@@ -209,10 +209,16 @@ func (s *Service) ConfirmTask(params map[string]any) (map[string]any, error) {
 
 	bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "已按新的要求开始处理", task.UpdatedAt.Format(dateTimeLayout))
 	if requiresAuthorization(intentValue) {
+		updatedTask, ok := s.runEngine.UpdateIntent(task.TaskID, intentValue)
+		if !ok {
+			return nil, ErrTaskNotFound
+		}
+		s.attachMemoryReadPlans(updatedTask.TaskID, updatedTask.RunID, snapshotFromTask(updatedTask), intentValue)
+
 		pendingExecution := s.delivery.BuildApprovalExecutionPlan(task.TaskID, intentValue)
 		approvalRequest := buildApprovalRequest(task.TaskID, intentValue, "red")
-		bubble = s.delivery.BuildBubbleMessage(task.TaskID, "status", "检测到待授权操作，请先确认。", task.UpdatedAt.Format(dateTimeLayout))
-		updatedTask, ok := s.runEngine.MarkWaitingApprovalWithPlan(task.TaskID, approvalRequest, pendingExecution, bubble)
+		bubble = s.delivery.BuildBubbleMessage(task.TaskID, "status", "检测到待授权操作，请先确认。", updatedTask.UpdatedAt.Format(dateTimeLayout))
+		updatedTask, ok = s.runEngine.MarkWaitingApprovalWithPlan(task.TaskID, approvalRequest, pendingExecution, bubble)
 		if !ok {
 			return nil, ErrTaskNotFound
 		}
@@ -227,12 +233,24 @@ func (s *Service) ConfirmTask(params map[string]any) (map[string]any, error) {
 	if !ok {
 		return nil, ErrTaskNotFound
 	}
-	s.attachMemoryReadPlans(updatedTask.TaskID, updatedTask.RunID, snapshotFromTask(task), intentValue)
+	snapshot := snapshotFromTask(updatedTask)
+	s.attachMemoryReadPlans(updatedTask.TaskID, updatedTask.RunID, snapshot, intentValue)
+
+	resultTitle, resultPreview, resultBubbleText := resultSpecFromIntent(intentValue)
+	deliveryType := deliveryTypeFromIntent(intentValue)
+	deliveryResult := s.delivery.BuildDeliveryResult(updatedTask.TaskID, deliveryType, resultTitle, resultPreview)
+	artifacts := s.delivery.BuildArtifact(updatedTask.TaskID, resultTitle, deliveryResult)
+	resultBubble := s.delivery.BuildBubbleMessage(updatedTask.TaskID, "result", resultBubbleText, updatedTask.UpdatedAt.Format(dateTimeLayout))
+	updatedTask, ok = s.runEngine.CompleteTask(updatedTask.TaskID, deliveryResult, resultBubble, artifacts)
+	if !ok {
+		return nil, ErrTaskNotFound
+	}
+	s.attachPostDeliveryHandoffs(updatedTask.TaskID, updatedTask.RunID, snapshot, intentValue, deliveryResult, artifacts)
 
 	return map[string]any{
 		"task":            taskMap(updatedTask),
-		"bubble_message":  bubble,
-		"delivery_result": nil,
+		"bubble_message":  resultBubble,
+		"delivery_result": deliveryResult,
 	}, nil
 }
 
