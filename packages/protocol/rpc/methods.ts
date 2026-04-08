@@ -74,6 +74,7 @@ export const NOTIFICATION_METHODS = {
   TASK_UPDATED: "task.updated",
   DELIVERY_READY: "delivery.ready",
   APPROVAL_PENDING: "approval.pending",
+  MIRROR_OVERVIEW_UPDATED: "mirror.overview.updated",
   PLUGIN_UPDATED: "plugin.updated",
   PLUGIN_METRIC_UPDATED: "plugin.metric.updated",
   PLUGIN_TASK_UPDATED: "plugin.task.updated",
@@ -463,4 +464,9 @@ export interface DeliveryReadyNotification {
 export interface ApprovalPendingNotification {
   task_id: string;
   approval_request: ApprovalRequest;
+}
+
+export interface MirrorOverviewUpdatedNotification {
+  revision: number;
+  source?: string;
 }

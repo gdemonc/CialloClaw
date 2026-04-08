@@ -6,6 +6,8 @@ type JsonRpcRequest = {
 };
 
 type JsonRpcEnvelope<T> = {
+  jsonrpc?: "2.0";
+  id?: string | number | null;
   result?: {
     data: T;
     meta?: { server_time: string };
@@ -21,6 +23,19 @@ type JsonRpcEnvelope<T> = {
   };
 };
 
+type JsonRpcNotification = {
+  jsonrpc?: "2.0";
+  id?: string | number | null;
+  method?: string;
+  params?: unknown;
+  [key: string]: unknown;
+};
+
+type NamedPipeSubscription = {
+  id: number;
+  unsubscribe: () => Promise<void>;
+};
+
 interface JsonRpcTransport {
   send<T>(payload: JsonRpcRequest): Promise<JsonRpcEnvelope<T>>;
 }
@@ -29,6 +44,10 @@ declare global {
   interface Window {
     __CIALLOCLAW_NAMED_PIPE__?: {
       request: <T>(payload: JsonRpcRequest) => Promise<JsonRpcEnvelope<T>>;
+      subscribe: (
+        topic: string,
+        handler: (message: JsonRpcNotification) => void,
+      ) => Promise<NamedPipeSubscription>;
     };
   }
 }
@@ -75,13 +94,21 @@ function createTransport(): JsonRpcTransport {
   return new NamedPipeJsonRpcTransport();
 }
 
+function createRequestId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `rpc_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 export class JsonRpcClient {
   constructor(private readonly transport: JsonRpcTransport = createTransport()) {}
 
   async request<T>(method: string, params?: object): Promise<T> {
     const payload: JsonRpcRequest = {
       jsonrpc: "2.0",
-      id: crypto.randomUUID(),
+      id: createRequestId(),
       method,
       params,
     };

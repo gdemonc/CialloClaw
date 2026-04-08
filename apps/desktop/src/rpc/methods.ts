@@ -1,4 +1,6 @@
 import type {
+  AgentMirrorOverviewGetParams,
+  AgentMirrorOverviewGetResult,
   AgentTaskConfirmParams,
   AgentTaskConfirmResult,
   AgentTaskDetailGetParams,
@@ -25,4 +27,8 @@ export function listTasks(params: AgentTaskListParams) {
 
 export function getTaskDetail(params: AgentTaskDetailGetParams) {
   return rpcClient.request<AgentTaskDetailGetResult>(RPC_METHODS.AGENT_TASK_DETAIL_GET, params);
+}
+
+export function getMirrorOverview(params: AgentMirrorOverviewGetParams) {
+  return rpcClient.request<AgentMirrorOverviewGetResult>(RPC_METHODS.AGENT_MIRROR_OVERVIEW_GET, params);
 }
