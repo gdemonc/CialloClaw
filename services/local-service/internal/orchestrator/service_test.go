@@ -2,6 +2,7 @@
 package orchestrator
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -557,7 +558,7 @@ func TestServiceSecurityRespondAllowOnceResumesAndCompletes(t *testing.T) {
 	}
 	impactScope := respondResult["impact_scope"].(map[string]any)
 	files := impactScope["files"].([]string)
-	if len(files) != 1 || files[0] != "workspace/report.md" {
+	if len(files) != 1 || files[0] != "workspace/文件写入结果.md" {
 		t.Fatalf("expected impact scope files to stay within workspace-relative paths, got %v", files)
 	}
 
@@ -788,6 +789,209 @@ func TestServiceTaskListSupportsSortParams(t *testing.T) {
 	secondTaskID := secondResult["task"].(map[string]any)["task_id"].(string)
 	if items[0]["task_id"] != firstTaskID || items[1]["task_id"] != secondTaskID {
 		t.Fatalf("expected started_at asc order %s -> %s, got %v -> %v", firstTaskID, secondTaskID, items[0]["task_id"], items[1]["task_id"])
+	}
+}
+
+func TestServiceDashboardOverviewUsesRuntimeAggregation(t *testing.T) {
+	service := newTestService()
+
+	completedResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_demo",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "completed task for dashboard overview",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start completed task failed: %v", err)
+	}
+
+	waitingResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_demo",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "waiting authorization task for dashboard overview",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start waiting auth task failed: %v", err)
+	}
+
+	result, err := service.DashboardOverviewGet(map[string]any{})
+	if err != nil {
+		t.Fatalf("dashboard overview failed: %v", err)
+	}
+
+	overview := result["overview"].(map[string]any)
+	focusSummary := overview["focus_summary"].(map[string]any)
+	waitingTaskID := waitingResult["task"].(map[string]any)["task_id"].(string)
+	if focusSummary["task_id"] != waitingTaskID {
+		t.Fatalf("expected focus summary to point at latest unfinished task %s, got %v", waitingTaskID, focusSummary["task_id"])
+	}
+	if focusSummary["status"] != "waiting_auth" {
+		t.Fatalf("expected focus summary status waiting_auth, got %v", focusSummary["status"])
+	}
+
+	trustSummary := overview["trust_summary"].(map[string]any)
+	if trustSummary["pending_authorizations"] != 1 {
+		t.Fatalf("expected one pending authorization, got %v", trustSummary["pending_authorizations"])
+	}
+	if trustSummary["has_restore_point"] != true {
+		t.Fatalf("expected completed task to provide restore point, got %v", trustSummary["has_restore_point"])
+	}
+	if trustSummary["workspace_path"] != "workspace" {
+		t.Fatalf("expected workspace-relative path in trust summary, got %v", trustSummary["workspace_path"])
+	}
+
+	quickActions := overview["quick_actions"].([]string)
+	if len(quickActions) == 0 || quickActions[0] != "处理待授权操作" {
+		t.Fatalf("expected dashboard quick actions to prioritize authorization handling, got %v", quickActions)
+	}
+
+	highValueSignals := overview["high_value_signal"].([]string)
+	if len(highValueSignals) == 0 {
+		t.Fatal("expected runtime-derived high value signals")
+	}
+
+	completedTaskID := completedResult["task"].(map[string]any)["task_id"].(string)
+	if completedTaskID == waitingTaskID {
+		t.Fatal("expected completed and waiting tasks to be distinct runtime records")
+	}
+}
+
+func TestServiceMirrorOverviewUsesRuntimeMirrorReferences(t *testing.T) {
+	service := newTestService()
+
+	_, err := service.StartTask(map[string]any{
+		"session_id": "sess_demo",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "mirror overview should reuse runtime memory plans",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+
+	result, err := service.MirrorOverviewGet(map[string]any{})
+	if err != nil {
+		t.Fatalf("mirror overview failed: %v", err)
+	}
+
+	memoryReferences := result["memory_references"].([]map[string]any)
+	if len(memoryReferences) == 0 {
+		t.Fatal("expected runtime-derived mirror references")
+	}
+	if !strings.HasPrefix(memoryReferences[0]["memory_id"].(string), "mem_") {
+		t.Fatalf("expected memory reference to come from runtime plans, got %v", memoryReferences[0]["memory_id"])
+	}
+
+	historySummary := result["history_summary"].([]string)
+	if len(historySummary) == 0 {
+		t.Fatal("expected history summary to be derived from runtime tasks")
+	}
+
+	profile := result["profile"].(map[string]any)
+	if profile["preferred_output"] != "workspace_document" {
+		t.Fatalf("expected profile to infer workspace_document preference, got %v", profile["preferred_output"])
+	}
+}
+
+func TestServiceSecuritySummaryUsesRuntimeTaskState(t *testing.T) {
+	service := newTestService()
+
+	_, err := service.StartTask(map[string]any{
+		"session_id": "sess_demo",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "completed task for security summary restore point",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start completed task failed: %v", err)
+	}
+
+	waitingResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_demo",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "security summary intercepted task",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start intercepted task failed: %v", err)
+	}
+
+	waitingTaskID := waitingResult["task"].(map[string]any)["task_id"].(string)
+	_, err = service.SecurityRespond(map[string]any{
+		"task_id":       waitingTaskID,
+		"approval_id":   "appr_001",
+		"decision":      "deny_once",
+		"remember_rule": false,
+	})
+	if err != nil {
+		t.Fatalf("security respond failed: %v", err)
+	}
+
+	result, err := service.SecuritySummaryGet()
+	if err != nil {
+		t.Fatalf("security summary failed: %v", err)
+	}
+
+	summary := result["summary"].(map[string]any)
+	if summary["security_status"] != "intercepted" {
+		t.Fatalf("expected intercepted security status from runtime task state, got %v", summary["security_status"])
+	}
+	if summary["pending_authorizations"] != 0 {
+		t.Fatalf("expected no pending authorizations after denial, got %v", summary["pending_authorizations"])
+	}
+	if summary["latest_restore_point"] == nil {
+		t.Fatal("expected latest restore point to come from completed runtime task")
+	}
+
+	tokenCostSummary := summary["token_cost_summary"].(map[string]any)
+	if tokenCostSummary["budget_auto_downgrade"] != true {
+		t.Fatalf("expected token summary to reflect settings snapshot, got %v", tokenCostSummary["budget_auto_downgrade"])
 	}
 }
 
