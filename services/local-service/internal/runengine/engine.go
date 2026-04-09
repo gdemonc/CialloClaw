@@ -639,6 +639,22 @@ func (e *Engine) SetMemoryPlans(taskID string, readPlans []map[string]any, write
 // SetDeliveryPlans 设置DeliveryPlans。
 
 // SetDeliveryPlans 记录 workspace 写入计划和 artifact 持久化计划。
+// SetMirrorReferences 记录任务挂接后的镜像引用快照。
+// SetMirrorReferences 记录任务挂接后的镜像引用快照。
+func (e *Engine) SetMirrorReferences(taskID string, mirrorReferences []map[string]any) (TaskRecord, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	record, ok := e.tasks[taskID]
+	if !ok {
+		return TaskRecord{}, false
+	}
+
+	record.MirrorReferences = cloneMapSlice(mirrorReferences)
+	return record.clone(), true
+}
+
+// SetDeliveryPlans 记录 workspace 写入计划和 artifact 持久化计划。
 func (e *Engine) SetDeliveryPlans(taskID string, storageWritePlan map[string]any, artifactPlans []map[string]any) (TaskRecord, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
