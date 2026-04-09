@@ -8,12 +8,16 @@ import (
 )
 
 type InMemoryStore struct {
-	mu        sync.RWMutex
-	summaries []MemorySummary
+	mu            sync.RWMutex
+	summaries     []MemorySummary
+	retrievalHits []RetrievalHit
 }
 
 func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{summaries: make([]MemorySummary, 0)}
+	return &InMemoryStore{
+		summaries:     make([]MemorySummary, 0),
+		retrievalHits: make([]RetrievalHit, 0),
+	}
 }
 
 func (s *InMemoryStore) SaveSummary(_ context.Context, summary MemorySummary) error {
@@ -21,6 +25,14 @@ func (s *InMemoryStore) SaveSummary(_ context.Context, summary MemorySummary) er
 	defer s.mu.Unlock()
 
 	s.summaries = append(s.summaries, summary)
+	return nil
+}
+
+func (s *InMemoryStore) SaveRetrievalHits(_ context.Context, hits []RetrievalHit) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.retrievalHits = append(s.retrievalHits, hits...)
 	return nil
 }
 

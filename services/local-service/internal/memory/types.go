@@ -43,6 +43,7 @@ type RetrievalHit struct {
 	Score          float64
 	Source         string
 	Summary        string
+	CreatedAt      string
 }
 
 type RetrievalQuery struct {
@@ -66,6 +67,7 @@ func (q RetrievalQuery) Normalized() RetrievalQuery {
 
 type Store interface {
 	SaveSummary(ctx context.Context, summary MemorySummary) error
+	SaveRetrievalHits(ctx context.Context, hits []RetrievalHit) error
 	Search(ctx context.Context, query RetrievalQuery) ([]RetrievalHit, error)
 	ListSummaries(ctx context.Context, limit int) ([]MemorySummary, error)
 }

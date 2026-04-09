@@ -13,8 +13,8 @@ func TestNewServiceFromStorageWritesAndSearchesThroughStorageBoundary(t *testing
 	storageService := storagesvc.NewService(platform.NewLocalStorageAdapter(filepath.Join(t.TempDir(), "memory.db")))
 	defer func() { _ = storageService.Close() }()
 
-	service := NewServiceFromStorage(storageService.MemoryStore(), storageService.Capabilities().MemoryStoreBackend)
-	if service.RetrievalBackend() != "sqlite_wal" {
+	service := NewServiceFromStorage(storageService.MemoryStore(), storageService.Capabilities().MemoryRetrievalBackend)
+	if service.RetrievalBackend() != "sqlite_fts5+sqlite_vec" {
 		t.Fatalf("unexpected retrieval backend: %q", service.RetrievalBackend())
 	}
 
@@ -48,5 +48,27 @@ func TestNewServiceFromStorageWritesAndSearchesThroughStorageBoundary(t *testing
 	}
 	if len(references) != 1 || references[0].MemoryID != "mem_001" {
 		t.Fatalf("unexpected references: %+v", references)
+	}
+}
+
+func TestNewServiceFromStorageWritesRetrievalHitsThroughStorageBoundary(t *testing.T) {
+	storageService := storagesvc.NewService(platform.NewLocalStorageAdapter(filepath.Join(t.TempDir(), "retrieval.db")))
+	defer func() { _ = storageService.Close() }()
+
+	service := NewServiceFromStorage(storageService.MemoryStore(), storageService.Capabilities().MemoryRetrievalBackend)
+
+	err := service.WriteRetrievalHits(context.Background(), []RetrievalHit{{
+		TaskID:   "task_001",
+		RunID:    "run_001",
+		MemoryID: "mem_001",
+		Score:    0.9,
+		Summary:  "retrieval summary",
+	}})
+	if err != nil {
+		t.Fatalf("WriteRetrievalHits returned error: %v", err)
+	}
+
+	if storageService.Capabilities().MemoryRetrievalBackend != "sqlite_fts5+sqlite_vec" {
+		t.Fatalf("unexpected storage retrieval backend: %+v", storageService.Capabilities())
 	}
 }

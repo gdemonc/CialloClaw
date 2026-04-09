@@ -8,6 +8,7 @@ import (
 
 type stubStore struct {
 	savedSummary MemorySummary
+	savedHits    []RetrievalHit
 	searchQuery  RetrievalQuery
 	hits         []RetrievalHit
 	summaries    []MemorySummary
@@ -31,6 +32,11 @@ func (s *stubStore) Search(_ context.Context, query RetrievalQuery) ([]Retrieval
 	}
 
 	return s.hits, nil
+}
+
+func (s *stubStore) SaveRetrievalHits(_ context.Context, hits []RetrievalHit) error {
+	s.savedHits = append([]RetrievalHit(nil), hits...)
+	return s.err
 }
 
 func (s *stubStore) ListSummaries(_ context.Context, limit int) ([]MemorySummary, error) {
@@ -134,6 +140,63 @@ func TestWriteSummaryDelegatesToStore(t *testing.T) {
 
 	if store.savedSummary != summary {
 		t.Fatalf("saved summary mismatch: got %+v want %+v", store.savedSummary, summary)
+	}
+}
+
+func TestWriteRetrievalHitsRequiresStore(t *testing.T) {
+	service := NewService()
+
+	err := service.WriteRetrievalHits(context.Background(), []RetrievalHit{{TaskID: "task_001", RunID: "run_001", MemoryID: "mem_001"}})
+	if !errors.Is(err, ErrStoreNotConfigured) {
+		t.Fatalf("expected ErrStoreNotConfigured, got %v", err)
+	}
+}
+
+func TestWriteRetrievalHitsValidatesRequiredFields(t *testing.T) {
+	service := NewService(&stubStore{})
+
+	err := service.WriteRetrievalHits(context.Background(), []RetrievalHit{{RunID: "run_001", MemoryID: "mem_001"}})
+	if !errors.Is(err, ErrTaskIDRequired) {
+		t.Fatalf("expected ErrTaskIDRequired, got %v", err)
+	}
+
+	err = service.WriteRetrievalHits(context.Background(), []RetrievalHit{{TaskID: "task_001", MemoryID: "mem_001"}})
+	if !errors.Is(err, ErrRunIDRequired) {
+		t.Fatalf("expected ErrRunIDRequired, got %v", err)
+	}
+
+	err = service.WriteRetrievalHits(context.Background(), []RetrievalHit{{TaskID: "task_001", RunID: "run_001"}})
+	if !errors.Is(err, ErrMemoryIDRequired) {
+		t.Fatalf("expected ErrMemoryIDRequired, got %v", err)
+	}
+}
+
+func TestWriteRetrievalHitsAssignsDefaultsAndDelegates(t *testing.T) {
+	store := &stubStore{}
+	service := NewService(store)
+
+	err := service.WriteRetrievalHits(context.Background(), []RetrievalHit{{
+		TaskID:   "task_001",
+		RunID:    "run_001",
+		MemoryID: "mem_001",
+		Score:    0.8,
+		Summary:  "markdown summary",
+	}})
+	if err != nil {
+		t.Fatalf("WriteRetrievalHits returned error: %v", err)
+	}
+
+	if len(store.savedHits) != 1 {
+		t.Fatalf("expected one retrieval hit, got %+v", store.savedHits)
+	}
+	if store.savedHits[0].RetrievalHitID == "" {
+		t.Fatalf("expected retrieval hit id to be generated, got %+v", store.savedHits[0])
+	}
+	if store.savedHits[0].Source != retrievalBackend {
+		t.Fatalf("expected retrieval source %q, got %+v", retrievalBackend, store.savedHits[0])
+	}
+	if store.savedHits[0].CreatedAt == "" {
+		t.Fatalf("expected retrieval hit created_at to be populated, got %+v", store.savedHits[0])
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	storagesvc "github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
 )
@@ -16,6 +17,7 @@ const retrievalBackend = "sqlite_fts5+sqlite_vec"
 var ErrStoreNotConfigured = errors.New("memory store not configured")
 var ErrTaskIDRequired = errors.New("memory task_id is required")
 var ErrRunIDRequired = errors.New("memory run_id is required")
+var ErrMemoryIDRequired = errors.New("memory memory_id is required")
 var ErrSummaryRequired = errors.New("memory summary is required")
 var ErrQueryRequired = errors.New("memory query is required")
 
@@ -72,6 +74,35 @@ func (s *Service) WriteSummary(ctx context.Context, summary MemorySummary) error
 	}
 
 	return s.store.SaveSummary(ctx, summary)
+}
+
+func (s *Service) WriteRetrievalHits(ctx context.Context, hits []RetrievalHit) error {
+	if len(hits) == 0 {
+		return nil
+	}
+
+	if s.store == nil {
+		return ErrStoreNotConfigured
+	}
+
+	normalized := make([]RetrievalHit, 0, len(hits))
+	for index, hit := range hits {
+		if err := validateRetrievalHit(hit); err != nil {
+			return err
+		}
+		if strings.TrimSpace(hit.RetrievalHitID) == "" {
+			hit.RetrievalHitID = fmt.Sprintf("hit_%s_%s_%03d", hit.TaskID, hit.RunID, index+1)
+		}
+		if strings.TrimSpace(hit.Source) == "" {
+			hit.Source = s.RetrievalBackend()
+		}
+		if strings.TrimSpace(hit.CreatedAt) == "" {
+			hit.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		normalized = append(normalized, hit)
+	}
+
+	return s.store.SaveRetrievalHits(ctx, normalized)
 }
 
 func (s *Service) Search(ctx context.Context, query RetrievalQuery) ([]RetrievalHit, error) {
@@ -161,6 +192,20 @@ func validateQuery(query RetrievalQuery) error {
 
 	if strings.TrimSpace(query.Query) == "" {
 		return ErrQueryRequired
+	}
+
+	return nil
+}
+
+func validateRetrievalHit(hit RetrievalHit) error {
+	if strings.TrimSpace(hit.TaskID) == "" {
+		return ErrTaskIDRequired
+	}
+	if strings.TrimSpace(hit.RunID) == "" {
+		return ErrRunIDRequired
+	}
+	if strings.TrimSpace(hit.MemoryID) == "" {
+		return ErrMemoryIDRequired
 	}
 
 	return nil

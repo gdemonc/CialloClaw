@@ -28,6 +28,24 @@ func (s *storageStore) SaveSummary(ctx context.Context, summary MemorySummary) e
 	})
 }
 
+func (s *storageStore) SaveRetrievalHits(ctx context.Context, hits []RetrievalHit) error {
+	records := make([]storagesvc.MemoryRetrievalRecord, 0, len(hits))
+	for _, hit := range hits {
+		records = append(records, storagesvc.MemoryRetrievalRecord{
+			RetrievalHitID: hit.RetrievalHitID,
+			TaskID:         hit.TaskID,
+			RunID:          hit.RunID,
+			MemoryID:       hit.MemoryID,
+			Score:          hit.Score,
+			Source:         hit.Source,
+			Summary:        hit.Summary,
+			CreatedAt:      hit.CreatedAt,
+		})
+	}
+
+	return s.store.SaveRetrievalHits(ctx, records)
+}
+
 func (s *storageStore) Search(ctx context.Context, query RetrievalQuery) ([]RetrievalHit, error) {
 	records, err := s.store.SearchSummaries(ctx, query.TaskID, query.RunID, query.Query, query.Limit)
 	if err != nil {
@@ -44,6 +62,7 @@ func (s *storageStore) Search(ctx context.Context, query RetrievalQuery) ([]Retr
 			Score:          record.Score,
 			Source:         record.Source,
 			Summary:        record.Summary,
+			CreatedAt:      record.CreatedAt,
 		})
 	}
 
