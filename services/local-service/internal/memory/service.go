@@ -1,3 +1,4 @@
+// 该文件负责记忆层接入与检索后端声明。
 package memory
 
 import (
@@ -33,6 +34,7 @@ func NewInMemoryService() *Service {
 	return NewService(NewInMemoryStore())
 }
 
+// RetrievalBackend 处理当前模块的相关逻辑。
 func (s *Service) RetrievalBackend() string {
 	return retrievalBackend
 }
