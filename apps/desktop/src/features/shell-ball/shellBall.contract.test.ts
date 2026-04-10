@@ -27,7 +27,9 @@ import {
 } from "./shellBall.interaction";
 import { getShellBallMotionConfig } from "./shellBall.motion";
 import { ShellBallApp } from "./ShellBallApp";
+import { ShellBallBubbleWindow } from "./ShellBallBubbleWindow";
 import { ShellBallDevLayer } from "./ShellBallDevLayer";
+import { ShellBallInputWindow } from "./ShellBallInputWindow";
 import { ShellBallSurface } from "./ShellBallSurface";
 import { shouldShowShellBallDemoSwitcher } from "./shellBall.dev";
 import { shellBallWindowLabels, shellBallWindowPermissions } from "../../platform/shellBallWindowController";
@@ -778,36 +780,59 @@ test("shell-ball app drops page-shell copy while preserving the floating shell s
   assert.doesNotMatch(markup, /demo-only 第一阶段边界/);
   assert.doesNotMatch(markup, /<main/i);
   assert.match(markup, /shell-ball-surface/);
-  assert.match(markup, /shell-ball-bubble-zone/);
   assert.match(markup, /shell-ball-mascot/);
+  assert.doesNotMatch(markup, /shell-ball-bubble-zone/);
+  assert.doesNotMatch(markup, /shell-ball-input-bar/);
   assert.doesNotMatch(markup, /Shell-ball demo switcher/);
 });
 
-test("shell-ball surface renders the floating structure without the demo switcher", () => {
+test("shell-ball bubble window owns the bubble zone rendering", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ShellBallBubbleWindow, {
+      visualState: "hover_input",
+    }),
+  );
+
+  assert.match(markup, /shell-ball-bubble-zone/);
+  assert.doesNotMatch(markup, /shell-ball-input-bar/);
+});
+
+test("shell-ball input window owns the input rendering", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ShellBallInputWindow, {
+      mode: "interactive",
+      voicePreview: null,
+      value: "draft",
+      onValueChange: () => {},
+      onAttachFile: () => {},
+      onSubmit: () => {},
+      onFocusChange: () => {},
+    }),
+  );
+
+  assert.match(markup, /shell-ball-input-bar/);
+  assert.doesNotMatch(markup, /shell-ball-bubble-zone/);
+});
+
+test("shell-ball surface renders the mascot-only floating structure without the demo switcher", () => {
   const markup = renderToStaticMarkup(
     createElement(ShellBallSurface, {
       visualState: "hover_input",
       voicePreview: null,
-      inputBarMode: "interactive",
-      inputValue: "draft",
       motionConfig: getShellBallMotionConfig("hover_input"),
       onPrimaryClick: () => {},
       onRegionEnter: () => {},
       onRegionLeave: () => {},
-      onInputValueChange: () => {},
-      onAttachFile: () => {},
-      onSubmitText: () => {},
       onPressStart: () => {},
       onPressMove: () => {},
       onPressEnd: () => false,
-      onInputFocusChange: () => {},
     }),
   );
 
   assert.match(markup, /shell-ball-surface/);
-  assert.match(markup, /shell-ball-bubble-zone/);
   assert.match(markup, /shell-ball-mascot/);
-  assert.match(markup, /shell-ball-input-bar/);
+  assert.doesNotMatch(markup, /shell-ball-bubble-zone/);
+  assert.doesNotMatch(markup, /shell-ball-input-bar/);
   assert.doesNotMatch(markup, /Shell-ball demo switcher/);
   assert.doesNotMatch(markup, /shell-ball-surface__switcher-shell/);
 });
@@ -817,19 +842,13 @@ test("shell-ball surface reserves a host drag zone separate from the interaction
     createElement(ShellBallSurface, {
       visualState: "hover_input",
       voicePreview: null,
-      inputBarMode: "interactive",
-      inputValue: "draft",
       motionConfig: getShellBallMotionConfig("hover_input"),
       onPrimaryClick: () => {},
       onRegionEnter: () => {},
       onRegionLeave: () => {},
-      onInputValueChange: () => {},
-      onAttachFile: () => {},
-      onSubmitText: () => {},
       onPressStart: () => {},
       onPressMove: () => {},
       onPressEnd: () => false,
-      onInputFocusChange: () => {},
     }),
   );
 
