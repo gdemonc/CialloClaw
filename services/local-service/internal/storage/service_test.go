@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/audit"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/checkpoint"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
 )
 
@@ -248,6 +250,61 @@ func TestToolCallSinkReturnsWorkingImplementation(t *testing.T) {
 	assertToolCallCount(t, sqliteSink.db, 1)
 }
 
+func TestAuditWriterReturnsWorkingImplementation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.db")
+	service := NewService(stubAdapter{databasePath: path})
+	defer func() { _ = service.Close() }()
+
+	writer := service.AuditWriter()
+	if writer == nil {
+		t.Fatal("expected audit writer to be available")
+	}
+	err := writer.WriteAuditRecord(context.Background(), audit.Record{
+		AuditID:   "audit_001",
+		TaskID:    "task_001",
+		Type:      "file",
+		Action:    "write_file",
+		Summary:   "write result file",
+		Target:    "workspace/result.md",
+		Result:    "success",
+		CreatedAt: "2026-04-08T10:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("WriteAuditRecord returned error: %v", err)
+	}
+	sqliteWriter, ok := service.auditStore.(*SQLiteAuditStore)
+	if !ok {
+		t.Fatalf("expected sqlite audit store, got %T", service.auditStore)
+	}
+	assertAuditCount(t, sqliteWriter.db, 1)
+}
+
+func TestRecoveryPointWriterReturnsWorkingImplementation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "recovery.db")
+	service := NewService(stubAdapter{databasePath: path})
+	defer func() { _ = service.Close() }()
+
+	writer := service.RecoveryPointWriter()
+	if writer == nil {
+		t.Fatal("expected recovery point writer to be available")
+	}
+	err := writer.WriteRecoveryPoint(context.Background(), checkpoint.RecoveryPoint{
+		RecoveryPointID: "rp_001",
+		TaskID:          "task_001",
+		Summary:         "before overwrite",
+		CreatedAt:       "2026-04-08T10:00:00Z",
+		Objects:         []string{"workspace/result.md"},
+	})
+	if err != nil {
+		t.Fatalf("WriteRecoveryPoint returned error: %v", err)
+	}
+	sqliteWriter, ok := service.recoveryPointStore.(*SQLiteRecoveryPointStore)
+	if !ok {
+		t.Fatalf("expected sqlite recovery point store, got %T", service.recoveryPointStore)
+	}
+	assertRecoveryPointCount(t, sqliteWriter.db, 1)
+}
+
 func TestTaskRunStoreReturnsWorkingImplementation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "task-runs.db")
 	service := NewService(stubAdapter{databasePath: path})
@@ -286,5 +343,27 @@ func assertToolCallCount(t *testing.T, db *sql.DB, expected int) {
 	}
 	if count != expected {
 		t.Fatalf("expected tool call count %d, got %d", expected, count)
+	}
+}
+
+func assertAuditCount(t *testing.T, db *sql.DB, expected int) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM audit_records`).Scan(&count); err != nil {
+		t.Fatalf("query audit_records count failed: %v", err)
+	}
+	if count != expected {
+		t.Fatalf("expected audit count %d, got %d", expected, count)
+	}
+}
+
+func assertRecoveryPointCount(t *testing.T, db *sql.DB, expected int) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM recovery_points`).Scan(&count); err != nil {
+		t.Fatalf("query recovery_points count failed: %v", err)
+	}
+	if count != expected {
+		t.Fatalf("expected recovery point count %d, got %d", expected, count)
 	}
 }

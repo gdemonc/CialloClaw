@@ -40,9 +40,9 @@ func New(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 
-	auditService := audit.NewService()
-	checkpointService := checkpoint.NewService()
 	storageService := storage.NewService(platform.NewLocalStorageAdapter(cfg.DatabasePath))
+	auditService := audit.NewService(storageService.AuditWriter())
+	checkpointService := checkpoint.NewService(storageService.RecoveryPointWriter())
 	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
 	executionBackend := platform.LocalExecutionBackend{}
 	toolRegistry := tools.NewRegistry()
