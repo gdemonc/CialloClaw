@@ -10,11 +10,8 @@ import {
 import { BookMarked, BrainCircuit, CalendarDays, Sparkles, X } from "lucide-react";
 import { PanelSurface, StatusBadge } from "@cialloclaw/ui";
 import { subscribeMirrorOverviewUpdated } from "@/rpc/subscriptions";
-import {
-  loadMirrorOverviewData,
-  type MirrorOverviewData,
-  type MirrorOverviewSource,
-} from "./mirrorService";
+import { loadMirrorOverviewData, type MirrorOverviewData } from "./mirrorService";
+import "./mirror.css";
 
 const MODULE_KEYS = [
   "history",
@@ -58,6 +55,7 @@ const BOARD_PADDING = 12;
 const CARD_CLEARANCE = 10;
 const CARD_STEP = 16;
 const DEFAULT_CARD_SIZE: ModuleSize = { width: 260, height: 168 };
+const PINNED_MEMORY_CARD_OFFSET = { x: 20, y: 104 };
 const DEFAULT_MODULE_POSITIONS: ModulePositions = {
   history: { x: 0, y: 0 },
   profile: { x: 0, y: 0 },
@@ -76,7 +74,7 @@ const ORBITAL_MODULE_TARGETS: Record<DraggableModuleKey, { x: number; y: number 
   daily: { x: 0.72, y: 0.68 },
   completedTasks: { x: 0.42, y: 0.82 },
   generatedOutputs: { x: 0.12, y: 0.7 },
-  memory: { x: 0.02, y: 0.44 },
+  memory: { x: 0.06, y: 0.18 },
 };
 
 function formatMirrorDate(value: string) {
@@ -104,37 +102,6 @@ function formatInsightBadgeLabel(value: string) {
   }
 
   return value;
-}
-
-function formatMirrorSourceLabel(source: MirrorOverviewSource) {
-  return source === "rpc" ? "JSON-RPC" : "前端 mock";
-}
-
-function getMirrorSourceStatus(source: MirrorOverviewSource) {
-  if (source === "rpc") {
-    return {
-      badge: "LIVE",
-      title: "当前显示的是 JSON-RPC 实时数据",
-      description: "来自后端返回，不是本地 mock。",
-      className: "mirror-page__source-status--rpc",
-    };
-  }
-
-  return {
-    badge: "MOCK",
-    title: "当前显示的是本地 mock 数据",
-    description: "仅用于前端联调，不是真实后端返回。",
-    className: "mirror-page__source-status--mock",
-  };
-}
-
-function getMirrorLoadingStatus() {
-  return {
-    badge: "LOADING",
-    title: "正在连接 JSON-RPC 数据源",
-    description: "尚未确认是否为真实后端返回，正在等待首个 overview 响应。",
-    className: "mirror-page__source-status--loading",
-  };
 }
 
 function clampValue(value: number, min: number, max: number) {
@@ -308,11 +275,28 @@ function getDefaultModuleTargets(bounds: BoardBounds, grid: BoardGrid, size: Mod
   return getOrbitalModuleTargets(bounds);
 }
 
+function getPinnedMemoryTarget(bounds: BoardBounds) {
+  return clampPosition(
+    {
+      x: bounds.minX + PINNED_MEMORY_CARD_OFFSET.x,
+      y: bounds.minY + PINNED_MEMORY_CARD_OFFSET.y,
+    },
+    bounds,
+  );
+}
+
 function normalizeModulePositions(targets: ModulePositions, layout: BoardLayout) {
   const nextPositions = { ...DEFAULT_MODULE_POSITIONS };
-  const occupied: ModulePosition[] = [];
+  const pinnedMemoryPosition = getPinnedMemoryTarget(layout.bounds);
+  const occupied: ModulePosition[] = [pinnedMemoryPosition];
+
+  nextPositions.memory = pinnedMemoryPosition;
 
   for (const key of MODULE_KEYS) {
+    if (key === "memory") {
+      continue;
+    }
+
     const settledPosition = resolveSettledPosition(targets[key], occupied, layout);
 
     if (!settledPosition) {
@@ -552,26 +536,16 @@ export function MirrorApp() {
   }, [activeDetailKey]);
 
   if (!mirrorData) {
-    const loadingStatus = getMirrorLoadingStatus();
-
     return (
       <main className="app-shell mirror-page">
         <div className="mirror-page__canvas mirror-page__canvas--full mirror-page__canvas--loading">
-          <aside className={`mirror-page__source-status ${loadingStatus.className}`} aria-label="Mirror 数据来源状态">
-            <StatusBadge tone="processing">{loadingStatus.badge}</StatusBadge>
-            <div className="mirror-page__source-copy">
-              <p className="mirror-page__source-title">{loadingStatus.title}</p>
-              <p className="mirror-page__source-description">{loadingStatus.description}</p>
-            </div>
-          </aside>
-          <p className="mirror-page__loading-copy">正在加载镜子卡片…</p>
+          <p className="mirror-page__loading-copy">正在整理镜像卡片…</p>
         </div>
       </main>
     );
   }
 
-  const { overview, insight, source } = mirrorData;
-  const sourceStatus = getMirrorSourceStatus(source);
+  const { overview, insight } = mirrorData;
   const dailySummary = overview.daily_summary;
   const profile = overview.profile;
   const latestMemoryReference = overview.memory_references[0] ?? null;
@@ -831,7 +805,6 @@ export function MirrorApp() {
             <div className="mirror-page__detail-topbar">
               <div className="mirror-page__detail-meta">
                 <StatusBadge tone="processing">{formatInsightBadgeLabel(insight.badge)}</StatusBadge>
-                <span className="mirror-page__mono">{sourceStatus.title}</span>
               </div>
               <button type="button" className="mirror-page__close-button" onClick={closeDetail} aria-label="关闭详情视图">
                 <X className="mirror-page__close-icon" />
@@ -932,7 +905,9 @@ export function MirrorApp() {
   const renderDraggableModule = (key: DraggableModuleKey) => {
     const isDragging = draggingKey === key;
     const isExpanded = activeDetailKey === key;
+    const isPinnedMemoryCard = key === "memory";
     const summary = getCardSummary(key);
+    const moduleHint = isPinnedMemoryCard ? "点按查看详情" : "拖动整理 · 点按查看";
     const summaryClassName = [
       "mirror-page__card-line",
       summary.emphasis ? `mirror-page__card-line--${summary.emphasis}` : null,
@@ -940,10 +915,24 @@ export function MirrorApp() {
       .filter(Boolean)
       .join(" ");
 
+    const pointerHandlers = isPinnedMemoryCard
+      ? {
+          onClick: () => {
+            bringModuleToFront(key);
+            setActiveDetailKey(key);
+          },
+        }
+      : {
+          onPointerDown: handleModulePointerDown(key),
+          onPointerMove: handleModulePointerMove(key),
+          onPointerUp: handleModulePointerUp(key),
+          onPointerCancel: handleModulePointerCancel(key),
+        };
+
     return (
       <div
         key={key}
-        className={`mirror-page__draggable mirror-page__draggable--${key}${isDragging ? " is-dragging" : ""}${isExpanded ? " is-active" : ""}${boardReady ? " is-ready" : ""}`}
+        className={`mirror-page__draggable mirror-page__draggable--${key}${isPinnedMemoryCard ? " mirror-page__draggable--pinned" : ""}${isDragging ? " is-dragging" : ""}${isExpanded ? " is-active" : ""}${boardReady ? " is-ready" : ""}`}
         data-accent={summary.accent}
         style={{
           height: `${cardSize.height}px`,
@@ -954,12 +943,9 @@ export function MirrorApp() {
         tabIndex={0}
         aria-haspopup="dialog"
         aria-expanded={isExpanded}
-        aria-label={`${getModuleTitle(key)}，可拖动并打开详情`}
-        onPointerDown={handleModulePointerDown(key)}
-        onPointerMove={handleModulePointerMove(key)}
-        onPointerUp={handleModulePointerUp(key)}
-        onPointerCancel={handleModulePointerCancel(key)}
+        aria-label={`${getModuleTitle(key)}，${isPinnedMemoryCard ? "可打开详情" : "可拖动并打开详情"}`}
         onKeyDown={handleModuleKeyDown(key)}
+        {...pointerHandlers}
       >
         <section className="mirror-page__card-surface" aria-hidden="true">
           <div className="mirror-page__card-shell">
@@ -972,34 +958,20 @@ export function MirrorApp() {
             </div>
             <p className={summaryClassName}>{summary.mainLine}</p>
             <p className="mirror-page__card-detail">{summary.detailLine}</p>
-            <p className="mirror-page__module-hint">拖动整理 · 点按查看</p>
+            <p className="mirror-page__module-hint">{moduleHint}</p>
           </div>
         </section>
       </div>
     );
   };
 
-  const summaryDateLabel = dailySummary ? formatShortMirrorDate(dailySummary.date) : "暂无日报";
-
   return (
     <main className="app-shell mirror-page">
       <div className="mirror-page__canvas mirror-page__canvas--full" ref={canvasRef} aria-label="Mirror 卡片工作板">
         <section className="mirror-page__scene" aria-label="Mirror 中央陪伴视图">
-          <div className="mirror-page__hero-copy">
-            <p className="mirror-page__eyebrow">Mirror companion hub</p>
-            <h1 className="mirror-page__title">让镜像围着今天的你轻轻旋转</h1>
-            <p className="mirror-page__lede">
-              中央陪伴球负责收拢今天的镜像语气，周围浮卡继续保留可拖动的整理方式；点开任意卡片，仍然可以查看完整历史、画像、日报与记忆细节。
-            </p>
-          </div>
-
           <div className="mirror-page__companion-shell">
             <div className="mirror-page__companion-halo" />
             <div className="mirror-page__companion-orbit mirror-page__companion-orbit--outer" />
-            <div className="mirror-page__companion-orbit mirror-page__companion-orbit--mid" />
-            <div className="mirror-page__companion-orbit mirror-page__companion-orbit--inner" />
-            <div className="mirror-page__companion-spark mirror-page__companion-spark--left" />
-            <div className="mirror-page__companion-spark mirror-page__companion-spark--right" />
 
             <div className="mirror-page__mascot-shell">
               <div className="mirror-page__mascot-shadow" />
@@ -1028,49 +1000,8 @@ export function MirrorApp() {
               <div className="mirror-page__mascot-perch" />
             </div>
 
-            <article className="mirror-page__insight-shell">
-              <div className="mirror-page__insight-header">
-                <p className="mirror-page__insight-label">镜像洞察</p>
-                <StatusBadge tone="processing">{formatInsightBadgeLabel(insight.badge)}</StatusBadge>
-              </div>
-              <h2 className="mirror-page__insight-title">{insight.title}</h2>
-              <p className="mirror-page__insight-description">{insight.description}</p>
-              {latestMemoryReference ? (
-                <div className="mirror-page__citation">
-                  <p className="mirror-page__citation-header">
-                    <BookMarked className="mirror-page__citation-icon" />
-                    最近记忆引用
-                  </p>
-                  <p className="mirror-page__citation-id">{latestMemoryReference.memory_id}</p>
-                  <p className="mirror-page__citation-summary">{latestMemoryReference.reason}</p>
-                </div>
-              ) : null}
-            </article>
-
-            <div className="mirror-page__companion-metrics" aria-hidden="true">
-              <article className="mirror-page__companion-metric mirror-page__companion-metric--date">
-                <p className="mirror-page__micro-label">最近日报</p>
-                <p className="mirror-page__companion-value">{summaryDateLabel}</p>
-              </article>
-              <article className="mirror-page__companion-metric mirror-page__companion-metric--tasks">
-                <p className="mirror-page__micro-label">今日完成</p>
-                <p className="mirror-page__companion-value">{dailySummary?.completed_tasks ?? 0} 项</p>
-              </article>
-              <article className="mirror-page__companion-metric mirror-page__companion-metric--memory">
-                <p className="mirror-page__micro-label">记忆引用</p>
-                <p className="mirror-page__companion-value">{overview.memory_references.length} 条</p>
-              </article>
-            </div>
           </div>
         </section>
-
-        <aside className={`mirror-page__source-status ${sourceStatus.className}`} aria-label="Mirror 数据来源状态">
-          <StatusBadge tone={source === "rpc" ? "green" : "processing"}>{sourceStatus.badge}</StatusBadge>
-          <div className="mirror-page__source-copy">
-            <p className="mirror-page__source-title">{sourceStatus.title}</p>
-            <p className="mirror-page__source-description">{sourceStatus.description}</p>
-          </div>
-        </aside>
         {moduleStack.map(renderDraggableModule)}
         {renderDetailOverlay()}
       </div>
