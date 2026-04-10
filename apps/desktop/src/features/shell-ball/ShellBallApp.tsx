@@ -11,6 +11,7 @@ export function ShellBallApp() {
     visualState,
     inputValue,
     setInputValue,
+    voicePreview,
     inputBarMode,
     handlePrimaryClick,
     handleRegionEnter,
@@ -20,6 +21,7 @@ export function ShellBallApp() {
     handlePressStart,
     handlePressMove,
     handlePressEnd,
+    handleInputFocusChange,
     handleForceState,
   } = useShellBallInteraction();
   const motionConfig = getShellBallMotionConfig(visualState);
@@ -43,19 +45,22 @@ export function ShellBallApp() {
                 <div className="shell-ball-page__mascot-shell">
                   <ShellBallMascot
                     visualState={visualState}
+                    voicePreview={voicePreview}
                     motionConfig={motionConfig}
                     onPrimaryClick={handlePrimaryClick}
-                    onPressStart={(event) => handlePressStart(event.clientY)}
-                    onPressMove={(event) => handlePressMove(event.clientY)}
+                    onPressStart={(event) => handlePressStart(event.clientX, event.clientY)}
+                    onPressMove={(event) => handlePressMove(event.clientX, event.clientY)}
                     onPressEnd={handlePressEnd}
                   />
                 </div>
                 <ShellBallInputBar
                   mode={inputBarMode}
+                  voicePreview={voicePreview}
                   value={inputValue}
                   onValueChange={setInputValue}
                   onAttachFile={handleAttachFile}
                   onSubmit={handleSubmitText}
+                  onFocusChange={handleInputFocusChange}
                 />
               </div>
             </div>

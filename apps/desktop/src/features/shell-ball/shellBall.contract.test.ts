@@ -1,19 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { getShellBallDemoViewModel } from "./shellBall.demo";
 import {
   createShellBallInteractionController,
   getShellBallInputBarMode,
   getShellBallProcessingReturnState,
+  getShellBallVoicePreview,
   resolveShellBallTransition,
+  resolveShellBallVoiceReleaseEvent,
+  shouldRetainShellBallHoverInput,
   SHELL_BALL_CANCEL_DELTA_PX,
   SHELL_BALL_CONFIRMING_MS,
+  SHELL_BALL_HOVER_INTENT_MS,
+  SHELL_BALL_LEAVE_GRACE_MS,
   SHELL_BALL_LOCK_DELTA_PX,
   SHELL_BALL_LONG_PRESS_MS,
   SHELL_BALL_PROCESSING_MS,
+  SHELL_BALL_VERTICAL_PRIORITY_RATIO,
   SHELL_BALL_WAITING_AUTH_MS,
 } from "./shellBall.interaction";
 import { getShellBallMotionConfig } from "./shellBall.motion";
+import { ShellBallInputBar } from "./components/ShellBallInputBar";
 import type { ShellBallTransitionResult } from "./shellBall.types";
 import { shellBallVisualStates } from "./shellBall.types";
 import { syncShellBallInteractionController, useShellBallInteraction } from "./useShellBallInteraction";
@@ -35,8 +44,14 @@ function createFakeScheduler() {
       }
     },
     flush() {
-      while (queue.size > 0) {
-        const [handle, callback] = queue.entries().next().value as [number, () => void];
+      const currentHandles = [...queue.keys()];
+
+      for (const handle of currentHandles) {
+        const callback = queue.get(handle);
+        if (callback === undefined) {
+          continue;
+        }
+
         queue.delete(handle);
         callback();
       }
@@ -137,7 +152,11 @@ test("shell-ball interaction contract enters hover mode on hotspot entry", () =>
       event: "pointer_enter_hotspot",
       regionActive: true,
     }),
-    { next: "hover_input" },
+    {
+      next: "idle",
+      autoAdvanceTo: "hover_input",
+      autoAdvanceMs: SHELL_BALL_HOVER_INTENT_MS,
+    },
   );
 
   assert.deepEqual(
@@ -156,8 +175,13 @@ test("shell-ball interaction contract leaves the region only from hoverable rest
       current: "hover_input",
       event: "pointer_leave_region",
       regionActive: false,
+      hoverRetained: false,
     }),
-    { next: "idle" },
+    {
+      next: "hover_input",
+      autoAdvanceTo: "idle",
+      autoAdvanceMs: SHELL_BALL_LEAVE_GRACE_MS,
+    },
   );
 
   assert.deepEqual(
@@ -165,8 +189,39 @@ test("shell-ball interaction contract leaves the region only from hoverable rest
       current: "processing",
       event: "pointer_leave_region",
       regionActive: false,
+      hoverRetained: false,
     }),
     { next: "processing" },
+  );
+});
+
+test("shell-ball interaction contract retains hover input while focus or draft is active", () => {
+  assert.equal(
+    shouldRetainShellBallHoverInput({
+      regionActive: false,
+      inputFocused: true,
+      hasDraft: false,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldRetainShellBallHoverInput({
+      regionActive: false,
+      inputFocused: false,
+      hasDraft: true,
+    }),
+    true,
+  );
+
+  assert.deepEqual(
+    resolveShellBallTransition({
+      current: "hover_input",
+      event: "pointer_leave_region",
+      regionActive: false,
+      hoverRetained: true,
+    }),
+    { next: "hover_input" },
   );
 });
 
@@ -284,6 +339,28 @@ test("shell-ball interaction contract auto-advances waiting auth and processing 
 });
 
 test("shell-ball controller schedules confirm, auth, and processing auto-advances", () => {
+  const hoverScheduler = createFakeScheduler();
+  const hoverController = createShellBallInteractionController({
+    initialState: "idle",
+    schedule: hoverScheduler.schedule,
+    cancel: hoverScheduler.cancel,
+  });
+
+  hoverController.dispatch("pointer_enter_hotspot", { regionActive: true });
+  assert.equal(hoverController.getState(), "idle");
+  assert.equal(hoverScheduler.size, 1);
+
+  hoverScheduler.flush();
+  assert.equal(hoverController.getState(), "hover_input");
+
+  hoverController.dispatch("pointer_leave_region", { regionActive: false });
+  assert.equal(hoverController.getState(), "hover_input");
+  assert.equal(hoverScheduler.size, 1);
+
+  hoverScheduler.flush();
+  assert.equal(hoverController.getState(), "idle");
+  hoverController.dispose();
+
   const confirmingScheduler = createFakeScheduler();
   const confirmingController = createShellBallInteractionController({
     initialState: "hover_input",
@@ -293,6 +370,10 @@ test("shell-ball controller schedules confirm, auth, and processing auto-advance
 
   confirmingController.dispatch("submit_text", { regionActive: true });
   assert.equal(confirmingController.getState(), "confirming_intent");
+  assert.equal(confirmingScheduler.size, 1);
+
+  confirmingScheduler.flush();
+  assert.equal(confirmingController.getState(), "processing");
   assert.equal(confirmingScheduler.size, 1);
 
   confirmingScheduler.flush();
@@ -311,8 +392,52 @@ test("shell-ball controller schedules confirm, auth, and processing auto-advance
   assert.equal(authScheduler.size, 1);
 
   authScheduler.flush();
+  assert.equal(authController.getState(), "processing");
+  assert.equal(authScheduler.size, 1);
+
+  authScheduler.flush();
   assert.equal(authController.getState(), "idle");
   authController.dispose();
+});
+
+test("shell-ball controller cancels leave grace when the hotspot is re-entered", () => {
+  const scheduler = createFakeScheduler();
+  const controller = createShellBallInteractionController({
+    initialState: "hover_input",
+    schedule: scheduler.schedule,
+    cancel: scheduler.cancel,
+  });
+
+  controller.dispatch("pointer_leave_region", { regionActive: false });
+  assert.equal(scheduler.size, 1);
+
+  controller.dispatch("pointer_enter_hotspot", { regionActive: true });
+  assert.equal(controller.getState(), "hover_input");
+  assert.equal(scheduler.size, 0);
+
+  scheduler.flush();
+  assert.equal(controller.getState(), "hover_input");
+  controller.dispose();
+});
+
+test("shell-ball controller keeps hover input open while retained and closes after retention ends", () => {
+  const scheduler = createFakeScheduler();
+  const controller = createShellBallInteractionController({
+    initialState: "hover_input",
+    schedule: scheduler.schedule,
+    cancel: scheduler.cancel,
+  });
+
+  controller.dispatch("pointer_leave_region", { regionActive: false, hoverRetained: true });
+  assert.equal(controller.getState(), "hover_input");
+  assert.equal(scheduler.size, 0);
+
+  controller.dispatch("pointer_leave_region", { regionActive: false, hoverRetained: false });
+  assert.equal(scheduler.size, 1);
+
+  scheduler.flush();
+  assert.equal(controller.getState(), "idle");
+  controller.dispose();
 });
 
 test("shell-ball controller cancels stale auto-advance on forceState and replacement flows", () => {
@@ -340,8 +465,27 @@ test("shell-ball controller cancels stale auto-advance on forceState and replace
   replacementController.forceState("hover_input");
   replacementController.dispatch("attach_file", { regionActive: false });
   replacementScheduler.flush();
+  assert.equal(replacementController.getState(), "processing");
+  replacementScheduler.flush();
   assert.equal(replacementController.getState(), "idle");
   replacementController.dispose();
+});
+
+test("shell-ball controller forceState applies processing entry side effects", () => {
+  const scheduler = createFakeScheduler();
+  const controller = createShellBallInteractionController({
+    initialState: "hover_input",
+    schedule: scheduler.schedule,
+    cancel: scheduler.cancel,
+  });
+
+  controller.forceState("processing", { regionActive: true });
+  assert.equal(controller.getState(), "processing");
+  assert.equal(scheduler.size, 1);
+
+  scheduler.flush();
+  assert.equal(controller.getState(), "hover_input");
+  controller.dispose();
 });
 
 test("shell-ball controller keeps locked voice active until explicit end", () => {
@@ -364,6 +508,7 @@ test("shell-ball controller keeps locked voice active until explicit end", () =>
 
   scheduler.flush();
   assert.equal(controller.getState(), "hover_input");
+  assert.equal(scheduler.size, 0);
   controller.dispose();
 });
 
@@ -410,6 +555,40 @@ test("shell-ball processing completion returns to the region-aware resting state
   assert.equal(getShellBallProcessingReturnState(false), "idle");
 });
 
+test("shell-ball voice preview helpers keep preview and release resolution pure", () => {
+  assert.equal(getShellBallVoicePreview({ deltaX: 0, deltaY: -SHELL_BALL_LOCK_DELTA_PX }), "lock");
+  assert.equal(getShellBallVoicePreview({ deltaX: 0, deltaY: SHELL_BALL_CANCEL_DELTA_PX }), "cancel");
+  assert.equal(
+    getShellBallVoicePreview({
+      deltaX: SHELL_BALL_CANCEL_DELTA_PX,
+      deltaY: SHELL_BALL_CANCEL_DELTA_PX,
+    }),
+    null,
+  );
+  assert.equal(getShellBallVoicePreview({ deltaX: SHELL_BALL_LOCK_DELTA_PX, deltaY: 0 }), null);
+
+  assert.equal(resolveShellBallVoiceReleaseEvent("lock"), "voice_lock");
+  assert.equal(resolveShellBallVoiceReleaseEvent("cancel"), "voice_cancel");
+  assert.equal(resolveShellBallVoiceReleaseEvent(null), "voice_finish");
+});
+
+test("shell-ball input bar surfaces voice preview guidance to the UI", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ShellBallInputBar, {
+      mode: "voice",
+      voicePreview: "cancel",
+      value: "",
+      onValueChange: () => {},
+      onAttachFile: () => {},
+      onSubmit: () => {},
+      onFocusChange: () => {},
+    }),
+  );
+
+  assert.match(markup, /data-voice-preview="cancel"/);
+  assert.match(markup, /Release to cancel/);
+});
+
 test("shell-ball input bar mode stays aligned with visual states", () => {
   assert.equal(getShellBallInputBarMode("idle"), "hidden");
   assert.equal(getShellBallInputBarMode("hover_input"), "interactive");
@@ -421,9 +600,12 @@ test("shell-ball input bar mode stays aligned with visual states", () => {
 });
 
 test("shell-ball interaction timing constants stay frozen", () => {
-  assert.equal(SHELL_BALL_LONG_PRESS_MS, 300);
-  assert.equal(SHELL_BALL_LOCK_DELTA_PX, 24);
-  assert.equal(SHELL_BALL_CANCEL_DELTA_PX, 24);
+  assert.equal(SHELL_BALL_HOVER_INTENT_MS, 240);
+  assert.equal(SHELL_BALL_LEAVE_GRACE_MS, 180);
+  assert.equal(SHELL_BALL_LONG_PRESS_MS, 420);
+  assert.equal(SHELL_BALL_LOCK_DELTA_PX, 48);
+  assert.equal(SHELL_BALL_CANCEL_DELTA_PX, 48);
+  assert.equal(SHELL_BALL_VERTICAL_PRIORITY_RATIO, 1.25);
   assert.equal(SHELL_BALL_CONFIRMING_MS, 600);
   assert.equal(SHELL_BALL_WAITING_AUTH_MS, 700);
   assert.equal(SHELL_BALL_PROCESSING_MS, 1200);

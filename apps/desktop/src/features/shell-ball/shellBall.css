@@ -262,6 +262,16 @@
     background 180ms ease;
 }
 
+.shell-ball-input-bar__preview {
+  align-self: center;
+  color: var(--shell-ball-copy);
+  font-size: 0.72rem;
+  font-weight: 600;
+  grid-column: 1 / 2;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 .shell-ball-input-bar::before {
   background: linear-gradient(90deg, transparent, var(--shell-ball-input-accent), transparent);
   border-radius: inherit;
@@ -385,6 +395,22 @@
   box-shadow:
     0 28px 42px -28px rgba(63, 108, 115, 0.32),
     0 0 0 1px rgba(111, 176, 182, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.92) inset;
+}
+
+.shell-ball-input-bar--preview-lock {
+  border-color: rgba(79, 157, 167, 0.34);
+  box-shadow:
+    0 28px 42px -28px rgba(63, 108, 115, 0.36),
+    0 0 0 4px rgba(79, 157, 167, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.92) inset;
+}
+
+.shell-ball-input-bar--preview-cancel {
+  border-color: rgba(193, 141, 70, 0.34);
+  box-shadow:
+    0 28px 42px -28px rgba(130, 92, 34, 0.34),
+    0 0 0 4px rgba(193, 141, 70, 0.12),
     0 1px 0 rgba(255, 255, 255, 0.92) inset;
 }
 
@@ -912,6 +938,21 @@
 
 .shell-ball-mascot__perch--active {
   box-shadow: 0 14px 26px -18px rgba(89, 140, 152, 0.34);
+}
+
+.shell-ball-mascot--preview-lock .shell-ball-mascot__perch {
+  box-shadow: 0 16px 28px -16px rgba(76, 148, 151, 0.42);
+}
+
+.shell-ball-mascot--preview-cancel .shell-ball-mascot__perch {
+  box-shadow: 0 16px 28px -16px rgba(193, 141, 70, 0.44);
+}
+
+.shell-ball-mascot--preview-lock .shell-ball-mascot__hotspot:focus-visible,
+.shell-ball-mascot--preview-cancel .shell-ball-mascot__hotspot:focus-visible {
+  box-shadow:
+    0 0 0 4px rgba(255, 248, 236, 0.95),
+    0 0 0 7px color-mix(in srgb, var(--shell-ball-accent, #6a91c8) 58%, white);
 }
 
 .shell-ball-mascot[data-tone="sky"] .shell-ball-mascot__orbital--back {
