@@ -211,7 +211,7 @@ func TestTaskInspectorRunAggregatesRuntimeState(t *testing.T) {
 
 func TestServiceNotepadListReturnsRuntimeItemsByBucket(t *testing.T) {
 	service := newTestService()
-	now := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	service.runEngine.ReplaceNotepadItems([]map[string]any{
 		{
 			"item_id":          "todo_today",
