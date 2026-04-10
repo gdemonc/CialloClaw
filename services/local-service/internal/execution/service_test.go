@@ -56,6 +56,7 @@ func newTestExecutionService(t *testing.T, output string) (*Service, string) {
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
+		stubExecutionCapability{result: tools.CommandExecutionResult{Stdout: "ok", ExitCode: 0}},
 		model.NewService(serviceconfig.ModelConfig{}, stubModelClient{output: output}),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -229,6 +230,7 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 
 	service := NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
+		stubExecutionCapability{err: errors.New("provider unavailable")},
 		model.NewService(serviceconfig.ModelConfig{}, stubModelClient{err: errors.New("provider unavailable")}),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -253,4 +255,19 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 	if !strings.Contains(result.BubbleText, "需要解释的文本") {
 		t.Fatalf("expected fallback bubble to include normalized input, got %s", result.BubbleText)
 	}
+}
+
+type stubExecutionCapability struct {
+	result tools.CommandExecutionResult
+	err    error
+}
+
+func (s stubExecutionCapability) RunCommand(_ context.Context, command string, args []string, workingDir string) (tools.CommandExecutionResult, error) {
+	_ = command
+	_ = args
+	_ = workingDir
+	if s.err != nil {
+		return tools.CommandExecutionResult{}, s.err
+	}
+	return s.result, nil
 }

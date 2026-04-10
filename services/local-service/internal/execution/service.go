@@ -21,6 +21,7 @@ import (
 // Service 负责在当前仓库代码范围内完成一条可运行的最小执行链路。
 type Service struct {
 	fileSystem platform.FileSystemAdapter
+	execution  tools.ExecutionCapability
 	model      *model.Service
 	audit      *audit.Service
 	checkpoint *checkpoint.Service
@@ -58,6 +59,7 @@ type Result struct {
 // NewService 创建执行服务。
 func NewService(
 	fileSystem platform.FileSystemAdapter,
+	executionBackend tools.ExecutionCapability,
 	modelService *model.Service,
 	auditService *audit.Service,
 	checkpointService *checkpoint.Service,
@@ -68,6 +70,7 @@ func NewService(
 ) *Service {
 	return &Service{
 		fileSystem: fileSystem,
+		execution:  executionBackend,
 		model:      modelService,
 		audit:      auditService,
 		checkpoint: checkpointService,
@@ -81,6 +84,13 @@ func NewService(
 // Execute 执行当前任务的最小内容生成与落盘链路。
 func (s *Service) Execute(ctx context.Context, request Request) (Result, error) {
 	startedAt := time.Now()
+	if result, ok, err := s.executeDirectBuiltinTool(ctx, request); err != nil {
+		return Result{}, err
+	} else if ok {
+		result.DurationMS = time.Since(startedAt).Milliseconds()
+		return result, nil
+	}
+
 	inputText := s.buildExecutionInput(request.Snapshot)
 	outputText, invocationRecord, err := s.generateOutput(ctx, request, inputText)
 	if err != nil {
@@ -160,6 +170,45 @@ func (s *Service) Execute(ctx context.Context, request Request) (Result, error) 
 	return result, nil
 }
 
+func (s *Service) executeDirectBuiltinTool(ctx context.Context, request Request) (Result, bool, error) {
+	intentName := stringValue(request.Intent, "name", "")
+	if intentName == "" || intentName == "write_file" {
+		return Result{}, false, nil
+	}
+	if s.executor == nil || s.tools == nil {
+		return Result{}, false, nil
+	}
+	if _, err := s.tools.Get(intentName); err != nil {
+		return Result{}, false, nil
+	}
+	args := mapValue(request.Intent, "arguments")
+	toolResult, err := s.executor.ExecuteToolWithContext(ctx, &tools.ToolExecuteContext{
+		TaskID:        request.TaskID,
+		RunID:         request.RunID,
+		WorkspacePath: "workspace",
+		Platform:      s.fileSystem,
+		Execution:     s.execution,
+	}, intentName, args)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("execute builtin tool %s: %w", intentName, err)
+	}
+	bubbleText := toolBubbleText(intentName, toolResult)
+	return Result{
+		Content:        bubbleText,
+		DeliveryResult: s.delivery.BuildDeliveryResultWithTargetPath(request.TaskID, "bubble", request.ResultTitle, bubbleText, ""),
+		Artifacts:      toolArtifactsFromResult(request.TaskID, toolResult),
+		BubbleText:     bubbleText,
+		ToolName:       intentName,
+		ToolInput: mergeToolInputs(args, map[string]any{
+			"intent_name":     intentName,
+			"delivery_type":   "bubble",
+			"available_tools": s.availableToolNames(),
+			"workers":         s.availableWorkers(),
+		}),
+		ToolOutput: mergeToolOutputs(toolResult.RawOutput, toolResult.SummaryOutput),
+	}, true, nil
+}
+
 func (s *Service) executeThroughToolExecutor(ctx context.Context, request Request, deliveryResult map[string]any, outputText string) (Result, bool, error) {
 	toolName, toolInput, ok := s.resolveToolExecution(request, deliveryResult, outputText)
 	if !ok || s.executor == nil {
@@ -172,6 +221,7 @@ func (s *Service) executeThroughToolExecutor(ctx context.Context, request Reques
 		RunID:         request.RunID,
 		WorkspacePath: workspacePath,
 		Platform:      s.fileSystem,
+		Execution:     s.execution,
 	}, toolName, toolInput)
 	if err != nil {
 		return Result{}, false, fmt.Errorf("execute tool %s: %w", toolName, err)

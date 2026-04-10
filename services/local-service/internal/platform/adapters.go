@@ -2,12 +2,17 @@
 package platform
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
 )
 
 // FileSystemAdapter 定义当前模块的接口约束。
@@ -45,6 +50,7 @@ type OSCapabilityAdapter interface {
 // ExecutionBackendAdapter 定义当前模块的接口约束。
 type ExecutionBackendAdapter interface {
 	Name() string
+	RunCommand(ctx context.Context, command string, args []string, workingDir string) (tools.CommandExecutionResult, error)
 }
 
 // StorageAdapter 定义当前模块的接口约束。
@@ -290,6 +296,30 @@ type LocalExecutionBackend struct{}
 // Name 处理当前模块的相关逻辑。
 func (LocalExecutionBackend) Name() string {
 	return "docker"
+}
+
+// RunCommand 执行最小受控命令。
+func (LocalExecutionBackend) RunCommand(ctx context.Context, command string, args []string, workingDir string) (tools.CommandExecutionResult, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	if strings.TrimSpace(workingDir) != "" {
+		cmd.Dir = workingDir
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	result := tools.CommandExecutionResult{
+		Stdout: stdout.String(),
+		Stderr: stderr.String(),
+	}
+	if cmd.ProcessState != nil {
+		result.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // LocalStorageAdapter 定义当前模块的数据结构。

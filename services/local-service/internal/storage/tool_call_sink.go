@@ -74,7 +74,7 @@ func (s *SQLiteToolCallStore) SaveToolCall(ctx context.Context, record tools.Too
 		record.TaskID,
 		record.StepID,
 		record.ToolName,
-		string(record.Status),
+		normalizeToolCallStatus(record.Status),
 		string(inputJSON),
 		string(outputJSON),
 		record.ErrorCode,
@@ -84,6 +84,19 @@ func (s *SQLiteToolCallStore) SaveToolCall(ctx context.Context, record tools.Too
 		return fmt.Errorf("save tool call: %w", err)
 	}
 	return nil
+}
+
+func normalizeToolCallStatus(status tools.ToolCallStatus) string {
+	switch status {
+	case tools.ToolCallStatusStarted:
+		return "running"
+	case tools.ToolCallStatusSucceeded:
+		return "succeeded"
+	case tools.ToolCallStatusFailed, tools.ToolCallStatusTimeout:
+		return "failed"
+	default:
+		return "pending"
+	}
 }
 
 func (s *SQLiteToolCallStore) Close() error {
