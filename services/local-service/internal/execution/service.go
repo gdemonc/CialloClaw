@@ -123,6 +123,9 @@ func (s *Service) Execute(ctx context.Context, request Request) (Result, error) 
 	if toolResult, ok, err := s.executeThroughToolExecutor(ctx, request, deliveryResult, outputText); err != nil {
 		return Result{}, err
 	} else if ok {
+		// 当请求已走 ToolExecutor 路径时，保留真实工具输入，
+		// 仅把 execution 层的通用上下文附加到 execution_context，
+		// 避免后续 ToolCall 记录丢失实际工具参数。
 		toolResult.ToolInput = mergeToolInputs(toolResult.ToolInput, result.ToolInput)
 		toolResult.DurationMS = time.Since(startedAt).Milliseconds()
 		return toolResult, nil
