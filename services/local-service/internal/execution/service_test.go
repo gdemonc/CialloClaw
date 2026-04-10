@@ -204,3 +204,9 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 		t.Fatalf("expected fallback bubble to include normalized input, got %s", result.BubbleText)
 	}
 }
+
+func TestWorkspaceFSPathPreservesAbsoluteUnixPath(t *testing.T) {
+	if got := workspaceFSPath("/tmp/out.md"); got != "/tmp/out.md" {
+		t.Fatalf("expected absolute path to stay absolute, got %q", got)
+	}
+}

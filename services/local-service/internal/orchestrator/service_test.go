@@ -66,7 +66,8 @@ func newTestServiceWithExecution(t *testing.T, modelOutput string) (*Service, st
 	}
 	pluginService := plugin.NewService()
 	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
-	executor := execution.NewService(fileSystem, modelService, audit.NewService(), deliveryService, toolRegistry, nil, pluginService)
+	auditService := audit.NewService()
+	executor := execution.NewService(fileSystem, modelService, auditService, deliveryService, toolRegistry, nil, pluginService)
 
 	service := NewService(
 		contextsvc.NewService(),
@@ -78,7 +79,7 @@ func newTestServiceWithExecution(t *testing.T, modelOutput string) (*Service, st
 		modelService,
 		toolRegistry,
 		pluginService,
-	).WithExecutor(executor).WithTaskInspector(taskinspector.NewService(fileSystem))
+	).WithAudit(auditService).WithExecutor(executor).WithTaskInspector(taskinspector.NewService(fileSystem))
 
 	return service, workspaceRoot
 }
@@ -254,7 +255,7 @@ func TestServiceNotepadListReturnsRuntimeItemsByBucket(t *testing.T) {
 	}
 }
 
-func TestServiceNotepadConvertToTaskUsesRuntimeItemAndClosesTodo(t *testing.T) {
+func TestServiceNotepadConvertToTaskUsesRuntimeItemWithoutClosingTodo(t *testing.T) {
 	service := newTestService()
 	now := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
 	service.runEngine.ReplaceNotepadItems([]map[string]any{
@@ -299,12 +300,54 @@ func TestServiceNotepadConvertToTaskUsesRuntimeItemAndClosesTodo(t *testing.T) {
 		t.Fatal("expected converted task to attach memory read plans")
 	}
 
-	closedItems, total := service.runEngine.NotepadItems("closed", 10, 0)
-	if total != 1 || len(closedItems) != 1 {
-		t.Fatalf("expected converted todo item to move into closed bucket, total=%d len=%d", total, len(closedItems))
+	upcomingItems, total := service.runEngine.NotepadItems("upcoming", 10, 0)
+	if total != 1 || len(upcomingItems) != 1 {
+		t.Fatalf("expected converted todo item to stay open until task finishes, total=%d len=%d", total, len(upcomingItems))
 	}
-	if closedItems[0]["item_id"] != "todo_translate" || closedItems[0]["status"] != "completed" {
-		t.Fatalf("expected closed notepad item to reflect completion, got %+v", closedItems[0])
+	if upcomingItems[0]["item_id"] != "todo_translate" || upcomingItems[0]["status"] == "completed" {
+		t.Fatalf("expected notepad item to remain open, got %+v", upcomingItems[0])
+	}
+}
+
+func TestServiceExecutionAuditIDsStayUniqueAcrossToolAndTaskRecords(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "runtime output")
+
+	startResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_audit",
+		"source":     "floating_ball",
+		"trigger":    "text_selected_click",
+		"input": map[string]any{
+			"type": "text_selection",
+			"text": "解释一下这段内容",
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+	_, err = service.ConfirmTask(map[string]any{
+		"task_id":   taskID,
+		"confirmed": true,
+	})
+	if err != nil {
+		t.Fatalf("confirm task failed: %v", err)
+	}
+
+	recordedTask, ok := service.runEngine.GetTask(taskID)
+	if !ok {
+		t.Fatal("expected task to remain available")
+	}
+	if len(recordedTask.AuditRecords) == 0 {
+		t.Fatal("expected task audit records to be appended")
+	}
+
+	firstTaskAuditID, _ := recordedTask.AuditRecords[0]["audit_id"].(string)
+	if firstTaskAuditID == "" {
+		t.Fatalf("expected persisted task audit id, got %+v", recordedTask.AuditRecords[0])
+	}
+	if firstTaskAuditID == "audit_001" {
+		t.Fatalf("expected shared audit service to advance ids before task audit persistence, got %q", firstTaskAuditID)
 	}
 }
 

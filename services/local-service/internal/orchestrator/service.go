@@ -83,6 +83,14 @@ func NewService(
 	}
 }
 
+// WithAudit 挂接共享审计服务，避免运行态出现独立计数器。
+func (s *Service) WithAudit(auditService *audit.Service) *Service {
+	if auditService != nil {
+		s.audit = auditService
+	}
+	return s
+}
+
 // WithExecutor 把真实执行服务挂入 orchestrator。
 func (s *Service) WithExecutor(executorService *execution.Service) *Service {
 	s.executor = executorService
@@ -518,7 +526,6 @@ func (s *Service) NotepadConvertToTask(params map[string]any) (map[string]any, e
 		Timeline:    initialTimeline("confirming_intent", "intent_confirmation"),
 	})
 	s.attachMemoryReadPlans(task.TaskID, task.RunID, notepadSnapshot(item), taskIntent)
-	_, _ = s.runEngine.CompleteNotepadItem(itemID)
 
 	return map[string]any{
 		"task": taskMap(task),
@@ -1100,7 +1107,7 @@ func countGeneratedOutputs(tasks []runengine.TaskRecord) int {
 func buildDashboardSignalsWithAudit(unfinishedTasks, finishedTasks []runengine.TaskRecord, pendingApprovals []map[string]any) []string {
 	signals := buildDashboardSignals(unfinishedTasks, finishedTasks, pendingApprovals)
 	if latestAudit := latestAuditRecordFromTasks(append(append([]runengine.TaskRecord{}, unfinishedTasks...), finishedTasks...)); latestAudit != nil {
-		signals = append(signals, fmt.Sprintf("鏈€杩戝璁℃憳瑕侊細%s。", truncateText(stringValue(latestAudit, "summary", "runtime audit recorded"), 48)))
+		signals = append(signals, fmt.Sprintf("最近审计摘要：%s。", truncateText(stringValue(latestAudit, "summary", "runtime audit recorded"), 48)))
 	}
 	return signals
 }
@@ -1108,7 +1115,7 @@ func buildDashboardSignalsWithAudit(unfinishedTasks, finishedTasks []runengine.T
 func buildDashboardModuleHighlightsWithAudit(unfinishedTasks, finishedTasks []runengine.TaskRecord, pendingTotal int) []string {
 	highlights := buildDashboardModuleHighlights(unfinishedTasks, finishedTasks, pendingTotal)
 	if latestAudit := latestAuditRecordFromTasks(append(append([]runengine.TaskRecord{}, unfinishedTasks...), finishedTasks...)); latestAudit != nil {
-		highlights = append(highlights, fmt.Sprintf("鏈€杩戝璁?%s -> %s。", truncateText(stringValue(latestAudit, "action", "audit"), 24), truncateText(stringValue(latestAudit, "target", "main_flow"), 36)))
+		highlights = append(highlights, fmt.Sprintf("最近审计动作：%s -> %s。", truncateText(stringValue(latestAudit, "action", "audit"), 24), truncateText(stringValue(latestAudit, "target", "main_flow"), 36)))
 	}
 	return highlights
 }

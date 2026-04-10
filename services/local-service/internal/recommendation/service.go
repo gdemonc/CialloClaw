@@ -12,8 +12,12 @@ import (
 )
 
 const (
-	negativeCooldown = 5 * time.Minute
-	ignoreCooldown   = 2 * time.Minute
+	negativeCooldown         = 5 * time.Minute
+	ignoreCooldown           = 2 * time.Minute
+	recommendationRecordTTL  = 15 * time.Minute
+	recommendationStateTTL   = 30 * time.Minute
+	maxRecommendationRecords = 256
+	maxFingerprintStates     = 128
 )
 
 type Service struct {
@@ -51,6 +55,7 @@ type fingerprintState struct {
 	CooldownUntil time.Time
 	IntentScores  map[string]int
 	LastFeedback  map[string]string
+	LastTouched   time.Time
 }
 
 type candidate struct {
@@ -73,8 +78,9 @@ func (s *Service) Get(input GenerateInput) GenerateResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	currentState := s.state[fingerprint]
 	now := s.now()
+	s.pruneLocked(now)
+	currentState := s.state[fingerprint]
 	if currentState.CooldownUntil.After(now) {
 		return GenerateResult{
 			CooldownHit: true,
@@ -99,6 +105,8 @@ func (s *Service) Get(input GenerateInput) GenerateResult {
 			"intent":            item.Intent,
 		})
 	}
+	currentState.LastTouched = now
+	s.state[fingerprint] = currentState
 
 	return GenerateResult{
 		CooldownHit: false,
@@ -110,6 +118,8 @@ func (s *Service) SubmitFeedback(recommendationID, feedback string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	now := s.now()
+	s.pruneLocked(now)
 	item, ok := s.items[recommendationID]
 	if !ok {
 		return false
@@ -129,15 +139,17 @@ func (s *Service) SubmitFeedback(recommendationID, feedback string) bool {
 		currentState.CooldownUntil = time.Time{}
 	case "negative":
 		currentState.IntentScores[item.IntentName]--
-		currentState.CooldownUntil = s.now().Add(negativeCooldown)
+		currentState.CooldownUntil = now.Add(negativeCooldown)
 	case "ignore":
-		currentState.CooldownUntil = s.now().Add(ignoreCooldown)
+		currentState.CooldownUntil = now.Add(ignoreCooldown)
 	default:
 		return false
 	}
 
 	currentState.LastFeedback[item.IntentName] = feedback
+	currentState.LastTouched = now
 	s.state[item.Fingerprint] = currentState
+	delete(s.items, recommendationID)
 	return true
 }
 
@@ -148,13 +160,7 @@ func (s *Service) rankCandidates(candidates []candidate, state fingerprintState)
 
 	filtered := make([]candidate, 0, len(candidates))
 	for _, item := range candidates {
-		if state.LastFeedback[item.IntentName] == "negative" {
-			continue
-		}
 		filtered = append(filtered, item)
-	}
-	if len(filtered) == 0 {
-		filtered = candidates
 	}
 
 	sort.SliceStable(filtered, func(i, j int) bool {
@@ -241,7 +247,107 @@ func recommendationFingerprint(input GenerateInput) string {
 		strings.TrimSpace(input.PageTitle),
 		strings.TrimSpace(input.AppName),
 		strings.TrimSpace(input.SelectionText),
+		taskContextFingerprint(input.UnfinishedTasks),
+		notepadContextFingerprint(input.NotepadItems),
 	}, "|"))
+}
+
+func taskContextFingerprint(tasks []runengine.TaskRecord) string {
+	parts := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task.TaskID == "" {
+			continue
+		}
+		parts = append(parts, strings.ToLower(strings.Join([]string{
+			task.TaskID,
+			task.Status,
+			taskIntentName(task.Intent),
+		}, ":")))
+		if len(parts) == 3 {
+			break
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+func notepadContextFingerprint(items []map[string]any) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		itemID := strings.TrimSpace(stringValue(item, "item_id"))
+		if itemID == "" {
+			continue
+		}
+		parts = append(parts, strings.ToLower(strings.Join([]string{
+			itemID,
+			stringValue(item, "bucket"),
+			stringValue(item, "status"),
+			inferNotepadIntent(item),
+		}, ":")))
+		if len(parts) == 3 {
+			break
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+func (s *Service) pruneLocked(now time.Time) {
+	for recommendationID, item := range s.items {
+		if now.Sub(item.CreatedAt) > recommendationRecordTTL {
+			delete(s.items, recommendationID)
+		}
+	}
+	if len(s.items) > maxRecommendationRecords {
+		s.trimRecommendationRecordsLocked()
+	}
+
+	for fingerprint, item := range s.state {
+		lastTouched := item.LastTouched
+		if lastTouched.IsZero() {
+			lastTouched = item.CooldownUntil
+		}
+		if !lastTouched.IsZero() && now.Sub(lastTouched) > recommendationStateTTL {
+			delete(s.state, fingerprint)
+		}
+	}
+	if len(s.state) > maxFingerprintStates {
+		s.trimFingerprintStatesLocked()
+	}
+}
+
+func (s *Service) trimRecommendationRecordsLocked() {
+	records := make([]record, 0, len(s.items))
+	for _, item := range s.items {
+		records = append(records, item)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+	for len(records) > maxRecommendationRecords {
+		delete(s.items, records[0].ID)
+		records = records[1:]
+	}
+}
+
+func (s *Service) trimFingerprintStatesLocked() {
+	type stateRecord struct {
+		fingerprint string
+		lastTouched time.Time
+	}
+	records := make([]stateRecord, 0, len(s.state))
+	for fingerprint, item := range s.state {
+		lastTouched := item.LastTouched
+		if lastTouched.IsZero() {
+			lastTouched = item.CooldownUntil
+		}
+		records = append(records, stateRecord{fingerprint: fingerprint, lastTouched: lastTouched})
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].lastTouched.Before(records[j].lastTouched)
+	})
+	for len(records) > maxFingerprintStates {
+		delete(s.state, records[0].fingerprint)
+		records = records[1:]
+	}
 }
 
 func dedupeCandidates(candidates []candidate) []candidate {

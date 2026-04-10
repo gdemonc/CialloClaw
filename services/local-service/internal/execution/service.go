@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -420,8 +421,10 @@ func workspaceFSPath(filePath string) string {
 	if normalized == "" {
 		return ""
 	}
+	if filepath.IsAbs(normalized) || isWindowsAbsolutePath(normalized) {
+		return path.Clean(normalized)
+	}
 	normalized = strings.TrimPrefix(normalized, "./")
-	normalized = strings.TrimPrefix(normalized, "/")
 	if normalized == "workspace" {
 		return "."
 	}
@@ -436,6 +439,10 @@ func workspaceFSPath(filePath string) string {
 		return ""
 	}
 	return cleaned
+}
+
+func isWindowsAbsolutePath(pathValue string) bool {
+	return len(pathValue) >= 3 && pathValue[1] == ':' && (pathValue[2] == '/' || pathValue[2] == '\\')
 }
 
 func extractHighlights(inputText string, limit int) []string {
