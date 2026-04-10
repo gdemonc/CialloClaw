@@ -16,6 +16,7 @@ import (
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/memory"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/model"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/plugin"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/recommendation"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/risk"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/runengine"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/taskinspector"
@@ -36,17 +37,18 @@ var (
 // Service 是 4 号后端 Harness 主链路的统一编排入口。
 // 所有稳定的 task-centric RPC 方法都会在这里汇合，并继续拆分到 context、intent、runengine、delivery 等子模块。
 type Service struct {
-	context   *contextsvc.Service
-	intent    *intent.Service
-	runEngine *runengine.Engine
-	delivery  *delivery.Service
-	memory    *memory.Service
-	risk      *risk.Service
-	model     *model.Service
-	tools     *tools.Registry
-	plugin    *plugin.Service
-	executor  *execution.Service
-	inspector *taskinspector.Service
+	context        *contextsvc.Service
+	intent         *intent.Service
+	runEngine      *runengine.Engine
+	delivery       *delivery.Service
+	memory         *memory.Service
+	risk           *risk.Service
+	model          *model.Service
+	tools          *tools.Registry
+	plugin         *plugin.Service
+	recommendation *recommendation.Service
+	executor       *execution.Service
+	inspector      *taskinspector.Service
 }
 
 // NewService 创建并返回Service。
@@ -64,16 +66,17 @@ func NewService(
 	plugin *plugin.Service,
 ) *Service {
 	return &Service{
-		context:   context,
-		intent:    intent,
-		runEngine: runEngine,
-		delivery:  delivery,
-		memory:    memory,
-		risk:      risk,
-		model:     model,
-		tools:     tools,
-		plugin:    plugin,
-		inspector: taskinspector.NewService(nil),
+		context:        context,
+		intent:         intent,
+		runEngine:      runEngine,
+		delivery:       delivery,
+		memory:         memory,
+		risk:           risk,
+		model:          model,
+		tools:          tools,
+		plugin:         plugin,
+		recommendation: recommendation.NewService(),
+		inspector:      taskinspector.NewService(nil),
 	}
 }
 
@@ -321,21 +324,23 @@ func (s *Service) ConfirmTask(params map[string]any) (map[string]any, error) {
 
 // RecommendationGet 处理 agent.recommendation.get，返回轻量推荐动作。
 func (s *Service) RecommendationGet(params map[string]any) (map[string]any, error) {
-	selectionText := stringValue(mapValue(params, "context"), "selection_text", "当前内容")
+	contextValue := mapValue(params, "context")
+	unfinishedTasks, _ := s.runEngine.ListTasks("unfinished", "updated_at", "desc", 20, 0)
+	finishedTasks, _ := s.runEngine.ListTasks("finished", "finished_at", "desc", 20, 0)
+	notepadItems, _ := s.runEngine.NotepadItems("", 20, 0)
+	result := s.recommendation.Get(recommendation.GenerateInput{
+		Source:          stringValue(params, "source", "floating_ball"),
+		Scene:           stringValue(params, "scene", "hover"),
+		PageTitle:       stringValue(contextValue, "page_title", ""),
+		AppName:         stringValue(contextValue, "app_name", ""),
+		SelectionText:   stringValue(contextValue, "selection_text", ""),
+		UnfinishedTasks: unfinishedTasks,
+		FinishedTasks:   finishedTasks,
+		NotepadItems:    notepadItems,
+	})
 	return map[string]any{
-		"cooldown_hit": false,
-		"items": []map[string]any{
-			{
-				"recommendation_id": "rec_001",
-				"text":              fmt.Sprintf("要不要我帮你总结这段内容：%s", truncateText(selectionText, 16)),
-				"intent":            defaultIntentMap("summarize"),
-			},
-			{
-				"recommendation_id": "rec_002",
-				"text":              "也可以直接改写成更正式的版本。",
-				"intent":            defaultIntentMap("rewrite"),
-			},
-		},
+		"cooldown_hit": result.CooldownHit,
+		"items":        result.Items,
 	}, nil
 }
 
@@ -343,8 +348,12 @@ func (s *Service) RecommendationGet(params map[string]any) (map[string]any, erro
 
 // RecommendationFeedbackSubmit 处理 agent.recommendation.feedback.submit。
 func (s *Service) RecommendationFeedbackSubmit(params map[string]any) (map[string]any, error) {
-	_ = params
-	return map[string]any{"applied": true}, nil
+	return map[string]any{
+		"applied": s.recommendation.SubmitFeedback(
+			stringValue(params, "recommendation_id", ""),
+			stringValue(params, "feedback", ""),
+		),
+	}, nil
 }
 
 // TaskList 处理当前模块的相关逻辑。
