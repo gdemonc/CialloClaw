@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/audit"
 	contextsvc "github.com/cialloclaw/cialloclaw/services/local-service/internal/context"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/delivery"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/execution"
@@ -46,6 +47,7 @@ type Service struct {
 	model          *model.Service
 	tools          *tools.Registry
 	plugin         *plugin.Service
+	audit          *audit.Service
 	recommendation *recommendation.Service
 	executor       *execution.Service
 	inspector      *taskinspector.Service
@@ -75,6 +77,7 @@ func NewService(
 		model:          model,
 		tools:          tools,
 		plugin:         plugin,
+		audit:          audit.NewService(),
 		recommendation: recommendation.NewService(),
 		inspector:      taskinspector.NewService(nil),
 	}
@@ -556,7 +559,7 @@ func (s *Service) DashboardOverviewGet(params map[string]any) (map[string]any, e
 			},
 			"quick_actions":     buildDashboardQuickActions(hasFocusTask, pendingTotal, len(finishedTasks)),
 			"global_state":      s.Snapshot(),
-			"high_value_signal": buildDashboardSignals(unfinishedTasks, finishedTasks, pendingApprovals),
+			"high_value_signal": buildDashboardSignalsWithAudit(unfinishedTasks, finishedTasks, pendingApprovals),
 		},
 	}, nil
 }
@@ -579,7 +582,7 @@ func (s *Service) DashboardModuleGet(params map[string]any) (map[string]any, err
 			"authorizations_used": countAuthorizedTasks(unfinishedTasks, finishedTasks),
 			"exceptions":          countExceptionTasks(unfinishedTasks, finishedTasks),
 		},
-		"highlights": buildDashboardModuleHighlights(unfinishedTasks, finishedTasks, pendingTotal),
+		"highlights": buildDashboardModuleHighlightsWithAudit(unfinishedTasks, finishedTasks, pendingTotal),
 	}, nil
 }
 
@@ -616,15 +619,7 @@ func (s *Service) SecuritySummaryGet() (map[string]any, error) {
 			"security_status":        aggregateSecurityStatus(allTasks, pendingTotal),
 			"pending_authorizations": pendingTotal,
 			"latest_restore_point":   latestRestorePointFromTasks(allTasks),
-			"token_cost_summary": map[string]any{
-				"current_task_tokens":   0,
-				"current_task_cost":     0.0,
-				"today_tokens":          0,
-				"today_cost":            0.0,
-				"single_task_limit":     0.0,
-				"daily_limit":           0.0,
-				"budget_auto_downgrade": boolValue(dataLogSettings, "budget_auto_downgrade", true),
-			},
+			"token_cost_summary":     aggregateTokenCostSummary(unfinishedTasks, finishedTasks, boolValue(dataLogSettings, "budget_auto_downgrade", true)),
 		},
 	}, nil
 }
@@ -718,6 +713,7 @@ func (s *Service) SecurityRespond(params map[string]any) (map[string]any, error)
 		if !ok {
 			return nil, ErrTaskNotFound
 		}
+		updatedTask = s.appendAuditData(updatedTask, compactAuditRecords(s.audit.BuildAuthorizationAudit(updatedTask.TaskID, updatedTask.RunID, decision, impactScope)), nil)
 		return map[string]any{
 			"authorization_record": authorizationRecord,
 			"task":                 taskMap(updatedTask),
@@ -731,6 +727,7 @@ func (s *Service) SecurityRespond(params map[string]any) (map[string]any, error)
 	if !ok {
 		return nil, ErrTaskNotFound
 	}
+	processingTask = s.appendAuditData(processingTask, compactAuditRecords(s.audit.BuildAuthorizationAudit(processingTask.TaskID, processingTask.RunID, decision, impactScope)), nil)
 
 	resultTitle := stringValue(pendingExecution, "result_title", "处理结果")
 	resultPreview := stringValue(pendingExecution, "preview_text", "已为你写入文档并打开")
@@ -1100,6 +1097,22 @@ func countGeneratedOutputs(tasks []runengine.TaskRecord) int {
 	return total
 }
 
+func buildDashboardSignalsWithAudit(unfinishedTasks, finishedTasks []runengine.TaskRecord, pendingApprovals []map[string]any) []string {
+	signals := buildDashboardSignals(unfinishedTasks, finishedTasks, pendingApprovals)
+	if latestAudit := latestAuditRecordFromTasks(append(append([]runengine.TaskRecord{}, unfinishedTasks...), finishedTasks...)); latestAudit != nil {
+		signals = append(signals, fmt.Sprintf("鏈€杩戝璁℃憳瑕侊細%s。", truncateText(stringValue(latestAudit, "summary", "runtime audit recorded"), 48)))
+	}
+	return signals
+}
+
+func buildDashboardModuleHighlightsWithAudit(unfinishedTasks, finishedTasks []runengine.TaskRecord, pendingTotal int) []string {
+	highlights := buildDashboardModuleHighlights(unfinishedTasks, finishedTasks, pendingTotal)
+	if latestAudit := latestAuditRecordFromTasks(append(append([]runengine.TaskRecord{}, unfinishedTasks...), finishedTasks...)); latestAudit != nil {
+		highlights = append(highlights, fmt.Sprintf("鏈€杩戝璁?%s -> %s。", truncateText(stringValue(latestAudit, "action", "audit"), 24), truncateText(stringValue(latestAudit, "target", "main_flow"), 36)))
+	}
+	return highlights
+}
+
 func countAuthorizedTasks(taskGroups ...[]runengine.TaskRecord) int {
 	total := 0
 	for _, tasks := range taskGroups {
@@ -1238,6 +1251,77 @@ func aggregateSecurityStatus(tasks []runengine.TaskRecord, pendingTotal int) str
 		}
 	}
 	return "normal"
+}
+
+func latestAuditRecordFromTasks(tasks []runengine.TaskRecord) map[string]any {
+	var latestAudit map[string]any
+	var latestAt time.Time
+	for _, task := range tasks {
+		for _, auditRecord := range task.AuditRecords {
+			auditAt := parseAuditTime(auditRecord)
+			if latestAudit == nil || auditAt.After(latestAt) {
+				latestAudit = cloneMap(auditRecord)
+				latestAt = auditAt
+			}
+		}
+	}
+	return latestAudit
+}
+
+func aggregateTokenCostSummary(unfinishedTasks, finishedTasks []runengine.TaskRecord, budgetAutoDowngrade bool) map[string]any {
+	currentTaskTokens := 0
+	currentTaskCost := 0.0
+	if currentTask, ok := latestTokenUsageTask(unfinishedTasks, finishedTasks); ok {
+		currentTaskTokens = intValueFromAny(currentTask.TokenUsage["total_tokens"])
+		currentTaskCost = floatValueFromAny(currentTask.TokenUsage["estimated_cost"])
+	}
+
+	todayTokens := 0
+	todayCost := 0.0
+	now := time.Now()
+	for _, task := range append(append([]runengine.TaskRecord{}, unfinishedTasks...), finishedTasks...) {
+		if !sameDay(task.StartedAt, now) {
+			continue
+		}
+		todayTokens += intValueFromAny(task.TokenUsage["total_tokens"])
+		todayCost += floatValueFromAny(task.TokenUsage["estimated_cost"])
+	}
+
+	return map[string]any{
+		"current_task_tokens":   currentTaskTokens,
+		"current_task_cost":     currentTaskCost,
+		"today_tokens":          todayTokens,
+		"today_cost":            todayCost,
+		"single_task_limit":     0.0,
+		"daily_limit":           0.0,
+		"budget_auto_downgrade": budgetAutoDowngrade,
+	}
+}
+
+func latestTokenUsageTask(unfinishedTasks, finishedTasks []runengine.TaskRecord) (runengine.TaskRecord, bool) {
+	for _, task := range unfinishedTasks {
+		if len(task.TokenUsage) > 0 {
+			return task, true
+		}
+	}
+	for _, task := range finishedTasks {
+		if len(task.TokenUsage) > 0 {
+			return task, true
+		}
+	}
+	return runengine.TaskRecord{}, false
+}
+
+func parseAuditTime(auditRecord map[string]any) time.Time {
+	createdAt := stringValue(auditRecord, "created_at", "")
+	if createdAt == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 func latestRestorePointFromTasks(tasks []runengine.TaskRecord) map[string]any {
@@ -1626,6 +1710,55 @@ func firstNonEmptyString(primary, fallback string) string {
 	return fallback
 }
 
+func compactAuditRecords(records ...map[string]any) []map[string]any {
+	if len(records) == 0 {
+		return nil
+	}
+
+	items := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		if len(record) == 0 {
+			continue
+		}
+		items = append(items, cloneMap(record))
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return items
+}
+
+func sameDay(left, right time.Time) bool {
+	left = left.In(right.Location())
+	return left.Year() == right.Year() && left.YearDay() == right.YearDay()
+}
+
+func intValueFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func floatValueFromAny(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0.0
+	}
+}
+
 // firstMapOrNil 处理当前模块的相关逻辑。
 
 // firstMapOrNil 返回列表中的第一项拷贝；如果为空则返回 nil。
@@ -1774,6 +1907,7 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		)
 		artifacts := s.delivery.BuildArtifact(processingTask.TaskID, resultTitle, deliveryResult)
 		resultBubble := s.delivery.BuildBubbleMessage(processingTask.TaskID, "result", resultBubbleText, processingTask.UpdatedAt.Format(dateTimeLayout))
+		processingTask = s.appendAuditData(processingTask, compactAuditRecords(s.audit.BuildDeliveryAudit(processingTask.TaskID, processingTask.RunID, deliveryResult)), nil)
 		updatedTask, ok := s.runEngine.CompleteTask(processingTask.TaskID, deliveryResult, resultBubble, artifacts)
 		if !ok {
 			return runengine.TaskRecord{}, nil, nil, nil, ErrTaskNotFound
@@ -1809,6 +1943,8 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 			processingTask = recordedTask
 		}
 	}
+	executionAuditRecords, executionTokenUsage := s.buildExecutionAudit(processingTask, executionResult.ToolCalls, executionResult.DeliveryResult)
+	processingTask = s.appendAuditData(processingTask, executionAuditRecords, executionTokenUsage)
 
 	resultBubble := s.delivery.BuildBubbleMessage(
 		processingTask.TaskID,
@@ -1822,6 +1958,40 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 	}
 	s.attachPostDeliveryHandoffs(updatedTask.TaskID, updatedTask.RunID, snapshot, taskIntent, executionResult.DeliveryResult, executionResult.Artifacts)
 	return updatedTask, resultBubble, executionResult.DeliveryResult, executionResult.Artifacts, nil
+}
+
+func (s *Service) buildExecutionAudit(task runengine.TaskRecord, toolCalls []tools.ToolCallRecord, deliveryResult map[string]any) ([]map[string]any, map[string]any) {
+	if s.audit == nil {
+		return nil, nil
+	}
+
+	auditRecords := make([]map[string]any, 0, len(toolCalls)+1)
+	var tokenUsage map[string]any
+	for _, toolCall := range toolCalls {
+		auditRecord, usage, ok := s.audit.BuildToolAudit(task.TaskID, task.RunID, toolCall)
+		if ok {
+			auditRecords = append(auditRecords, auditRecord)
+		}
+		if len(usage) > 0 {
+			tokenUsage = cloneMap(usage)
+		}
+	}
+	if deliveryAudit := s.audit.BuildDeliveryAudit(task.TaskID, task.RunID, deliveryResult); len(deliveryAudit) > 0 {
+		auditRecords = append(auditRecords, deliveryAudit)
+	}
+
+	return auditRecords, tokenUsage
+}
+
+func (s *Service) appendAuditData(task runengine.TaskRecord, auditRecords []map[string]any, tokenUsage map[string]any) runengine.TaskRecord {
+	if len(auditRecords) == 0 && len(tokenUsage) == 0 {
+		return task
+	}
+	updatedTask, ok := s.runEngine.AppendAuditData(task.TaskID, auditRecords, tokenUsage)
+	if !ok {
+		return task
+	}
+	return updatedTask
 }
 
 const dateTimeLayout = time.RFC3339
