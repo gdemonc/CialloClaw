@@ -311,7 +311,7 @@ func TestServiceRecommendationGetUsesRuntimeTaskState(t *testing.T) {
 		"trigger":    "text_selected_click",
 		"input": map[string]any{
 			"type": "text_selection",
-			"text": "explain this runtime-backed recommendation target",
+			"text": "tiny note",
 		},
 	})
 	if err != nil {
@@ -381,6 +381,35 @@ func TestServiceRecommendationFeedbackSubmitAppliesCooldown(t *testing.T) {
 	}
 	if len(second["items"].([]map[string]any)) != 0 {
 		t.Fatalf("expected cooldown hit to suppress recommendation items, got %+v", second["items"])
+	}
+}
+
+func TestServiceSubmitInputWithFilesDoesNotWaitForInput(t *testing.T) {
+	service := newTestService()
+
+	result, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_files",
+		"source":     "floating_ball",
+		"input": map[string]any{
+			"files": []any{"workspace/notes.md"},
+		},
+		"context": map[string]any{
+			"page": map[string]any{
+				"title":    "Workspace",
+				"app_name": "desktop",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("submit input failed: %v", err)
+	}
+
+	task := result["task"].(map[string]any)
+	if task["status"] == "waiting_input" {
+		t.Fatalf("expected file input to enter task flow instead of waiting_input, got %+v", task)
+	}
+	if task["source_type"] != "dragged_file" {
+		t.Fatalf("expected file input to map to dragged_file source_type, got %v", task["source_type"])
 	}
 }
 
