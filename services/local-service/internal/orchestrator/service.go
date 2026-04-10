@@ -125,7 +125,7 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 	confirmRequired := boolValue(options, "confirm_required", true)
 	preferredDelivery, fallbackDelivery := deliveryPreferenceFromSubmit(params)
 	suggestion := s.intent.Suggest(snapshot, nil, confirmRequired)
-	if s.intent.Analyze(snapshot.Text) == "waiting_input" {
+	if s.intent.AnalyzeSnapshot(snapshot) == "waiting_input" {
 		task := s.runEngine.CreateTask(runengine.CreateTaskInput{
 			SessionID:         stringValue(params, "session_id", ""),
 			Title:             "等待补充输入",
