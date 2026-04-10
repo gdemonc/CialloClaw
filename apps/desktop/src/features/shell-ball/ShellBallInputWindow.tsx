@@ -8,6 +8,7 @@ import {
   emitShellBallPrimaryAction,
   useShellBallHelperWindowSnapshot,
 } from "./useShellBallCoordinator";
+import { useShellBallWindowMetrics } from "./useShellBallWindowMetrics";
 import { ShellBallInputBar } from "./components/ShellBallInputBar";
 
 type ShellBallInputWindowProps = {
@@ -44,6 +45,10 @@ export function ShellBallInputWindow({
   const resolvedMode = mode ?? snapshot.inputBarMode;
   const resolvedVoicePreview = voicePreview ?? snapshot.voicePreview;
   const resolvedValue = value ?? draftValue;
+  const { rootRef } = useShellBallWindowMetrics({
+    role: "input",
+    visible: snapshot.visibility.input,
+  });
 
   function handleValueChange(nextValue: string) {
     if (onValueChange !== undefined) {
@@ -84,6 +89,7 @@ export function ShellBallInputWindow({
 
   return (
     <div
+      ref={rootRef}
       className="shell-ball-window shell-ball-window--input"
       aria-label="Shell-ball input window"
       onPointerEnter={() => {

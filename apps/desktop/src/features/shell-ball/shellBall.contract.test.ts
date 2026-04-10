@@ -42,6 +42,14 @@ import {
   shellBallWindowSyncEvents,
 } from "./shellBall.windowSync";
 import {
+  SHELL_BALL_WINDOW_GAP_PX,
+  SHELL_BALL_WINDOW_SAFE_MARGIN_PX,
+  clampShellBallFrameToBounds,
+  createShellBallWindowFrame,
+  getShellBallBubbleAnchor,
+  getShellBallInputAnchor,
+} from "./useShellBallWindowMetrics";
+import {
   getShellBallPostSubmitInputReset,
   getShellBallVoicePreviewFromEvent,
   shouldKeepShellBallVoicePreviewOnRegionLeave,
@@ -227,6 +235,77 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
         bubble: true,
         input: true,
       },
+    },
+  );
+});
+
+test("shell-ball window metrics compute safe frames and helper anchors", () => {
+  assert.equal(SHELL_BALL_WINDOW_GAP_PX, 12);
+  assert.equal(SHELL_BALL_WINDOW_SAFE_MARGIN_PX, 12);
+
+  const ballFrame = createShellBallWindowFrame({ width: 100, height: 80 });
+
+  assert.deepEqual(ballFrame, {
+    width: 124,
+    height: 104,
+  });
+
+  assert.deepEqual(
+    getShellBallBubbleAnchor({
+      ballFrame: {
+        x: 200,
+        y: 300,
+        ...ballFrame,
+      },
+      helperFrame: {
+        width: 180,
+        height: 90,
+      },
+    }),
+    {
+      x: 172,
+      y: 198,
+    },
+  );
+
+  assert.deepEqual(
+    getShellBallInputAnchor({
+      ballFrame: {
+        x: 200,
+        y: 300,
+        ...ballFrame,
+      },
+      helperFrame: {
+        width: 220,
+        height: 88,
+      },
+    }),
+    {
+      x: 152,
+      y: 416,
+    },
+  );
+
+  assert.deepEqual(
+    clampShellBallFrameToBounds(
+      {
+        x: -24,
+        y: 44,
+        width: 124,
+        height: 104,
+      },
+      {
+        minX: 0,
+        minY: 0,
+        maxX: 320,
+        maxY: 520,
+      },
+    ),
+    {
+      x: 0,
+      y: 44,
+      width: 124,
+      height: 104,
     },
   );
 });

@@ -1,10 +1,11 @@
-import type { PointerEvent, ReactNode } from "react";
+import type { PointerEvent, ReactNode, RefObject } from "react";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
 import type { ShellBallMotionConfig, ShellBallVisualState } from "./shellBall.types";
 import { ShellBallMascot } from "./components/ShellBallMascot";
 
 type ShellBallSurfaceProps = {
   children?: ReactNode;
+  containerRef?: RefObject<HTMLDivElement>;
   visualState: ShellBallVisualState;
   voicePreview: ShellBallVoicePreview;
   motionConfig: ShellBallMotionConfig;
@@ -18,6 +19,7 @@ type ShellBallSurfaceProps = {
 
 export function ShellBallSurface({
   children,
+  containerRef,
   visualState,
   voicePreview,
   motionConfig,
@@ -29,7 +31,7 @@ export function ShellBallSurface({
   onPressEnd,
 }: ShellBallSurfaceProps) {
   return (
-    <div className="shell-ball-surface" aria-label="Shell-ball floating surface">
+    <div ref={containerRef} className="shell-ball-surface" aria-label="Shell-ball floating surface">
       <div className="shell-ball-surface__core">
         <div className="shell-ball-surface__interaction-shell">
           <div

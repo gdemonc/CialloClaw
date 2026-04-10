@@ -4,6 +4,7 @@ import { ShellBallSurface } from "./ShellBallSurface";
 import { useShellBallInteraction } from "./useShellBallInteraction";
 import { getShellBallMotionConfig } from "./shellBall.motion";
 import { useShellBallCoordinator } from "./useShellBallCoordinator";
+import { useShellBallWindowMetrics } from "./useShellBallWindowMetrics";
 
 type ShellBallAppProps = {
   isDev?: boolean;
@@ -28,6 +29,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   } = useShellBallInteraction();
   const motionConfig = getShellBallMotionConfig(visualState);
   const showDemoSwitcher = shouldShowShellBallDemoSwitcher(isDev);
+  const { rootRef } = useShellBallWindowMetrics({ role: "ball" });
 
   useShellBallCoordinator({
     visualState,
@@ -44,6 +46,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
   return (
     <ShellBallSurface
+      containerRef={rootRef}
       visualState={visualState}
       voicePreview={voicePreview}
       motionConfig={motionConfig}

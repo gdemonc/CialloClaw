@@ -30,10 +30,18 @@ export type ShellBallWindowSnapshot = {
 };
 
 export type ShellBallWindowGeometry = {
-  ballX: number;
-  ballY: number;
-  ballWidth: number;
-  ballHeight: number;
+  ballFrame: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  bounds: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  };
   scaleFactor: number;
 };
 
