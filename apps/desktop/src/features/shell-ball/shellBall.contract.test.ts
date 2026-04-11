@@ -637,6 +637,40 @@ test("shell-ball desktop window controller and capabilities stay aligned", () =>
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-size"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-start-dragging"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-ignore-cursor-events"), true);
+
+  const generatedCapabilitySchema = JSON.parse(
+    readFileSync(resolve(desktopRoot, "src-tauri/gen/schemas/capabilities.json"), "utf8"),
+  ) as {
+    default: {
+      windows: string[];
+      permissions: string[];
+    };
+  };
+
+  assert.deepEqual(generatedCapabilitySchema.default.windows, parsedCapabilityConfig.windows);
+  assert.deepEqual(generatedCapabilitySchema.default.permissions, parsedCapabilityConfig.permissions);
+  assert.equal(generatedCapabilitySchema.default.permissions.includes("core:window:allow-unminimize"), true);
+});
+
+test("dashboard and control-panel stay hidden on cold launch until explicitly opened", () => {
+  const tauriConfig = JSON.parse(
+    readFileSync(resolve(desktopRoot, "src-tauri/tauri.conf.json"), "utf8"),
+  ) as {
+    app: {
+      windows: Array<{
+        label: string;
+        visible?: boolean;
+      }>;
+    };
+  };
+
+  const dashboardWindow = tauriConfig.app.windows.find((window) => window.label === "dashboard");
+  const controlPanelWindow = tauriConfig.app.windows.find((window) => window.label === "control-panel");
+
+  assert.ok(dashboardWindow);
+  assert.ok(controlPanelWindow);
+  assert.equal(dashboardWindow.visible, false);
+  assert.equal(controlPanelWindow.visible, false);
 });
 
 test("shell-ball entries opt into transparent window mode", () => {
