@@ -22,6 +22,10 @@ type ShellBallMascotHotspotGesture = "single_click" | "double_click";
 
 type ShellBallMascotHotspotGestureAction = "noop" | "primary_click" | "double_click";
 
+type ShellBallMascotPointerPhase = "pointer_down" | "pointer_up" | "pointer_cancel";
+
+type ShellBallMascotPointerPhaseAction = "noop" | "start_press" | "finish_press" | "suppress_gestures" | "cleanup_only";
+
 export function getShellBallMascotHotspotGestureAction(input: {
   visualState: ShellBallVisualState;
   gesture: ShellBallMascotHotspotGesture;
@@ -40,6 +44,28 @@ export function getShellBallMascotHotspotGestureAction(input: {
   }
 
   return "noop";
+}
+
+export function getShellBallMascotPointerPhaseAction(input: {
+  phase: ShellBallMascotPointerPhase;
+  button: number;
+  isPrimary: boolean;
+  pressHandled: boolean;
+}): ShellBallMascotPointerPhaseAction {
+  if (input.phase === "pointer_cancel") {
+    return "cleanup_only";
+  }
+
+  const isPrimaryButtonSequence = input.button === 0 && input.isPrimary;
+  if (!isPrimaryButtonSequence) {
+    return "noop";
+  }
+
+  if (input.phase === "pointer_down") {
+    return "start_press";
+  }
+
+  return input.pressHandled ? "suppress_gestures" : "finish_press";
 }
 
 export function ShellBallMascot({
@@ -82,6 +108,17 @@ export function ShellBallMascot({
   };
 
   function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
+    if (
+      getShellBallMascotPointerPhaseAction({
+        phase: "pointer_down",
+        button: event.button,
+        isPrimary: event.isPrimary,
+        pressHandled: false,
+      }) !== "start_press"
+    ) {
+      return;
+    }
+
     suppressGestureRef.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
     onPressStart(event);
@@ -96,12 +133,49 @@ export function ShellBallMascot({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
+    const pointerAction = getShellBallMascotPointerPhaseAction({
+      phase: "pointer_up",
+      button: event.button,
+      isPrimary: event.isPrimary,
+      pressHandled: false,
+    });
+
+    if (pointerAction === "noop") {
+      return;
+    }
+
     const handled = onPressEnd(event);
-    if (!handled) {
+    const action = getShellBallMascotPointerPhaseAction({
+      phase: "pointer_up",
+      button: event.button,
+      isPrimary: event.isPrimary,
+      pressHandled: handled,
+    });
+
+    if (action !== "suppress_gestures") {
       return;
     }
 
     suppressGestureRef.current = true;
+  }
+
+  function handlePointerCancel(event: PointerEvent<HTMLButtonElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const action = getShellBallMascotPointerPhaseAction({
+      phase: "pointer_cancel",
+      button: event.button,
+      isPrimary: event.isPrimary,
+      pressHandled: false,
+    });
+
+    if (action !== "cleanup_only") {
+      return;
+    }
+
+    suppressGestureRef.current = false;
   }
 
   function handleClick(event: MouseEvent<HTMLButtonElement>) {
@@ -207,7 +281,7 @@ export function ShellBallMascot({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
-        onPointerCancel={handlePointerEnd}
+        onPointerCancel={handlePointerCancel}
       />
     </div>
   );

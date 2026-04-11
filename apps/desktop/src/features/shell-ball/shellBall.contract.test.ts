@@ -33,6 +33,7 @@ import { ShellBallDevLayer } from "./ShellBallDevLayer";
 import { ShellBallInputWindow } from "./ShellBallInputWindow";
 import { ShellBallMascot } from "./components/ShellBallMascot";
 import { getShellBallMascotHotspotGestureAction } from "./components/ShellBallMascot";
+import { getShellBallMascotPointerPhaseAction } from "./components/ShellBallMascot";
 import { ShellBallSurface } from "./ShellBallSurface";
 import { shouldShowShellBallDemoSwitcher } from "./shellBall.dev";
 import { shellBallWindowLabels, shellBallWindowPermissions } from "../../platform/shellBallWindowController";
@@ -1694,6 +1695,44 @@ test("shell-ball mascot hotspot policy drops suppressed sequences for both click
       suppressed: true,
     }),
     "noop",
+  );
+});
+
+test("shell-ball mascot pointer policy accepts only primary-button press sequences", () => {
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_down", button: 0, isPrimary: true, pressHandled: false }),
+    "start_press",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_up", button: 0, isPrimary: true, pressHandled: false }),
+    "finish_press",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_down", button: 1, isPrimary: true, pressHandled: false }),
+    "noop",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_up", button: 2, isPrimary: true, pressHandled: true }),
+    "noop",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_down", button: 0, isPrimary: false, pressHandled: false }),
+    "noop",
+  );
+});
+
+test("shell-ball mascot pointer policy keeps cancellation separate from successful release", () => {
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_up", button: 0, isPrimary: true, pressHandled: true }),
+    "suppress_gestures",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_cancel", button: 0, isPrimary: true, pressHandled: true }),
+    "cleanup_only",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_cancel", button: 1, isPrimary: false, pressHandled: false }),
+    "cleanup_only",
   );
 });
 
