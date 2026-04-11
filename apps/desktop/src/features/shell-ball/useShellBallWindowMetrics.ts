@@ -16,7 +16,8 @@ import { shellBallWindowSyncEvents, type ShellBallHelperWindowRole, type ShellBa
 type AnchoredShellBallHelperWindowRole = Exclude<ShellBallHelperWindowRole, "pinned">;
 
 export const SHELL_BALL_WINDOW_SAFE_MARGIN_PX = 12;
-export const SHELL_BALL_WINDOW_GAP_PX = 12;
+export const SHELL_BALL_BUBBLE_GAP_PX = 6;
+export const SHELL_BALL_INPUT_GAP_PX = 12;
 
 type ShellBallContentSize = {
   width: number;
@@ -84,7 +85,7 @@ export function getShellBallBubbleAnchor(input: {
   helperFrame: ShellBallWindowSize;
   gap?: number;
 }) {
-  const gap = input.gap ?? SHELL_BALL_WINDOW_GAP_PX;
+  const gap = input.gap ?? SHELL_BALL_BUBBLE_GAP_PX;
 
   return {
     x: Math.round(input.ballFrame.x + input.ballFrame.width / 2 - input.helperFrame.width / 2),
@@ -97,7 +98,7 @@ export function getShellBallInputAnchor(input: {
   helperFrame: ShellBallWindowSize;
   gap?: number;
 }) {
-  const gap = input.gap ?? SHELL_BALL_WINDOW_GAP_PX;
+  const gap = input.gap ?? SHELL_BALL_INPUT_GAP_PX;
 
   return {
     x: Math.round(input.ballFrame.x + input.ballFrame.width / 2 - input.helperFrame.width / 2),

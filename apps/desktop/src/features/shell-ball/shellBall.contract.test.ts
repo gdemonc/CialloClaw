@@ -59,7 +59,8 @@ import {
 import type { ShellBallBubbleItem } from "./shellBall.bubble";
 import { cloneShellBallBubbleItems } from "./shellBall.bubble";
 import {
-  SHELL_BALL_WINDOW_GAP_PX,
+  SHELL_BALL_BUBBLE_GAP_PX,
+  SHELL_BALL_INPUT_GAP_PX,
   SHELL_BALL_WINDOW_SAFE_MARGIN_PX,
   clampShellBallFrameToBounds,
   createShellBallWindowFrame,
@@ -1429,7 +1430,8 @@ test("shell-ball window snapshot copies bubble item arrays defensively", () => {
 });
 
 test("shell-ball window metrics compute safe frames and helper anchors", () => {
-  assert.equal(SHELL_BALL_WINDOW_GAP_PX, 12);
+  assert.equal(SHELL_BALL_BUBBLE_GAP_PX, 6);
+  assert.equal(SHELL_BALL_INPUT_GAP_PX, 12);
   assert.equal(SHELL_BALL_WINDOW_SAFE_MARGIN_PX, 12);
 
   const ballFrame = createShellBallWindowFrame({ width: 100, height: 80 });
@@ -1453,9 +1455,11 @@ test("shell-ball window metrics compute safe frames and helper anchors", () => {
     }),
     {
       x: 172,
-      y: 198,
+      y: 204,
     },
   );
+
+  assert.equal(204 + 90 <= 300, true);
 
   assert.deepEqual(
     getShellBallInputAnchor({
