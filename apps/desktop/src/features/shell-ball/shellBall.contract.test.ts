@@ -2843,6 +2843,157 @@ test("shell-ball detached bubble actions close pinned windows and delete detache
   assert.deepEqual(bubbleItemsState.map((item) => item.bubble.bubble_id), ["msg-detached-2"]);
 });
 
+test("shell-ball pin action opens pinned bubble windows immediately without geometry resync", async () => {
+  const listeners = new Map<string, (event: { payload: unknown }) => void>();
+  const openCalls: Array<{ bubbleId: string; position: { x: number; y: number }; size: { width: number; height: number } }> = [];
+  let movedListenerCount = 0;
+  let resizedListenerCount = 0;
+  let bubbleItemsState: ShellBallBubbleItem[] = [
+    {
+      bubble: {
+        bubble_id: "msg-pin-1",
+        task_id: "task-pin-1",
+        type: "status",
+        text: "Pin me now.",
+        pinned: false,
+        hidden: false,
+        created_at: "2026-04-11T10:10:00.000Z",
+      },
+      role: "agent",
+      desktop: {
+        lifecycleState: "visible",
+      },
+    },
+  ];
+
+  const { useShellBallCoordinator } = withShellBallModuleRuntime("useShellBallCoordinator.ts", {
+    react: {
+      ...require("react"),
+      useEffect(callback: () => void) {
+        callback();
+      },
+      useMemo<T>(factory: () => T) {
+        return factory();
+      },
+      useRef<T>(value: T) {
+        return { current: value };
+      },
+      useState<T>(value: T) {
+        const resolvedValue = typeof value === "function" ? (value as () => T)() : value;
+
+        if (
+          Array.isArray(resolvedValue) &&
+          resolvedValue.every((item) => item && typeof item === "object" && "bubble" in item) &&
+          bubbleItemsState.length === 0
+        ) {
+          bubbleItemsState = resolvedValue as ShellBallBubbleItem[];
+        }
+
+        return [bubbleItemsState as unknown as T || resolvedValue, (nextValue: T | ((currentValue: T) => T)) => {
+          bubbleItemsState = typeof nextValue === "function"
+            ? (nextValue as (currentValue: T) => T)(bubbleItemsState as unknown as T) as unknown as ShellBallBubbleItem[]
+            : nextValue as unknown as ShellBallBubbleItem[];
+        }] as const;
+      },
+    },
+    "@tauri-apps/api/window": {
+      getCurrentWindow() {
+        return {
+          label: shellBallWindowLabels.ball,
+          listen(eventName: string, callback: (event: { payload: unknown }) => void) {
+            listeners.set(eventName, callback);
+            return Promise.resolve(() => {});
+          },
+          onMoved(callback: () => void) {
+            movedListenerCount += 1;
+            return Promise.resolve(() => {
+              void callback;
+            });
+          },
+          onResized(callback: () => void) {
+            resizedListenerCount += 1;
+            return Promise.resolve(() => {
+              void callback;
+            });
+          },
+          outerPosition() {
+            return Promise.resolve({ toLogical: () => ({ x: 10, y: 20 }) });
+          },
+          outerSize() {
+            return Promise.resolve({ toLogical: () => ({ width: 124, height: 104 }) });
+          },
+          scaleFactor() {
+            return Promise.resolve(1);
+          },
+        };
+      },
+    },
+    "../../platform/shellBallWindowController": {
+      SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME: { width: 240, height: 140 },
+      closeShellBallPinnedBubbleWindow() {
+        return Promise.resolve();
+      },
+      emitToShellBallWindowLabel() {
+        return Promise.resolve();
+      },
+      getShellBallPinnedBubbleIdFromLabel() {
+        return null;
+      },
+      getShellBallPinnedBubbleWindowAnchor({ bubbleAnchor }: { bubbleAnchor: { x: number; y: number } }) {
+        return bubbleAnchor;
+      },
+      getShellBallPinnedBubbleWindowLabel(bubbleId: string) {
+        return `shell-ball-bubble-pinned-${bubbleId}`;
+      },
+      openShellBallPinnedBubbleWindow(input: {
+        bubbleId: string;
+        position: { x: number; y: number };
+        size: { width: number; height: number };
+      }) {
+        openCalls.push(input);
+        return Promise.resolve(`shell-ball-bubble-pinned-${input.bubbleId}`);
+      },
+      shellBallWindowLabels,
+    },
+    "./shellBall.bubble": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.bubble.js")),
+    "./shellBall.windowSync": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.windowSync.js")),
+    "./useShellBallWindowMetrics": {
+      getShellBallBubbleAnchor() {
+        return { x: 40, y: 50 };
+      },
+    },
+  }, (moduleExports) => moduleExports as { useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator });
+
+  useShellBallCoordinator({
+    visualState: "hover_input",
+    inputValue: "",
+    voicePreview: null,
+    setInputValue: () => {},
+    onRegionEnter: () => {},
+    onRegionLeave: () => {},
+    onInputFocusChange: () => {},
+    onSubmitText: () => {},
+    onAttachFile: () => {},
+    onPrimaryClick: () => {},
+  });
+
+  listeners.get(shellBallWindowSyncEvents.bubbleAction)?.({
+    payload: { source: "bubble", action: "pin", bubbleId: "msg-pin-1" },
+  });
+  await Promise.resolve();
+
+  assert.equal(movedListenerCount, 1);
+  assert.equal(resizedListenerCount, 1);
+  assert.deepEqual(openCalls, [
+    {
+      bubbleId: "msg-pin-1",
+      position: { x: 40, y: 50 },
+      size: { width: 240, height: 140 },
+    },
+  ]);
+  assert.equal(bubbleItemsState[0]?.bubble.pinned, true);
+});
+
 test("shell-ball bubble actions stay coordinator-owned and detached-position free", () => {
   const bubbleActionPayload = {
     source: "pinned_window",
