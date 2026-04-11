@@ -3,7 +3,7 @@ import { ArrowUpRight, ShieldCheck, Workflow } from "lucide-react";
 import { PanelSurface, StatusBadge } from "@cialloclaw/ui";
 import { MetricCard } from "@/components/MetricCard";
 import { mapTaskToDetailViewModel } from "@/models/TaskDetailViewModel";
-import { openDashboardRoute } from "@/platform/windowController";
+import { openDashboardRoute } from "@/features/dashboard/shared/dashboardRouteNavigation";
 import { useTaskStore } from "@/stores/taskStore";
 
 // DashboardApp 处理当前模块的相关逻辑。

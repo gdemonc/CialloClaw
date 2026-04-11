@@ -34,7 +34,7 @@ import {
   type SecurityModuleData,
   type SecurityModuleSource,
 } from "./securityService";
-import { openDashboardRoute } from "@/platform/windowController";
+import { openDashboardRoute } from "@/features/dashboard/shared/dashboardRouteNavigation";
 
 type SecurityCardKey = "status" | "restore" | "budget" | "governance" | `approval:${string}`;
 type CardPosition = { x: number; y: number };

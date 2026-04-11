@@ -42,6 +42,7 @@ import {
   resolveDashboardRouteHref,
   resolveDashboardRoutePath,
 } from "../dashboard/shared/dashboardRouteTargets";
+import { openDashboardRoute } from "../dashboard/shared/dashboardRouteNavigation";
 import {
   createShellBallWindowSnapshot,
   getShellBallHelperWindowVisibility,
@@ -264,41 +265,70 @@ test("shell-ball helper windows avoid auto-focus behavior", () => {
 test("shell-ball desktop navigation keeps route changes separate from desktop window focus", () => {
   const controllerSource = readFileSync(resolve(desktopRoot, "src/platform/windowController.ts"), "utf8");
   const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
+  const dashboardRouteNavigationSource = readFileSync(
+    resolve(desktopRoot, "src/features/dashboard/shared/dashboardRouteNavigation.ts"),
+    "utf8",
+  );
   const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
   const dashboardAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/DashboardApp.tsx"), "utf8");
   const trayControllerSource = readFileSync(resolve(desktopRoot, "src/platform/trayController.ts"), "utf8");
+  const originalWindow = globalThis.window;
+  const assignCalls: string[] = [];
 
-  assert.deepEqual(dashboardRoutePaths, {
-    home: "/",
-    safety: "/safety",
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: {
+        assign(href: string) {
+          assignCalls.push(href);
+        },
+      },
+    },
   });
-  assert.equal(resolveDashboardRoutePath("home"), "/");
-  assert.equal(resolveDashboardRoutePath("safety"), "/safety");
-  assert.equal(resolveDashboardRouteHref("home"), "./dashboard.html");
-  assert.equal(resolveDashboardRouteHref("safety"), "./dashboard.html#/safety");
 
-  assert.match(controllerSource, /export type DesktopWindowLabel = "dashboard" \| "control-panel"/);
-  assert.match(controllerSource, /type DashboardRouteTarget } from "@\/features\/dashboard\/shared\/dashboardRouteTargets"/);
-  assert.match(controllerSource, /export type \{ DashboardRouteTarget \}/);
-  assert.match(controllerSource, /export async function openOrFocusDesktopWindow\(label: DesktopWindowLabel\)/);
-  assert.match(controllerSource, /export function openDashboardRoute\(target: DashboardRouteTarget\)/);
-  assert.match(controllerSource, /resolveDashboardRouteHref\(target\)/);
-  assert.match(controllerSource, /Window\.getByLabel\(label\)/);
-  assert.match(controllerSource, /await windowHandle\.show\(\)/);
-  assert.match(controllerSource, /await windowHandle\.setFocus\(\)/);
-  assert.match(controllerSource, /if \(windowHandle === null\) \{\s+throw new Error\(`Desktop window not found: \$\{label\}`\);\s+\}/);
-  assert.doesNotMatch(controllerSource, /new Window\(/);
-  assert.match(controllerSource, /window\.location\.assign\(resolveDashboardRouteHref\(target\)\)/);
-  assert.doesNotMatch(controllerSource, /security\.html/);
-  assert.match(dashboardRootSource, /resolveDashboardRoutePath\("home"\)/);
-  assert.match(dashboardRootSource, /resolveDashboardRoutePath\("safety"\)/);
-  assert.match(securityAppSource, /openDashboardRoute\("home"\)/);
-  assert.doesNotMatch(securityAppSource, /openOrFocusDesktopWindow\("dashboard"\)/);
-  assert.match(dashboardAppSource, /openDashboardRoute\("safety"\)/);
-  assert.doesNotMatch(dashboardAppSource, /openDashboardRoute\("dashboard"\)/);
-  assert.doesNotMatch(dashboardAppSource, /openOrFocusDesktopWindow\("safety"\)/);
-  assert.match(trayControllerSource, /openOrFocusDesktopWindow\("control-panel"\)/);
-  assert.doesNotMatch(trayControllerSource, /openWindowLabel\("control-panel"\)/);
+  try {
+    assert.deepEqual(dashboardRoutePaths, {
+      home: "/",
+      safety: "/safety",
+    });
+    assert.equal(resolveDashboardRoutePath("home"), "/");
+    assert.equal(resolveDashboardRoutePath("safety"), "/safety");
+    assert.equal(resolveDashboardRouteHref("home"), "./dashboard.html");
+    assert.equal(resolveDashboardRouteHref("safety"), "./dashboard.html#/safety");
+    assert.equal(openDashboardRoute("home"), "home");
+    assert.equal(openDashboardRoute("safety"), "safety");
+    assert.deepEqual(assignCalls, ["./dashboard.html", "./dashboard.html#/safety"]);
+
+    assert.match(controllerSource, /export type DesktopWindowLabel = "dashboard" \| "control-panel"/);
+    assert.match(controllerSource, /export async function openOrFocusDesktopWindow\(label: DesktopWindowLabel\)/);
+    assert.match(controllerSource, /Window\.getByLabel\(label\)/);
+    assert.match(controllerSource, /await windowHandle\.show\(\)/);
+    assert.match(controllerSource, /await windowHandle\.setFocus\(\)/);
+    assert.match(controllerSource, /if \(windowHandle === null\) \{\s+throw new Error\(`Desktop window not found: \$\{label\}`\);\s+\}/);
+    assert.doesNotMatch(controllerSource, /new Window\(/);
+    assert.doesNotMatch(controllerSource, /openDashboardRoute/);
+    assert.doesNotMatch(controllerSource, /resolveDashboardRouteHref/);
+    assert.match(dashboardRouteNavigationSource, /export function openDashboardRoute\(target: DashboardRouteTarget\)/);
+    assert.match(dashboardRouteNavigationSource, /window\.location\.assign\(resolveDashboardRouteHref\(target\)\)/);
+    assert.match(dashboardRootSource, /resolveDashboardRoutePath\("home"\)/);
+    assert.match(dashboardRootSource, /resolveDashboardRoutePath\("safety"\)/);
+    assert.match(securityAppSource, /openDashboardRoute\("home"\)/);
+    assert.doesNotMatch(securityAppSource, /openOrFocusDesktopWindow\("dashboard"\)/);
+    assert.match(dashboardAppSource, /openDashboardRoute\("safety"\)/);
+    assert.doesNotMatch(dashboardAppSource, /openDashboardRoute\("dashboard"\)/);
+    assert.doesNotMatch(dashboardAppSource, /openOrFocusDesktopWindow\("safety"\)/);
+    assert.match(trayControllerSource, /openOrFocusDesktopWindow\("control-panel"\)/);
+    assert.doesNotMatch(trayControllerSource, /openWindowLabel\("control-panel"\)/);
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+  }
 });
 
 test("shell-ball input bar keeps hook order stable across hidden and visible states", () => {
