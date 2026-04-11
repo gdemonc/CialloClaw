@@ -1,12 +1,8 @@
 import { Window } from "@tauri-apps/api/window";
+import { resolveDashboardRouteHref, type DashboardRouteTarget } from "@/features/dashboard/shared/dashboardRouteTargets";
 
 export type DesktopWindowLabel = "dashboard" | "control-panel";
-export type WindowRouteLabel = "dashboard" | "safety";
-
-const windowRouteTargets: Record<WindowRouteLabel, string> = {
-  dashboard: "./dashboard.html",
-  safety: "./dashboard.html#/safety",
-};
+export type { DashboardRouteTarget };
 
 // 该文件封装桌面窗口控制能力。
 export async function openOrFocusDesktopWindow(label: DesktopWindowLabel) {
@@ -22,11 +18,11 @@ export async function openOrFocusDesktopWindow(label: DesktopWindowLabel) {
   return label;
 }
 
-// openWindowRoute 处理当前模块的相关逻辑。
-export function openWindowRoute(label: WindowRouteLabel) {
+// openDashboardRoute 处理当前模块的相关逻辑。
+export function openDashboardRoute(target: DashboardRouteTarget) {
   if (typeof window !== "undefined") {
-    window.location.assign(windowRouteTargets[label]);
+    window.location.assign(resolveDashboardRouteHref(target));
   }
 
-  return label;
+  return target;
 }

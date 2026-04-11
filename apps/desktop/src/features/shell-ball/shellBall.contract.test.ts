@@ -38,6 +38,11 @@ import { ShellBallInputBar } from "./components/ShellBallInputBar";
 import type { ShellBallTransitionResult } from "./shellBall.types";
 import { shellBallVisualStates } from "./shellBall.types";
 import {
+  dashboardRoutePaths,
+  resolveDashboardRouteHref,
+  resolveDashboardRoutePath,
+} from "../dashboard/shared/dashboardRouteTargets";
+import {
   createShellBallWindowSnapshot,
   getShellBallHelperWindowVisibility,
   shellBallWindowSyncEvents,
@@ -258,29 +263,39 @@ test("shell-ball helper windows avoid auto-focus behavior", () => {
 
 test("shell-ball desktop navigation keeps route changes separate from desktop window focus", () => {
   const controllerSource = readFileSync(resolve(desktopRoot, "src/platform/windowController.ts"), "utf8");
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
   const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
   const dashboardAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/DashboardApp.tsx"), "utf8");
   const trayControllerSource = readFileSync(resolve(desktopRoot, "src/platform/trayController.ts"), "utf8");
 
+  assert.deepEqual(dashboardRoutePaths, {
+    home: "/",
+    safety: "/safety",
+  });
+  assert.equal(resolveDashboardRoutePath("home"), "/");
+  assert.equal(resolveDashboardRoutePath("safety"), "/safety");
+  assert.equal(resolveDashboardRouteHref("home"), "./dashboard.html");
+  assert.equal(resolveDashboardRouteHref("safety"), "./dashboard.html#/safety");
+
   assert.match(controllerSource, /export type DesktopWindowLabel = "dashboard" \| "control-panel"/);
-  assert.match(controllerSource, /export type WindowRouteLabel = "dashboard" \| "safety"/);
+  assert.match(controllerSource, /type DashboardRouteTarget } from "@\/features\/dashboard\/shared\/dashboardRouteTargets"/);
+  assert.match(controllerSource, /export type \{ DashboardRouteTarget \}/);
   assert.match(controllerSource, /export async function openOrFocusDesktopWindow\(label: DesktopWindowLabel\)/);
-  assert.match(controllerSource, /export function openWindowRoute\(label: WindowRouteLabel\)/);
-  assert.match(controllerSource, /const windowRouteTargets: Record<WindowRouteLabel, string> = \{/);
-  assert.match(controllerSource, /dashboard: "\.\/dashboard\.html"/);
-  assert.match(controllerSource, /safety: "\.\/dashboard\.html#\/safety"/);
+  assert.match(controllerSource, /export function openDashboardRoute\(target: DashboardRouteTarget\)/);
+  assert.match(controllerSource, /resolveDashboardRouteHref\(target\)/);
   assert.match(controllerSource, /Window\.getByLabel\(label\)/);
   assert.match(controllerSource, /await windowHandle\.show\(\)/);
   assert.match(controllerSource, /await windowHandle\.setFocus\(\)/);
   assert.match(controllerSource, /if \(windowHandle === null\) \{\s+throw new Error\(`Desktop window not found: \$\{label\}`\);\s+\}/);
   assert.doesNotMatch(controllerSource, /new Window\(/);
-  assert.doesNotMatch(controllerSource, /export function openWindow\(/);
-  assert.match(controllerSource, /window\.location\.assign\(windowRouteTargets\[label\]\)/);
+  assert.match(controllerSource, /window\.location\.assign\(resolveDashboardRouteHref\(target\)\)/);
   assert.doesNotMatch(controllerSource, /security\.html/);
-  assert.match(securityAppSource, /openWindowRoute\("dashboard"\)/);
+  assert.match(dashboardRootSource, /resolveDashboardRoutePath\("home"\)/);
+  assert.match(dashboardRootSource, /resolveDashboardRoutePath\("safety"\)/);
+  assert.match(securityAppSource, /openDashboardRoute\("home"\)/);
   assert.doesNotMatch(securityAppSource, /openOrFocusDesktopWindow\("dashboard"\)/);
-  assert.match(dashboardAppSource, /openWindowRoute\("safety"\)/);
-  assert.doesNotMatch(dashboardAppSource, /openWindowRoute\("security"\)/);
+  assert.match(dashboardAppSource, /openDashboardRoute\("safety"\)/);
+  assert.doesNotMatch(dashboardAppSource, /openDashboardRoute\("dashboard"\)/);
   assert.doesNotMatch(dashboardAppSource, /openOrFocusDesktopWindow\("safety"\)/);
   assert.match(trayControllerSource, /openOrFocusDesktopWindow\("control-panel"\)/);
   assert.doesNotMatch(trayControllerSource, /openWindowLabel\("control-panel"\)/);

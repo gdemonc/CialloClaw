@@ -34,7 +34,7 @@ import {
   type SecurityModuleData,
   type SecurityModuleSource,
 } from "./securityService";
-import { openWindowRoute } from "@/platform/windowController";
+import { openDashboardRoute } from "@/platform/windowController";
 
 type SecurityCardKey = "status" | "restore" | "budget" | "governance" | `approval:${string}`;
 type CardPosition = { x: number; y: number };
@@ -772,7 +772,7 @@ export function SecurityApp() {
       {feedback ? <div className="security-page__detail-callout">{feedback}</div> : null}
 
       <Flex align="center" gap="3" wrap="wrap">
-        <Button variant="soft" color="gray" onClick={() => void openWindowRoute("dashboard")}>
+        <Button variant="soft" color="gray" onClick={() => openDashboardRoute("home")}>
           返回 Dashboard
           <ArrowUpRight className="h-4 w-4" />
         </Button>

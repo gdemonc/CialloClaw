@@ -3,7 +3,7 @@ import { ArrowUpRight, ShieldCheck, Workflow } from "lucide-react";
 import { PanelSurface, StatusBadge } from "@cialloclaw/ui";
 import { MetricCard } from "@/components/MetricCard";
 import { mapTaskToDetailViewModel } from "@/models/TaskDetailViewModel";
-import { openWindowRoute } from "@/platform/windowController";
+import { openDashboardRoute } from "@/platform/windowController";
 import { useTaskStore } from "@/stores/taskStore";
 
 // DashboardApp 处理当前模块的相关逻辑。
@@ -56,7 +56,7 @@ export function DashboardApp() {
                 <button
                   type="button"
                   onClick={() => {
-                    openWindowRoute("safety");
+                    openDashboardRoute("safety");
                   }}
                   className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
                 >
