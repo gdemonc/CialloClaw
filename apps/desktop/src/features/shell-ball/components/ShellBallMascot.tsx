@@ -11,6 +11,7 @@ type ShellBallMascotProps = {
   motionConfig: ShellBallMotionConfig;
   onPrimaryClick?: () => void;
   onDoubleClick?: () => void;
+  onHotspotDragStart?: () => void;
   onPressStart?: (event: PointerEvent<HTMLButtonElement>) => void;
   onPressMove?: (event: PointerEvent<HTMLButtonElement>) => void;
   onPressEnd?: (event: PointerEvent<HTMLButtonElement>) => boolean;
@@ -26,6 +27,8 @@ type ShellBallMascotHotspotGestureAction = "noop" | "primary_click" | "double_cl
 type ShellBallMascotPointerPhase = "pointer_down" | "pointer_up" | "pointer_cancel";
 
 type ShellBallMascotPointerPhaseAction = "noop" | "start_press" | "finish_press" | "suppress_gestures" | "cleanup_only";
+
+const SHELL_BALL_MASCOT_DRAG_THRESHOLD_PX = 10;
 
 export function getShellBallMascotHotspotGestureAction(input: {
   visualState: ShellBallVisualState;
@@ -70,17 +73,40 @@ export function getShellBallMascotPointerPhaseAction(input: {
   return input.pressHandled ? "suppress_gestures" : "finish_press";
 }
 
+export function shouldStartShellBallMascotWindowDrag(input: {
+  visualState: ShellBallVisualState;
+  startX: number | null;
+  startY: number | null;
+  clientX: number;
+  clientY: number;
+}) {
+  if (input.visualState === "voice_listening" || input.visualState === "voice_locked") {
+    return false;
+  }
+
+  if (input.startX === null || input.startY === null) {
+    return false;
+  }
+
+  return Math.hypot(input.clientX - input.startX, input.clientY - input.startY) >= SHELL_BALL_MASCOT_DRAG_THRESHOLD_PX;
+}
+
 export function ShellBallMascot({
   visualState,
   voicePreview = null,
   motionConfig,
   onPrimaryClick = () => {},
   onDoubleClick = () => {},
+  onHotspotDragStart = () => {},
   onPressStart = () => {},
   onPressMove = () => {},
   onPressEnd = () => false,
   onPressCancel = () => {},
 }: ShellBallMascotProps) {
+  const activeSequenceRef = useRef(false);
+  const draggingSequenceRef = useRef(false);
+  const pointerStartXRef = useRef<number | null>(null);
+  const pointerStartYRef = useRef<number | null>(null);
   const suppressGestureRef = useRef(false);
 
   const floatStyle: MotionStyle = {
@@ -110,6 +136,13 @@ export function ShellBallMascot({
     transform: `translateY(${-motionConfig.crestLiftPx}px)`,
   };
 
+  function resetPointerSequence() {
+    activeSequenceRef.current = false;
+    draggingSequenceRef.current = false;
+    pointerStartXRef.current = null;
+    pointerStartYRef.current = null;
+  }
+
   function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
     if (
       getShellBallMascotPointerPhaseAction({
@@ -123,17 +156,48 @@ export function ShellBallMascot({
     }
 
     suppressGestureRef.current = false;
+    activeSequenceRef.current = true;
+    draggingSequenceRef.current = false;
+    pointerStartXRef.current = event.clientX;
+    pointerStartYRef.current = event.clientY;
     event.currentTarget.setPointerCapture(event.pointerId);
     onPressStart(event);
   }
 
   function handlePointerMove(event: PointerEvent<HTMLButtonElement>) {
+    if (
+      activeSequenceRef.current &&
+      !draggingSequenceRef.current &&
+      shouldStartShellBallMascotWindowDrag({
+        visualState,
+        startX: pointerStartXRef.current,
+        startY: pointerStartYRef.current,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      })
+    ) {
+      draggingSequenceRef.current = true;
+      suppressGestureRef.current = true;
+      activeSequenceRef.current = false;
+      onPressCancel(event);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      onHotspotDragStart();
+      return;
+    }
+
     onPressMove(event);
   }
 
   function handlePointerEnd(event: PointerEvent<HTMLButtonElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (draggingSequenceRef.current) {
+      resetPointerSequence();
+      return;
     }
 
     const pointerAction = getShellBallMascotPointerPhaseAction({
@@ -148,6 +212,7 @@ export function ShellBallMascot({
     }
 
     const handled = onPressEnd(event);
+    resetPointerSequence();
     const action = getShellBallMascotPointerPhaseAction({
       phase: "pointer_up",
       button: event.button,
@@ -179,7 +244,11 @@ export function ShellBallMascot({
     }
 
     suppressGestureRef.current = false;
-    onPressCancel(event);
+    const shouldNotifyCancel = activeSequenceRef.current;
+    resetPointerSequence();
+    if (shouldNotifyCancel) {
+      onPressCancel(event);
+    }
   }
 
   function handleClick(event: MouseEvent<HTMLButtonElement>) {

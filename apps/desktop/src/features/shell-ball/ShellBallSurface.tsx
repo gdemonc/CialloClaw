@@ -41,20 +41,6 @@ export function ShellBallSurface({
       <div className="shell-ball-surface__core">
         <div className="shell-ball-surface__interaction-shell">
           <div
-            className="shell-ball-surface__host-drag-zone"
-            data-shell-ball-zone="host-drag"
-            data-shell-ball-drag-handle="true"
-            aria-hidden="true"
-            onPointerDown={(event) => {
-              if (event.button !== 0) {
-                return;
-              }
-
-              event.preventDefault();
-              onDragStart();
-            }}
-          />
-          <div
             className="shell-ball-surface__interaction-zone"
             data-shell-ball-zone="interaction"
             onPointerEnter={onRegionEnter}
@@ -68,6 +54,7 @@ export function ShellBallSurface({
                   motionConfig={motionConfig}
                   onPrimaryClick={onPrimaryClick}
                   onDoubleClick={onDoubleClick}
+                  onHotspotDragStart={onDragStart}
                   onPressStart={onPressStart}
                   onPressMove={onPressMove}
                   onPressEnd={onPressEnd}

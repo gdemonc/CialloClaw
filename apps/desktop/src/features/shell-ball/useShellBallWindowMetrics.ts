@@ -21,6 +21,15 @@ type ShellBallContentSize = {
   height: number;
 };
 
+type ShellBallMeasurableElement = {
+  getBoundingClientRect: () => {
+    width: number;
+    height: number;
+  };
+  scrollWidth: number;
+  scrollHeight: number;
+};
+
 type ShellBallWindowSize = {
   width: number;
   height: number;
@@ -50,6 +59,15 @@ export function createShellBallWindowFrame(
   return {
     width: Math.ceil(contentSize.width + safeMargin * 2),
     height: Math.ceil(contentSize.height + safeMargin * 2),
+  };
+}
+
+export function measureShellBallContentSize(element: ShellBallMeasurableElement): ShellBallContentSize {
+  const rect = element.getBoundingClientRect();
+
+  return {
+    width: Math.max(rect.width, element.scrollWidth),
+    height: Math.max(rect.height, element.scrollHeight),
   };
 }
 
@@ -131,12 +149,9 @@ export function useShellBallWindowMetrics({ role, visible = true }: UseShellBall
         return;
       }
 
-      const rect = nextElement.getBoundingClientRect();
+      const contentSize = measureShellBallContentSize(nextElement);
       setWindowFrame(
-        createShellBallWindowFrame({
-          width: rect.width,
-          height: rect.height,
-        }),
+        createShellBallWindowFrame(contentSize),
       );
     }
 

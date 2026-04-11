@@ -34,6 +34,7 @@ import { ShellBallInputWindow } from "./ShellBallInputWindow";
 import { ShellBallMascot } from "./components/ShellBallMascot";
 import { getShellBallMascotHotspotGestureAction } from "./components/ShellBallMascot";
 import { getShellBallMascotPointerPhaseAction } from "./components/ShellBallMascot";
+import { shouldStartShellBallMascotWindowDrag } from "./components/ShellBallMascot";
 import { ShellBallSurface } from "./ShellBallSurface";
 import { shouldShowShellBallDemoSwitcher } from "./shellBall.dev";
 import { shellBallWindowLabels, shellBallWindowPermissions } from "../../platform/shellBallWindowController";
@@ -59,6 +60,7 @@ import {
   createShellBallWindowFrame,
   getShellBallBubbleAnchor,
   getShellBallInputAnchor,
+  measureShellBallContentSize,
 } from "./useShellBallWindowMetrics";
 import {
   getShellBallPostSubmitInputReset,
@@ -693,6 +695,18 @@ test("shell-ball entries opt into transparent window mode", () => {
   assert.match(inputEntry, /data-app-window/);
   assert.match(globalStyles, /\[data-app-window="shell-ball"\]/);
   assert.match(globalStyles, /overflow: hidden/);
+});
+
+test("shell-ball surface styles keep the shell transparent and fully draggable", () => {
+  const shellBallStyles = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.css"), "utf8");
+  const shellBallSurfaceBeforeBlock = shellBallStyles.match(/\.shell-ball-surface::before\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const mascotBlock = shellBallStyles.match(/\.shell-ball-mascot\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const mascotHotspotBlock = shellBallStyles.match(/\.shell-ball-mascot__hotspot\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+
+  assert.doesNotMatch(shellBallSurfaceBeforeBlock, /background:/);
+  assert.doesNotMatch(shellBallStyles, /overflow-x:\s*hidden/);
+  assert.match(mascotBlock, /width:\s*clamp\(/);
+  assert.match(mascotHotspotBlock, /inset:\s*0;/);
 });
 
 test("shell-ball helper windows avoid auto-focus behavior", () => {
@@ -1697,6 +1711,20 @@ test("shell-ball dashboard gesture policy stays task-2 explicit", () => {
   );
 });
 
+test("shell-ball window measurement expands to overflowing mascot visuals", () => {
+  assert.deepEqual(
+    measureShellBallContentSize({
+      getBoundingClientRect: () => ({ width: 100, height: 80 }),
+      scrollWidth: 148,
+      scrollHeight: 126,
+    }),
+    {
+      width: 148,
+      height: 126,
+    },
+  );
+});
+
 test("shell-ball interaction consumed reducer keeps pointer sequence scope explicit", () => {
   const afterPressStart = mapShellBallInteractionConsumedEventToFlag("press_start");
   assert.equal(afterPressStart, false);
@@ -1843,7 +1871,7 @@ test("shell-ball surface renders the mascot-only floating structure without the 
   assert.doesNotMatch(markup, /shell-ball-surface__switcher-shell/);
 });
 
-test("shell-ball surface reserves a host drag zone separate from the interaction zone", () => {
+test("shell-ball surface keeps drag and click on the mascot hotspot only", () => {
   const markup = renderToStaticMarkup(
     createElement(ShellBallSurface, {
       visualState: "hover_input",
@@ -1861,11 +1889,9 @@ test("shell-ball surface reserves a host drag zone separate from the interaction
     }),
   );
 
-  assert.match(markup, /data-shell-ball-zone="host-drag"/);
-  assert.match(markup, /data-shell-ball-drag-handle="true"/);
   assert.match(markup, /data-shell-ball-zone="interaction"/);
   assert.match(markup, /data-shell-ball-zone="voice-hotspot"/);
-  assert.match(markup, /shell-ball-surface__host-drag-zone/);
+  assert.doesNotMatch(markup, /shell-ball-surface__host-drag-zone/);
   assert.match(markup, /shell-ball-surface__interaction-zone/);
 });
 
@@ -1993,6 +2019,69 @@ test("shell-ball mascot pointer policy keeps cancellation separate from successf
   );
 });
 
+test("shell-ball mascot drag policy lets the full hotspot start window dragging after movement", () => {
+  assert.equal(
+    shouldStartShellBallMascotWindowDrag({
+      visualState: "hover_input",
+      startX: 100,
+      startY: 100,
+      clientX: 104,
+      clientY: 103,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldStartShellBallMascotWindowDrag({
+      visualState: "idle",
+      startX: 100,
+      startY: 100,
+      clientX: 118,
+      clientY: 114,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldStartShellBallMascotWindowDrag({
+      visualState: "voice_listening",
+      startX: 100,
+      startY: 100,
+      clientX: 118,
+      clientY: 114,
+    }),
+    false,
+  );
+});
+
+test("shell-ball voice swipe contract keeps upward lock and downward cancel explicit", () => {
+  assert.equal(
+    resolveShellBallVoiceReleaseEvent(
+      getShellBallVoicePreviewFromEvent({
+        startX: 100,
+        startY: 100,
+        clientX: 100,
+        clientY: 100 - SHELL_BALL_LOCK_DELTA_PX,
+        fallbackPreview: null,
+      }),
+    ),
+    "voice_lock",
+  );
+
+  assert.equal(
+    resolveShellBallVoiceReleaseEvent(
+      getShellBallVoicePreviewFromEvent({
+        startX: 100,
+        startY: 100,
+        clientX: 100,
+        clientY: 100 + SHELL_BALL_CANCEL_DELTA_PX,
+        fallbackPreview: null,
+      }),
+    ),
+    "voice_cancel",
+  );
+});
+
 test("shell-ball press cancel policy clears pending press state and cancels active listening", () => {
   assert.equal(getShellBallPressCancelEvent("voice_listening"), "voice_cancel");
   assert.equal(getShellBallPressCancelEvent("hover_input"), null);
@@ -2018,12 +2107,13 @@ test("shell-ball cancel callback path is wired from mascot through app interacti
   assert.match(interactionSource, /dispatch\(cancelEvent\);/);
 });
 
-test("shell-ball surface passes mascot double-click wiring without collapsing the drag zone", () => {
+test("shell-ball surface passes mascot double-click and drag wiring through the mascot only", () => {
   const surfaceSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallSurface.tsx"), "utf8");
 
   assert.match(surfaceSource, /onDoubleClick: \(\) => void;/);
   assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onDoubleClick=\{onDoubleClick\}/);
-  assert.match(surfaceSource, /data-shell-ball-zone="host-drag"/);
+  assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onHotspotDragStart=\{onDragStart\}/);
+  assert.doesNotMatch(surfaceSource, /data-shell-ball-zone="host-drag"/);
   assert.match(surfaceSource, /data-shell-ball-zone="interaction"/);
 });
 
