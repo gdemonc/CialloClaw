@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
 import { getShellBallDemoViewModel } from "./shellBall.demo";
 import {
   createShellBallInteractionController,
@@ -31,12 +32,22 @@ import { ShellBallBubbleWindow } from "./ShellBallBubbleWindow";
 import { ShellBallDevLayer } from "./ShellBallDevLayer";
 import { ShellBallInputWindow } from "./ShellBallInputWindow";
 import { ShellBallMascot } from "./components/ShellBallMascot";
+import { getShellBallMascotHotspotGestureAction } from "./components/ShellBallMascot";
+import { getShellBallMascotPointerPhaseAction } from "./components/ShellBallMascot";
+import { shouldStartShellBallMascotWindowDrag } from "./components/ShellBallMascot";
 import { ShellBallSurface } from "./ShellBallSurface";
 import { shouldShowShellBallDemoSwitcher } from "./shellBall.dev";
 import { shellBallWindowLabels, shellBallWindowPermissions } from "../../platform/shellBallWindowController";
 import { ShellBallInputBar } from "./components/ShellBallInputBar";
 import type { ShellBallTransitionResult } from "./shellBall.types";
 import { shellBallVisualStates } from "./shellBall.types";
+import {
+  dashboardSafetyRoutePath,
+  resolveDashboardModuleRoutePath,
+  dashboardRoutePaths,
+  resolveDashboardRouteHref,
+  resolveDashboardRoutePath,
+} from "../dashboard/shared/dashboardRouteTargets";
 import {
   createShellBallWindowSnapshot,
   getShellBallHelperWindowVisibility,
@@ -49,10 +60,14 @@ import {
   createShellBallWindowFrame,
   getShellBallBubbleAnchor,
   getShellBallInputAnchor,
+  measureShellBallContentSize,
 } from "./useShellBallWindowMetrics";
 import {
   getShellBallPostSubmitInputReset,
+  getShellBallDashboardOpenGesturePolicy,
+  getShellBallPressCancelEvent,
   getShellBallVoicePreviewFromEvent,
+  mapShellBallInteractionConsumedEventToFlag,
   shouldKeepShellBallVoicePreviewOnRegionLeave,
   syncShellBallInteractionController,
   useShellBallInteraction,
@@ -60,6 +75,427 @@ import {
 import { useShellBallStore } from "../../stores/shellBallStore";
 
 const desktopRoot = process.cwd();
+
+function withDashboardRouteRuntime<T>(callback: (components: { DashboardRoot: unknown }) => T) {
+  const NodeModule = require("node:module") as any;
+  const createRequire = NodeModule.createRequire as (filename: string) => NodeRequire;
+  const originalResolveFilename = NodeModule._resolveFilename;
+  const originalLoad = NodeModule._load as undefined | ((request: string, parent: unknown, isMain: boolean) => unknown);
+  const originalCssLoader = require.extensions[".css"];
+  const originalPngLoader = require.extensions[".png"];
+
+  require.extensions[".css"] = (module) => {
+    module.exports = "";
+  };
+
+  require.extensions[".png"] = (module, filename) => {
+    module.exports = filename;
+  };
+
+  NodeModule._resolveFilename = function resolveDashboardAlias(
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+    options?: unknown,
+  ) {
+    if (request.startsWith("@/")) {
+      const modulePath = request.slice(2);
+
+      if (modulePath.endsWith(".css") || modulePath.endsWith(".png")) {
+        return resolve(desktopRoot, "src", modulePath);
+      }
+
+      const emittedBasePath = resolve(desktopRoot, ".cache/shell-ball-tests", modulePath);
+      const emittedCandidates = [`${emittedBasePath}.js`, resolve(emittedBasePath, "index.js")];
+
+      for (const candidate of emittedCandidates) {
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    return originalResolveFilename.call(this, request, parent, isMain, options);
+  };
+
+  NodeModule._load = function loadDashboardRuntime(request: string, parent: unknown, isMain: boolean) {
+    if (request === "./DashboardHome") {
+      return require(resolve(desktopRoot, ".cache/shell-ball-tests/app/dashboard/DashboardHome.js"));
+    }
+
+    if (request === "./SecurityPageShell" || request.endsWith("/SecurityPageShell")) {
+      return {
+        SecurityPageShell() {
+          return createElement("div", null, "security-shell-stub");
+        },
+      };
+    }
+
+    if (
+      request === "@/features/dashboard/tasks/TasksPage" ||
+      request === "@/features/dashboard/notes/NotesPage" ||
+      request === "@/features/dashboard/memory/MemoryPage"
+    ) {
+      return {
+        TasksPage() {
+          return createElement("div", null, "tasks-page-stub");
+        },
+        NotesPage() {
+          return createElement("div", null, "notes-page-stub");
+        },
+        MemoryPage() {
+          return createElement("div", null, "memory-page-stub");
+        },
+      };
+    }
+
+    return originalLoad?.(request, parent, isMain);
+  } as typeof NodeModule._load;
+
+  try {
+    const dashboardRootPath = resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx");
+    const dashboardRootModule = { exports: {} as Record<string, unknown> };
+    const transpiledDashboardRoot = ts.transpileModule(readFileSync(dashboardRootPath, "utf8"), {
+      compilerOptions: {
+        jsx: ts.JsxEmit.ReactJSX,
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2020,
+        esModuleInterop: true,
+      },
+      fileName: dashboardRootPath,
+    });
+    const moduleFactory = new Function("require", "module", "exports", transpiledDashboardRoot.outputText) as (
+      require: NodeRequire,
+      module: { exports: Record<string, unknown> },
+      exports: Record<string, unknown>,
+    ) => void;
+    moduleFactory(createRequire(dashboardRootPath), dashboardRootModule, dashboardRootModule.exports);
+    const { DashboardRoot } = dashboardRootModule.exports as { DashboardRoot: unknown };
+
+    return callback({ DashboardRoot });
+  } finally {
+    NodeModule._resolveFilename = originalResolveFilename;
+    if (originalLoad === undefined) {
+      Reflect.deleteProperty(NodeModule, "_load");
+    } else {
+      NodeModule._load = originalLoad as typeof NodeModule._load;
+    }
+
+    if (originalCssLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".css");
+    } else {
+      require.extensions[".css"] = originalCssLoader;
+    }
+
+    if (originalPngLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".png");
+    } else {
+      require.extensions[".png"] = originalPngLoader;
+    }
+  }
+}
+
+function withWindowControllerRuntime<T>(runtime: {
+  getByLabel: (label: string) => Promise<unknown> | unknown;
+  createWindow?: (label: string, options: Record<string, unknown>) => unknown;
+}, callback: (mod: {
+  openOrFocusDesktopWindow: (label: "dashboard" | "control-panel") => Promise<string>;
+}) => Promise<T> | T) {
+  const NodeModule = require("node:module") as any;
+  const originalLoad = NodeModule._load;
+  const modulePath = resolve(desktopRoot, ".cache/shell-ball-tests/platform/windowController.js");
+
+  delete require.cache[modulePath];
+
+  NodeModule._load = function loadWindowController(request: string, parent: unknown, isMain: boolean) {
+    if (request === "@tauri-apps/api/window") {
+      function FakeWindow(this: unknown, label: string, options: Record<string, unknown>) {
+        return runtime.createWindow?.(label, options);
+      }
+
+      FakeWindow.getByLabel = runtime.getByLabel;
+
+      return {
+        Window: FakeWindow,
+      };
+    }
+
+    return originalLoad(request, parent, isMain);
+  };
+
+  const loaded = require(modulePath) as {
+    openOrFocusDesktopWindow: (label: "dashboard" | "control-panel") => Promise<string>;
+  };
+
+  const finalize = () => {
+    NodeModule._load = originalLoad;
+    delete require.cache[modulePath];
+  };
+
+  try {
+    return Promise.resolve(callback(loaded)).finally(finalize);
+  } catch (error) {
+    finalize();
+    throw error;
+  }
+}
+
+function withHideOnCloseRequestRuntime<T>(
+  currentWindow: {
+    hide: () => Promise<void> | void;
+    onCloseRequested: (handler: (event: { preventDefault: () => void }) => Promise<void> | void) => unknown;
+  },
+  callback: (mod: {
+    installHideOnCloseRequest: () => unknown;
+  }) => Promise<T> | T,
+) {
+  const NodeModule = require("node:module") as any;
+  const originalLoad = NodeModule._load;
+  const modulePath = resolve(desktopRoot, "src/platform/hideOnCloseRequest.ts");
+  const source = readFileSync(modulePath, "utf8");
+
+  NodeModule._load = function loadHideOnCloseRequest(request: string, parent: unknown, isMain: boolean) {
+    if (request === "@tauri-apps/api/window") {
+      return {
+        getCurrentWindow() {
+          return currentWindow;
+        },
+      };
+    }
+
+    return originalLoad(request, parent, isMain);
+  };
+
+  const transpiledModule = { exports: {} as Record<string, unknown> };
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+    },
+    fileName: modulePath,
+  });
+  const moduleFactory = new Function("require", "module", "exports", transpiled.outputText) as (
+    require: NodeRequire,
+    module: { exports: Record<string, unknown> },
+    exports: Record<string, unknown>,
+  ) => void;
+
+  moduleFactory(require, transpiledModule, transpiledModule.exports);
+
+  const finalize = () => {
+    NodeModule._load = originalLoad;
+  };
+
+  try {
+    return Promise.resolve(callback(transpiledModule.exports as { installHideOnCloseRequest: () => unknown })).finally(finalize);
+  } catch (error) {
+    finalize();
+    throw error;
+  }
+}
+
+function withDesktopAliasRuntime<T>(callback: () => T) {
+  const NodeModule = require("node:module") as any;
+  const originalResolveFilename = NodeModule._resolveFilename;
+  const originalCssLoader = require.extensions[".css"];
+  const originalPngLoader = require.extensions[".png"];
+
+  require.extensions[".css"] = (module) => {
+    module.exports = "";
+  };
+
+  require.extensions[".png"] = (module, filename) => {
+    module.exports = filename;
+  };
+
+  NodeModule._resolveFilename = function resolveDesktopAlias(
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+    options?: unknown,
+  ) {
+    if (request.startsWith("@/")) {
+      const modulePath = request.slice(2);
+
+      if (modulePath.endsWith(".css") || modulePath.endsWith(".png")) {
+        return resolve(desktopRoot, "src", modulePath);
+      }
+
+      const emittedBasePath = resolve(desktopRoot, ".cache/shell-ball-tests", modulePath);
+      const emittedCandidates = [`${emittedBasePath}.js`, resolve(emittedBasePath, "index.js")];
+
+      for (const candidate of emittedCandidates) {
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    if (request === "@cialloclaw/ui") {
+      return resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/test-stubs/ui.js");
+    }
+
+    if (request === "@cialloclaw/protocol") {
+      return resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/test-stubs/protocol.js");
+    }
+
+    return originalResolveFilename.call(this, request, parent, isMain, options);
+  };
+
+  try {
+    return callback();
+  } finally {
+    NodeModule._resolveFilename = originalResolveFilename;
+
+    if (originalCssLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".css");
+    } else {
+      require.extensions[".css"] = originalCssLoader;
+    }
+
+    if (originalPngLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".png");
+    } else {
+      require.extensions[".png"] = originalPngLoader;
+    }
+  }
+}
+
+function withTrayControllerRuntime<T>(
+  openOrFocusDesktopWindow: (label: "dashboard" | "control-panel") => Promise<string>,
+  callback: (mod: { openControlPanelFromTray: () => Promise<string>; calls: Array<"dashboard" | "control-panel"> }) => Promise<T> | T,
+) {
+  const NodeModule = require("node:module") as any;
+  const originalLoad = NodeModule._load;
+  const modulePath = resolve(desktopRoot, ".cache/shell-ball-tests/platform/trayController.js");
+  const calls: Array<"dashboard" | "control-panel"> = [];
+
+  delete require.cache[modulePath];
+
+  NodeModule._load = function loadTrayController(request: string, parent: unknown, isMain: boolean) {
+    if (request === "@/platform/windowController") {
+      return {
+        openOrFocusDesktopWindow(label: "dashboard" | "control-panel") {
+          calls.push(label);
+          return openOrFocusDesktopWindow(label);
+        },
+      };
+    }
+
+    return originalLoad(request, parent, isMain);
+  };
+
+  const loaded = require(modulePath) as {
+    openControlPanelFromTray: () => Promise<string>;
+  };
+
+  const finalize = () => {
+    NodeModule._load = originalLoad;
+    delete require.cache[modulePath];
+  };
+
+  try {
+    return Promise.resolve(callback({ ...loaded, calls })).finally(finalize);
+  } catch (error) {
+    finalize();
+    throw error;
+  }
+}
+
+function renderDashboardAppMarkup() {
+  return withDesktopAliasRuntime(() => {
+    const modulePath = resolve(desktopRoot, ".cache/shell-ball-tests/features/dashboard/DashboardApp.js");
+
+    delete require.cache[modulePath];
+
+    try {
+      const { DashboardApp } = require(modulePath) as { DashboardApp: unknown };
+
+      return renderToStaticMarkup(createElement(DashboardApp as never));
+    } finally {
+      delete require.cache[modulePath];
+    }
+  });
+}
+
+function renderDashboardRouteSurface(hash: string) {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalSVGElement = globalThis.SVGElement;
+  const fakeDocument = {
+    location: null as unknown,
+    querySelector() {
+      return null;
+    },
+    defaultView: null as unknown,
+  };
+  const fakeWindow = {
+    location: {
+      hash,
+      href: `https://desktop.local/dashboard.html${hash}`,
+      origin: "https://desktop.local",
+      pathname: "/dashboard.html",
+      search: "",
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    history: {
+      state: null,
+      replaceState() {},
+      pushState() {},
+    },
+    document: fakeDocument,
+  };
+  fakeDocument.location = fakeWindow.location;
+  fakeDocument.defaultView = fakeWindow;
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: fakeWindow,
+  });
+
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: fakeDocument,
+  });
+
+  Object.defineProperty(globalThis, "SVGElement", {
+    configurable: true,
+    value: function SVGElement() {},
+  });
+
+  try {
+    return withDashboardRouteRuntime(({ DashboardRoot }) => renderToStaticMarkup(createElement(DashboardRoot as never)));
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+
+    if (originalDocument === undefined) {
+      Reflect.deleteProperty(globalThis, "document");
+    } else {
+      Object.defineProperty(globalThis, "document", {
+        configurable: true,
+        value: originalDocument,
+      });
+    }
+
+    if (originalSVGElement === undefined) {
+      Reflect.deleteProperty(globalThis, "SVGElement");
+    } else {
+      Object.defineProperty(globalThis, "SVGElement", {
+        configurable: true,
+        value: originalSVGElement,
+      });
+    }
+  }
+}
 
 function createFakeScheduler() {
   let nextId = 0;
@@ -206,10 +642,46 @@ test("shell-ball desktop window controller and capabilities stay aligned", () =>
     "dashboard",
     "control-panel",
   ]);
+  assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-create"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-position"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-size"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-start-dragging"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-ignore-cursor-events"), true);
+
+  const generatedCapabilitySchema = JSON.parse(
+    readFileSync(resolve(desktopRoot, "src-tauri/gen/schemas/capabilities.json"), "utf8"),
+  ) as {
+    default: {
+      windows: string[];
+      permissions: string[];
+    };
+  };
+
+  assert.deepEqual(generatedCapabilitySchema.default.windows, parsedCapabilityConfig.windows);
+  assert.deepEqual(generatedCapabilitySchema.default.permissions, parsedCapabilityConfig.permissions);
+  assert.equal(generatedCapabilitySchema.default.permissions.includes("core:window:allow-create"), true);
+  assert.equal(generatedCapabilitySchema.default.permissions.includes("core:window:allow-unminimize"), true);
+});
+
+test("dashboard and control-panel stay hidden on cold launch until explicitly opened", () => {
+  const tauriConfig = JSON.parse(
+    readFileSync(resolve(desktopRoot, "src-tauri/tauri.conf.json"), "utf8"),
+  ) as {
+    app: {
+      windows: Array<{
+        label: string;
+        visible?: boolean;
+      }>;
+    };
+  };
+
+  const dashboardWindow = tauriConfig.app.windows.find((window) => window.label === "dashboard");
+  const controlPanelWindow = tauriConfig.app.windows.find((window) => window.label === "control-panel");
+
+  assert.ok(dashboardWindow);
+  assert.ok(controlPanelWindow);
+  assert.equal(dashboardWindow.visible, false);
+  assert.equal(controlPanelWindow.visible, false);
 });
 
 test("shell-ball entries opt into transparent window mode", () => {
@@ -223,6 +695,18 @@ test("shell-ball entries opt into transparent window mode", () => {
   assert.match(inputEntry, /data-app-window/);
   assert.match(globalStyles, /\[data-app-window="shell-ball"\]/);
   assert.match(globalStyles, /overflow: hidden/);
+});
+
+test("shell-ball surface styles keep the shell transparent and fully draggable", () => {
+  const shellBallStyles = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.css"), "utf8");
+  const shellBallSurfaceBeforeBlock = shellBallStyles.match(/\.shell-ball-surface::before\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const mascotBlock = shellBallStyles.match(/\.shell-ball-mascot\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const mascotHotspotBlock = shellBallStyles.match(/\.shell-ball-mascot__hotspot\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+
+  assert.doesNotMatch(shellBallSurfaceBeforeBlock, /background:/);
+  assert.doesNotMatch(shellBallStyles, /overflow-x:\s*hidden/);
+  assert.match(mascotBlock, /width:\s*clamp\(/);
+  assert.match(mascotHotspotBlock, /inset:\s*0;/);
 });
 
 test("shell-ball helper windows avoid auto-focus behavior", () => {
@@ -254,6 +738,270 @@ test("shell-ball helper windows avoid auto-focus behavior", () => {
   assert.doesNotMatch(planSource, /focusable: false/);
   assert.match(planSource, /setFocusable\(false\)/);
   assert.match(planSource, /setIgnoreCursorEvents\(true\)/);
+});
+
+test("shell-ball desktop navigation keeps route changes separate from desktop window focus", () => {
+  const controllerSource = readFileSync(resolve(desktopRoot, "src/platform/windowController.ts"), "utf8");
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
+  const dashboardHomeSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardHome.tsx"), "utf8");
+  const dashboardBackHomeLinkSource = readFileSync(
+    resolve(desktopRoot, "src/features/dashboard/shared/DashboardBackHomeLink.tsx"),
+    "utf8",
+  );
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+  const notePageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/NotePage.tsx"), "utf8");
+  const dashboardHomeConfigSource = readFileSync(
+    resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.config.ts"),
+    "utf8",
+  );
+  const dashboardRoutesSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardRoutes.ts"), "utf8");
+  const dashboardEventPanelSource = readFileSync(
+    resolve(desktopRoot, "src/features/dashboard/home/components/DashboardEventPanel.tsx"),
+    "utf8",
+  );
+  const dashboardPlaceholderPageSource = readFileSync(
+    resolve(desktopRoot, "src/features/dashboard/shared/DashboardPlaceholderPage.tsx"),
+    "utf8",
+  );
+  const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
+  const dashboardRouteTargetsSource = readFileSync(
+    resolve(desktopRoot, "src/features/dashboard/shared/dashboardRouteTargets.ts"),
+    "utf8",
+  );
+  assert.deepEqual(dashboardRoutePaths, {
+    home: "/",
+    safety: "/safety",
+  });
+  assert.equal(dashboardSafetyRoutePath, "/safety");
+  assert.equal(resolveDashboardRoutePath("home"), "/");
+  assert.equal(resolveDashboardRoutePath("safety"), dashboardSafetyRoutePath);
+  assert.equal(resolveDashboardRouteHref("home"), "./dashboard.html");
+  assert.equal(resolveDashboardRouteHref("safety"), "./dashboard.html#/safety");
+  assert.equal(resolveDashboardModuleRoutePath("tasks"), "/tasks");
+  assert.equal(resolveDashboardModuleRoutePath("notes"), "/notes");
+  assert.equal(resolveDashboardModuleRoutePath("memory"), "/memory");
+  assert.equal(resolveDashboardModuleRoutePath("safety"), dashboardSafetyRoutePath);
+  assert.equal(existsSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardRouteNavigation.ts")), false);
+  assert.equal(existsSync(resolve(desktopRoot, ".cache/shell-ball-tests/app/dashboard/DashboardRoot.js")), true);
+  assert.equal(existsSync(resolve(desktopRoot, ".cache/shell-ball-tests/features/dashboard/DashboardApp.js")), true);
+  assert.equal(existsSync(resolve(desktopRoot, ".cache/shell-ball-tests/features/dashboard/safety/SafetyPage.js")), true);
+  assert.equal(existsSync(resolve(desktopRoot, ".cache/shell-ball-tests/features/dashboard/safety/SecurityPageShell.js")), true);
+  assert.equal(existsSync(resolve(desktopRoot, ".cache/shell-ball-tests/features/dashboard/safety/SecurityApp.js")), true);
+  assert.equal(existsSync(resolve(desktopRoot, ".cache/shell-ball-tests/platform/trayController.js")), true);
+  assert.match(dashboardRouteTargetsSource, /export const dashboardSafetyRoutePath = "\/safety"/);
+
+  assert.match(controllerSource, /export type DesktopWindowLabel = "dashboard" \| "control-panel"/);
+  assert.doesNotMatch(controllerSource, /resolveDashboardRouteHref/);
+  assert.doesNotMatch(controllerSource, /openDashboardRoute/);
+  assert.match(dashboardBackHomeLinkSource, /resolveDashboardRoutePath\("home"\)/);
+  assert.doesNotMatch(dashboardBackHomeLinkSource, /to="\/"/);
+  assert.match(dashboardRootSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.match(dashboardRootSource, /resolveDashboardModuleRoutePath\("notes"\)/);
+  assert.match(dashboardRootSource, /resolveDashboardModuleRoutePath\("memory"\)/);
+  assert.match(dashboardRootSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.doesNotMatch(dashboardRootSource, /path="\/tasks\/\*"/);
+  assert.doesNotMatch(dashboardRootSource, /path="\/notes\/\*"/);
+  assert.doesNotMatch(dashboardRootSource, /path="\/memory\/\*"/);
+  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\(module\)/);
+  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("notes"\)/);
+  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("memory"\)/);
+  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.doesNotMatch(dashboardHomeSource, /"\/tasks"/);
+  assert.doesNotMatch(dashboardHomeSource, /"\/notes"/);
+  assert.doesNotMatch(dashboardHomeSource, /"\/memory"/);
+  assert.doesNotMatch(dashboardHomeSource, /"\/safety"/);
+  assert.match(taskPageSource, /resolveDashboardRoutePath\("home"\)/);
+  assert.match(taskPageSource, /resolveDashboardRoutePath\("safety"\)/);
+  assert.doesNotMatch(taskPageSource, /navigate\("\/safety"\)/);
+  assert.doesNotMatch(taskPageSource, /to="\/"/);
+  assert.match(notePageSource, /resolveDashboardRoutePath\("home"\)/);
+  assert.match(notePageSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.doesNotMatch(notePageSource, /navigate\("\/tasks"/);
+  assert.doesNotMatch(notePageSource, /to="\/"/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("notes"\)/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("memory"\)/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/tasks"/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/notes"/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/memory"/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/safety"/);
+  assert.match(dashboardEventPanelSource, /resolveDashboardModuleRoutePath\(module\)/);
+  assert.doesNotMatch(dashboardEventPanelSource, /navigate\(`\/\$\{module\}`\)/);
+  assert.match(dashboardPlaceholderPageSource, /resolveDashboardRoutePath\("home"\)/);
+  assert.doesNotMatch(dashboardPlaceholderPageSource, /to="\/"/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("notes"\)/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("memory"\)/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/tasks"/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/notes"/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/memory"/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/safety"/);
+  assert.match(securityAppSource, /useNavigate\(/);
+  assert.match(securityAppSource, /navigate\(resolveDashboardRoutePath\("home"\)\)/);
+  assert.doesNotMatch(securityAppSource, /openDashboardRoute/);
+});
+
+test("window controller focuses an existing labeled desktop window", async () => {
+  const calls: string[] = [];
+  const handle = {
+    async unminimize() {
+      calls.push("unminimize");
+    },
+    async show() {
+      calls.push("show");
+    },
+    async setFocus() {
+      calls.push("setFocus");
+    },
+  };
+
+  const capabilityConfig = JSON.parse(
+    readFileSync(resolve(desktopRoot, "src-tauri/capabilities/default.json"), "utf8"),
+  ) as { permissions: string[] };
+
+  assert.equal(capabilityConfig.permissions.includes("core:window:allow-unminimize"), true);
+
+  await withWindowControllerRuntime({
+    getByLabel(label) {
+      calls.push(`label:${label}`);
+      return handle;
+    },
+  }, async ({ openOrFocusDesktopWindow }) => {
+    await openOrFocusDesktopWindow("dashboard");
+  });
+
+  assert.deepEqual(calls, ["label:dashboard", "unminimize", "show", "setFocus"]);
+});
+
+test("window controller recreates missing known desktop windows before focusing them", async () => {
+  const reopenScenarios = [
+    {
+      label: "dashboard",
+      expectedOptions: {
+        title: "CialloClaw Dashboard",
+        width: 1280,
+        height: 860,
+        visible: false,
+        url: "dashboard.html",
+      },
+    },
+    {
+      label: "control-panel",
+      expectedOptions: {
+        title: "CialloClaw Control Panel",
+        width: 1080,
+        height: 760,
+        visible: false,
+        url: "control-panel.html",
+      },
+    },
+  ] as const;
+
+  for (const scenario of reopenScenarios) {
+    const calls: string[] = [];
+    const recreatedHandle = {
+      async unminimize() {
+        calls.push("unminimize");
+      },
+      async show() {
+        calls.push("show");
+      },
+      async setFocus() {
+        calls.push("setFocus");
+      },
+    };
+
+    await withWindowControllerRuntime({
+      getByLabel(label) {
+        calls.push(`label:${label}`);
+        return null;
+      },
+      createWindow(label, options) {
+        calls.push(`create:${label}`);
+        assert.equal(label, scenario.label);
+        assert.deepEqual(options, scenario.expectedOptions);
+        return recreatedHandle;
+      },
+    }, async ({ openOrFocusDesktopWindow }) => {
+      await openOrFocusDesktopWindow(scenario.label);
+    });
+
+    assert.deepEqual(calls, [
+      `label:${scenario.label}`,
+      `create:${scenario.label}`,
+      "unminimize",
+      "show",
+      "setFocus",
+    ]);
+  }
+});
+
+test("hide-on-close helper prevents the close request and hides the current window", async () => {
+  const calls: string[] = [];
+  let closeHandler: ((event: { preventDefault: () => void }) => Promise<void> | void) | null = null;
+
+  await withHideOnCloseRequestRuntime({
+    onCloseRequested(handler) {
+      calls.push("onCloseRequested");
+      closeHandler = handler;
+      return "unlisten";
+    },
+    async hide() {
+      calls.push("hide");
+    },
+  }, async ({ installHideOnCloseRequest }) => {
+    const result = installHideOnCloseRequest();
+
+    assert.equal(result, "unlisten");
+    assert.notEqual(closeHandler, null);
+
+    await closeHandler?.({
+      preventDefault() {
+        calls.push("preventDefault");
+      },
+    });
+  });
+
+  assert.deepEqual(calls, ["onCloseRequested", "preventDefault", "hide"]);
+});
+
+test("dashboard and control-panel entrypoints install hide-on-close handling", () => {
+  const dashboardMainSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/main.tsx"), "utf8");
+  const controlPanelMainSource = readFileSync(resolve(desktopRoot, "src/app/control-panel/main.tsx"), "utf8");
+
+  assert.match(dashboardMainSource, /installHideOnCloseRequest/);
+  assert.match(dashboardMainSource, /void installHideOnCloseRequest\(\)/);
+  assert.match(controlPanelMainSource, /installHideOnCloseRequest/);
+  assert.match(controlPanelMainSource, /void installHideOnCloseRequest\(\)/);
+});
+
+test("tray controller opens the control panel through the desktop window API", async () => {
+  await withTrayControllerRuntime(async () => "control-panel", async ({ openControlPanelFromTray, calls }) => {
+    await openControlPanelFromTray();
+
+    assert.deepEqual(calls, ["control-panel"]);
+  });
+});
+
+test("dashboard app safety CTA renders the shared safety href", () => {
+  const markup = renderDashboardAppMarkup();
+
+  assert.match(markup, /href="\.\/dashboard\.html#\/safety"/);
+});
+
+test("dashboard route surface renders the live home and safety routes", () => {
+  const homeMarkup = renderDashboardRouteSurface("");
+  const safetyMarkup = renderDashboardRouteSurface("#/safety");
+
+  assert.match(homeMarkup, /Dashboard Orbit/);
+  assert.doesNotMatch(homeMarkup, /security-shell-stub/);
+  assert.doesNotMatch(homeMarkup, /返回首页/);
+  assert.match(safetyMarkup, /返回首页/);
+  assert.match(safetyMarkup, /security-shell-stub/);
+  assert.doesNotMatch(safetyMarkup, /Dashboard Orbit/);
 });
 
 test("shell-ball input bar keeps hook order stable across hidden and visible states", () => {
@@ -932,6 +1680,84 @@ test("shell-ball keeps voice preview alive on leave while voice listening is act
   assert.equal(shouldKeepShellBallVoicePreviewOnRegionLeave("voice_locked"), false);
 });
 
+test("shell-ball dashboard gesture policy stays task-2 explicit", () => {
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "single_click", state: "idle", interactionConsumed: false }),
+    false,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "single_click", state: "hover_input", interactionConsumed: false }),
+    false,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "idle", interactionConsumed: false }),
+    true,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "hover_input", interactionConsumed: false }),
+    true,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "hover_input", interactionConsumed: true }),
+    false,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "voice_listening", interactionConsumed: false }),
+    false,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "voice_locked", interactionConsumed: false }),
+    false,
+  );
+});
+
+test("shell-ball window measurement expands to overflowing mascot visuals", () => {
+  assert.deepEqual(
+    measureShellBallContentSize({
+      getBoundingClientRect: () => ({ width: 100, height: 80 }),
+      scrollWidth: 148,
+      scrollHeight: 126,
+    }),
+    {
+      width: 148,
+      height: 126,
+    },
+  );
+});
+
+test("shell-ball interaction consumed reducer keeps pointer sequence scope explicit", () => {
+  const afterPressStart = mapShellBallInteractionConsumedEventToFlag("press_start");
+  assert.equal(afterPressStart, false);
+
+  const afterLongPressVoiceEntry = mapShellBallInteractionConsumedEventToFlag("long_press_voice_entry");
+  assert.equal(afterLongPressVoiceEntry, true);
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({
+      gesture: "double_click",
+      state: "hover_input",
+      interactionConsumed: afterLongPressVoiceEntry,
+    }),
+    false,
+  );
+
+  const afterVoiceFlowConsumed = mapShellBallInteractionConsumedEventToFlag("voice_flow_consumed");
+  assert.equal(afterVoiceFlowConsumed, true);
+
+  const afterNextPressStart = mapShellBallInteractionConsumedEventToFlag("press_start");
+  assert.equal(afterNextPressStart, false);
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({
+      gesture: "double_click",
+      state: "hover_input",
+      interactionConsumed: afterNextPressStart,
+    }),
+    true,
+  );
+
+  const afterForceStateReset = mapShellBallInteractionConsumedEventToFlag("force_state_reset");
+  assert.equal(afterForceStateReset, false);
+});
+
 test("shell-ball submit reset clears draft retention after submit", () => {
   assert.deepEqual(getShellBallPostSubmitInputReset("summarize this"), {
     nextInputValue: "",
@@ -1026,12 +1852,14 @@ test("shell-ball surface renders the mascot-only floating structure without the 
       voicePreview: null,
       motionConfig: getShellBallMotionConfig("hover_input"),
       onPrimaryClick: () => {},
+      onDoubleClick: () => {},
       onRegionEnter: () => {},
       onRegionLeave: () => {},
       onDragStart: () => {},
       onPressStart: () => {},
       onPressMove: () => {},
       onPressEnd: () => false,
+      onPressCancel: () => {},
     }),
   );
 
@@ -1043,28 +1871,269 @@ test("shell-ball surface renders the mascot-only floating structure without the 
   assert.doesNotMatch(markup, /shell-ball-surface__switcher-shell/);
 });
 
-test("shell-ball surface reserves a host drag zone separate from the interaction zone", () => {
+test("shell-ball surface keeps drag and click on the mascot hotspot only", () => {
   const markup = renderToStaticMarkup(
     createElement(ShellBallSurface, {
       visualState: "hover_input",
       voicePreview: null,
       motionConfig: getShellBallMotionConfig("hover_input"),
       onPrimaryClick: () => {},
+      onDoubleClick: () => {},
       onRegionEnter: () => {},
       onRegionLeave: () => {},
       onDragStart: () => {},
       onPressStart: () => {},
       onPressMove: () => {},
       onPressEnd: () => false,
+      onPressCancel: () => {},
     }),
   );
 
-  assert.match(markup, /data-shell-ball-zone="host-drag"/);
-  assert.match(markup, /data-shell-ball-drag-handle="true"/);
   assert.match(markup, /data-shell-ball-zone="interaction"/);
   assert.match(markup, /data-shell-ball-zone="voice-hotspot"/);
-  assert.match(markup, /shell-ball-surface__host-drag-zone/);
+  assert.doesNotMatch(markup, /shell-ball-surface__host-drag-zone/);
   assert.match(markup, /shell-ball-surface__interaction-zone/);
+});
+
+test("shell-ball mascot hotspot policy keeps single click inert outside locked voice", () => {
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "voice_locked",
+      gesture: "single_click",
+      suppressed: false,
+    }),
+    "primary_click",
+  );
+
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "idle",
+      gesture: "single_click",
+      suppressed: false,
+    }),
+    "noop",
+  );
+
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "hover_input",
+      gesture: "single_click",
+      suppressed: false,
+    }),
+    "noop",
+  );
+});
+
+test("shell-ball mascot hotspot policy opens dashboard only from resting double click", () => {
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "idle",
+      gesture: "double_click",
+      suppressed: false,
+    }),
+    "double_click",
+  );
+
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "hover_input",
+      gesture: "double_click",
+      suppressed: false,
+    }),
+    "double_click",
+  );
+
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "voice_locked",
+      gesture: "double_click",
+      suppressed: false,
+    }),
+    "noop",
+  );
+});
+
+test("shell-ball mascot hotspot policy drops suppressed sequences for both click kinds", () => {
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "voice_locked",
+      gesture: "single_click",
+      suppressed: true,
+    }),
+    "noop",
+  );
+
+  assert.equal(
+    getShellBallMascotHotspotGestureAction({
+      visualState: "hover_input",
+      gesture: "double_click",
+      suppressed: true,
+    }),
+    "noop",
+  );
+});
+
+test("shell-ball mascot pointer policy accepts only primary-button press sequences", () => {
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_down", button: 0, isPrimary: true, pressHandled: false }),
+    "start_press",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_up", button: 0, isPrimary: true, pressHandled: false }),
+    "finish_press",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_down", button: 1, isPrimary: true, pressHandled: false }),
+    "noop",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_up", button: 2, isPrimary: true, pressHandled: true }),
+    "noop",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_down", button: 0, isPrimary: false, pressHandled: false }),
+    "noop",
+  );
+});
+
+test("shell-ball mascot pointer policy keeps cancellation separate from successful release", () => {
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_up", button: 0, isPrimary: true, pressHandled: true }),
+    "suppress_gestures",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_cancel", button: 0, isPrimary: true, pressHandled: true }),
+    "cleanup_only",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_cancel", button: 1, isPrimary: false, pressHandled: false }),
+    "noop",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_cancel", button: 0, isPrimary: false, pressHandled: false }),
+    "noop",
+  );
+  assert.equal(
+    getShellBallMascotPointerPhaseAction({ phase: "pointer_cancel", button: -1, isPrimary: true, pressHandled: false }),
+    "cleanup_only",
+  );
+});
+
+test("shell-ball mascot drag policy lets the full hotspot start window dragging after movement", () => {
+  assert.equal(
+    shouldStartShellBallMascotWindowDrag({
+      visualState: "hover_input",
+      startX: 100,
+      startY: 100,
+      clientX: 104,
+      clientY: 103,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldStartShellBallMascotWindowDrag({
+      visualState: "idle",
+      startX: 100,
+      startY: 100,
+      clientX: 118,
+      clientY: 114,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldStartShellBallMascotWindowDrag({
+      visualState: "voice_listening",
+      startX: 100,
+      startY: 100,
+      clientX: 118,
+      clientY: 114,
+    }),
+    false,
+  );
+});
+
+test("shell-ball voice swipe contract keeps upward lock and downward cancel explicit", () => {
+  assert.equal(
+    resolveShellBallVoiceReleaseEvent(
+      getShellBallVoicePreviewFromEvent({
+        startX: 100,
+        startY: 100,
+        clientX: 100,
+        clientY: 100 - SHELL_BALL_LOCK_DELTA_PX,
+        fallbackPreview: null,
+      }),
+    ),
+    "voice_lock",
+  );
+
+  assert.equal(
+    resolveShellBallVoiceReleaseEvent(
+      getShellBallVoicePreviewFromEvent({
+        startX: 100,
+        startY: 100,
+        clientX: 100,
+        clientY: 100 + SHELL_BALL_CANCEL_DELTA_PX,
+        fallbackPreview: null,
+      }),
+    ),
+    "voice_cancel",
+  );
+});
+
+test("shell-ball press cancel policy clears pending press state and cancels active listening", () => {
+  assert.equal(getShellBallPressCancelEvent("voice_listening"), "voice_cancel");
+  assert.equal(getShellBallPressCancelEvent("hover_input"), null);
+  assert.equal(getShellBallPressCancelEvent("voice_locked"), null);
+});
+
+test("shell-ball cancel callback path is wired from mascot through app interaction handlers", () => {
+  const surfaceSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallSurface.tsx"), "utf8");
+  const appSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallApp.tsx"), "utf8");
+  const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");
+
+  assert.match(surfaceSource, /onPressCancel: \(event: PointerEvent<HTMLButtonElement>\) => void;/);
+  assert.match(surfaceSource, /onPressCancel=\{onPressCancel\}/);
+  assert.match(appSource, /handlePressCancel,/);
+  assert.match(appSource, /onPressCancel=\{handlePressCancel\}/);
+  assert.match(interactionSource, /function handlePressCancel\(event: PointerEvent<HTMLButtonElement>\)/);
+  assert.match(interactionSource, /clearLongPressTimer\(\);/);
+  assert.match(interactionSource, /pressStartXRef\.current = null;/);
+  assert.match(interactionSource, /pressStartYRef\.current = null;/);
+  assert.match(interactionSource, /setCurrentVoicePreview\(null\);/);
+  assert.match(interactionSource, /const cancelEvent = getShellBallPressCancelEvent\(/);
+  assert.match(interactionSource, /if \(cancelEvent !== null\) \{/);
+  assert.match(interactionSource, /dispatch\(cancelEvent\);/);
+});
+
+test("shell-ball surface passes mascot double-click and drag wiring through the mascot only", () => {
+  const surfaceSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallSurface.tsx"), "utf8");
+
+  assert.match(surfaceSource, /onDoubleClick: \(\) => void;/);
+  assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onDoubleClick=\{onDoubleClick\}/);
+  assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onHotspotDragStart=\{onDragStart\}/);
+  assert.doesNotMatch(surfaceSource, /data-shell-ball-zone="host-drag"/);
+  assert.match(surfaceSource, /data-shell-ball-zone="interaction"/);
+});
+
+test("shell-ball app dashboard-open gate stays blocked for consumed or non-resting double clicks", () => {
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "idle", interactionConsumed: false }),
+    true,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "hover_input", interactionConsumed: false }),
+    true,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "hover_input", interactionConsumed: true }),
+    false,
+  );
+  assert.equal(
+    getShellBallDashboardOpenGesturePolicy({ gesture: "double_click", state: "voice_locked", interactionConsumed: false }),
+    false,
+  );
 });
 
 test("shell-ball demo switcher visibility stays dev-only", () => {

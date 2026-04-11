@@ -5,6 +5,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CircleDashed, NotebookPen } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { resolveDashboardModuleRoutePath, resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { dashboardModules } from "@/features/dashboard/shared/dashboardRoutes";
 import { cn } from "@/utils/cn";
 import { buildNoteSummary, describeNotePreview, getNoteBucketLabel, groupClosedNotes, sortClosedNotes, sortNotesByUrgency } from "./notePage.mapper";
@@ -66,7 +67,7 @@ export function NotePage() {
     mutationFn: (itemId: string) => convertNoteToTask(itemId),
     onSuccess: (outcome) => {
       showFeedback("已为这条事项生成任务，正在跳转到任务页。");
-      navigate("/tasks", { state: { focusTaskId: outcome.result.task.task_id, openDetail: true } });
+      navigate(resolveDashboardModuleRoutePath("tasks"), { state: { focusTaskId: outcome.result.task.task_id, openDetail: true } });
     },
     onError: () => {
       showFeedback("转交给 Agent 失败，请稍后再试。");
@@ -148,7 +149,7 @@ export function NotePage() {
   return (
     <main className="dashboard-page note-preview-page" style={pageStyle}>
       <header className="dashboard-page__topbar">
-        <Link className="dashboard-page__home-link" to="/">
+        <Link className="dashboard-page__home-link" to={resolveDashboardRoutePath("home")}>
           <ArrowLeft className="h-4 w-4" />
           返回首页
         </Link>

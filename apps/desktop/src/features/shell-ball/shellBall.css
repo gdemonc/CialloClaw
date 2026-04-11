@@ -30,10 +30,6 @@
 }
 
 .shell-ball-surface::before {
-  background:
-    radial-gradient(circle at 18% 24%, rgba(255, 255, 255, 0.42), transparent 28%),
-    radial-gradient(circle at 82% 14%, rgba(242, 219, 182, 0.32), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgba(202, 180, 143, 0.09), transparent 30%);
   content: "";
   inset: 14% 18% 12% 18%;
   pointer-events: none;
@@ -152,18 +148,6 @@
   display: grid;
   justify-items: center;
   width: auto;
-}
-
-.shell-ball-surface__host-drag-zone {
-  cursor: grab;
-  height: clamp(0.75rem, 2vw, 1rem);
-  pointer-events: auto;
-  touch-action: none;
-  width: min(100%, 18rem);
-}
-
-.shell-ball-surface__host-drag-zone:active {
-  cursor: grabbing;
 }
 
 .shell-ball-surface__interaction-zone {
@@ -505,6 +489,7 @@
   height: clamp(18rem, 34vw, 24rem);
   justify-content: center;
   position: relative;
+  width: clamp(16.5rem, 31vw, 19rem);
 }
 
 .shell-ball-mascot__hotspot {
@@ -512,10 +497,14 @@
   background: transparent;
   border: 0;
   border-radius: 999px;
-  cursor: pointer;
-  inset: 1.4rem 1.4rem 2rem;
+  cursor: grab;
+  inset: 0;
   position: absolute;
   z-index: 8;
+}
+
+.shell-ball-mascot__hotspot:active {
+  cursor: grabbing;
 }
 
 .shell-ball-mascot__hotspot:focus-visible {
@@ -1092,7 +1081,6 @@
 
 @media (max-width: 720px) {
   .shell-ball-surface {
-    overflow-x: hidden;
     padding: 0.75rem 0.55rem 0.9rem;
   }
 
