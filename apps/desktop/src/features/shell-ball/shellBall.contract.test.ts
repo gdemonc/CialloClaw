@@ -636,6 +636,13 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
     resolve(desktopRoot, "src/features/dashboard/shared/DashboardBackHomeLink.tsx"),
     "utf8",
   );
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+  const notePageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/NotePage.tsx"), "utf8");
+  const dashboardHomeConfigSource = readFileSync(
+    resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.config.ts"),
+    "utf8",
+  );
+  const dashboardRoutesSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardRoutes.ts"), "utf8");
   const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
   const dashboardRouteTargetsSource = readFileSync(
     resolve(desktopRoot, "src/features/dashboard/shared/dashboardRouteTargets.ts"),
@@ -685,6 +692,30 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   assert.doesNotMatch(dashboardHomeSource, /"\/notes"/);
   assert.doesNotMatch(dashboardHomeSource, /"\/memory"/);
   assert.doesNotMatch(dashboardHomeSource, /"\/safety"/);
+  assert.match(taskPageSource, /resolveDashboardRoutePath\("home"\)/);
+  assert.match(taskPageSource, /resolveDashboardRoutePath\("safety"\)/);
+  assert.doesNotMatch(taskPageSource, /navigate\("\/safety"\)/);
+  assert.doesNotMatch(taskPageSource, /to="\/"/);
+  assert.match(notePageSource, /resolveDashboardRoutePath\("home"\)/);
+  assert.match(notePageSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.doesNotMatch(notePageSource, /navigate\("\/tasks"/);
+  assert.doesNotMatch(notePageSource, /to="\/"/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("notes"\)/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("memory"\)/);
+  assert.match(dashboardHomeConfigSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/tasks"/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/notes"/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/memory"/);
+  assert.doesNotMatch(dashboardHomeConfigSource, /route: "\/safety"/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("notes"\)/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("memory"\)/);
+  assert.match(dashboardRoutesSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/tasks"/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/notes"/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/memory"/);
+  assert.doesNotMatch(dashboardRoutesSource, /path: "\/safety"/);
   assert.match(securityAppSource, /useNavigate\(/);
   assert.match(securityAppSource, /navigate\(resolveDashboardRoutePath\("home"\)\)/);
   assert.doesNotMatch(securityAppSource, /openDashboardRoute/);

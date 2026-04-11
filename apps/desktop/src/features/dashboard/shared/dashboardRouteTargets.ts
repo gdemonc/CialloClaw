@@ -1,13 +1,15 @@
 export type DashboardRouteTarget = "home" | "safety";
 export type DashboardModuleRouteTarget = "tasks" | "notes" | "memory" | "safety";
+type DashboardRoutePath = "/" | `/${Exclude<DashboardRouteTarget, "home">}`;
+type DashboardModuleRoutePath = `/${DashboardModuleRouteTarget}`;
 export const dashboardSafetyRoutePath = "/safety";
 
-export const dashboardRoutePaths: Record<DashboardRouteTarget, string> = {
+export const dashboardRoutePaths: Record<DashboardRouteTarget, DashboardRoutePath> = {
   home: "/",
   safety: dashboardSafetyRoutePath,
 };
 
-export const dashboardModuleRoutePaths: Record<DashboardModuleRouteTarget, string> = {
+export const dashboardModuleRoutePaths: Record<DashboardModuleRouteTarget, DashboardModuleRoutePath> = {
   tasks: "/tasks",
   notes: "/notes",
   memory: "/memory",
@@ -18,7 +20,7 @@ export function resolveDashboardRoutePath(target: DashboardRouteTarget) {
   return dashboardRoutePaths[target];
 }
 
-export function resolveDashboardModuleRoutePath(target: DashboardModuleRouteTarget) {
+export function resolveDashboardModuleRoutePath<TTarget extends DashboardModuleRouteTarget>(target: TTarget): (typeof dashboardModuleRoutePaths)[TTarget] {
   return dashboardModuleRoutePaths[target];
 }
 
