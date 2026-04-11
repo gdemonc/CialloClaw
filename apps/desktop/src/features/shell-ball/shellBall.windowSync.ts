@@ -1,3 +1,4 @@
+import type { ShellBallBubbleMessage } from "./shellBall.bubble";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
 import { getShellBallInputBarMode } from "./shellBall.interaction";
 import type { ShellBallInputBarMode, ShellBallVisualState } from "./shellBall.types";
@@ -26,6 +27,7 @@ export type ShellBallWindowSnapshot = {
   inputBarMode: ShellBallInputBarMode;
   inputValue: string;
   voicePreview: ShellBallVoicePreview;
+  bubbleMessages: ShellBallBubbleMessage[];
   visibility: ShellBallHelperWindowVisibility;
 };
 
@@ -79,12 +81,14 @@ export function createShellBallWindowSnapshot(input: {
   visualState: ShellBallVisualState;
   inputValue: string;
   voicePreview: ShellBallVoicePreview;
+  bubbleMessages?: ShellBallBubbleMessage[];
 }): ShellBallWindowSnapshot {
   return {
     visualState: input.visualState,
     inputBarMode: getShellBallInputBarMode(input.visualState),
     inputValue: input.inputValue,
     voicePreview: input.voicePreview,
+    bubbleMessages: input.bubbleMessages ?? [],
     visibility: getShellBallHelperWindowVisibility(input.visualState),
   };
 }
@@ -94,5 +98,6 @@ export function createDefaultShellBallWindowSnapshot(): ShellBallWindowSnapshot 
     visualState: "idle",
     inputValue: "",
     voicePreview: null,
+    bubbleMessages: [],
   });
 }

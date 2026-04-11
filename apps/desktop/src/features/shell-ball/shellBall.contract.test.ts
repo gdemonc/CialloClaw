@@ -53,6 +53,7 @@ import {
   getShellBallHelperWindowVisibility,
   shellBallWindowSyncEvents,
 } from "./shellBall.windowSync";
+import type { ShellBallBubbleMessage } from "./shellBall.bubble";
 import {
   SHELL_BALL_WINDOW_GAP_PX,
   SHELL_BALL_WINDOW_SAFE_MARGIN_PX,
@@ -1042,18 +1043,65 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
       visualState: "voice_locked",
       inputValue: "draft",
       voicePreview: "lock",
+      bubbleMessages: [
+        {
+          id: "msg-1",
+          role: "assistant",
+          text: "Still listening.",
+          createdAt: "2026-04-11T10:00:00.000Z",
+          freshnessHint: "fresh",
+          motionHint: "pulse",
+        },
+      ],
     }),
     {
       visualState: "voice_locked",
       inputBarMode: "voice",
       inputValue: "draft",
       voicePreview: "lock",
+      bubbleMessages: [
+        {
+          id: "msg-1",
+          role: "assistant",
+          text: "Still listening.",
+          createdAt: "2026-04-11T10:00:00.000Z",
+          freshnessHint: "fresh",
+          motionHint: "pulse",
+        },
+      ],
       visibility: {
         bubble: true,
         input: true,
       },
     },
   );
+});
+
+test("shell-ball bubble message contract supports local bubble feed hints", () => {
+  const bubbleMessage: ShellBallBubbleMessage = {
+    id: "msg-local-1",
+    role: "user",
+    text: "Open the dashboard.",
+    createdAt: "2026-04-11T10:00:00.000Z",
+    freshnessHint: "stale",
+    motionHint: "settle",
+  };
+
+  assert.deepEqual(bubbleMessage, {
+    id: "msg-local-1",
+    role: "user",
+    text: "Open the dashboard.",
+    createdAt: "2026-04-11T10:00:00.000Z",
+    freshnessHint: "stale",
+    motionHint: "settle",
+  });
+
+  assert.deepEqual(createShellBallWindowSnapshot({
+    visualState: "idle",
+    inputValue: "",
+    voicePreview: null,
+    bubbleMessages: [],
+  }).bubbleMessages, []);
 });
 
 test("shell-ball window metrics compute safe frames and helper anchors", () => {
