@@ -790,6 +790,12 @@ test("window controller focuses an existing labeled desktop window", async () =>
     },
   };
 
+  const capabilityConfig = JSON.parse(
+    readFileSync(resolve(desktopRoot, "src-tauri/capabilities/default.json"), "utf8"),
+  ) as { permissions: string[] };
+
+  assert.equal(capabilityConfig.permissions.includes("core:window:allow-unminimize"), true);
+
   await withWindowControllerRuntime((label) => {
     calls.push(`label:${label}`);
     return handle;
