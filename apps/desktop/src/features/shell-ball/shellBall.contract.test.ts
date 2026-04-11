@@ -55,6 +55,7 @@ import {
   shellBallWindowSyncEvents,
 } from "./shellBall.windowSync";
 import type { ShellBallBubbleMessage } from "./shellBall.bubble";
+import { cloneShellBallBubbleMessages } from "./shellBall.bubble";
 import {
   SHELL_BALL_WINDOW_GAP_PX,
   SHELL_BALL_WINDOW_SAFE_MARGIN_PX,
@@ -1160,6 +1161,11 @@ test("shell-ball bubble message contract supports local bubble feed hints", () =
     text: "On it.",
     createdAt: "2026-04-11T10:01:00.000Z",
   });
+
+  assert.deepEqual(
+    cloneShellBallBubbleMessages([minimalBubbleMessage]),
+    [minimalBubbleMessage],
+  );
 });
 
 test("shell-ball window snapshot copies bubble message arrays defensively", () => {
@@ -1180,7 +1186,19 @@ test("shell-ball window snapshot copies bubble message arrays defensively", () =
   });
 
   assert.notEqual(snapshot.bubbleMessages, sourceMessages);
+  assert.notEqual(snapshot.bubbleMessages[0], sourceMessages[0]);
   assert.deepEqual(snapshot.bubbleMessages, sourceMessages);
+
+  sourceMessages[0].text = "Changed after snapshot.";
+
+  assert.deepEqual(snapshot.bubbleMessages, [
+    {
+      id: "msg-copy-1",
+      role: "agent",
+      text: "Drafting update.",
+      createdAt: "2026-04-11T10:02:00.000Z",
+    },
+  ]);
 
   sourceMessages.push({
     id: "msg-copy-2",
@@ -2011,6 +2029,52 @@ test("shell-ball coordinator snapshots carry shell-ball-local bubble messages", 
 
   assert.ok(Array.isArray(snapshot.bubbleMessages));
   assert.ok(snapshot.bubbleMessages.length > 0);
+  assert.equal(snapshot.bubbleMessages.at(-1)?.freshnessHint, "fresh");
+  assert.equal(snapshot.bubbleMessages.at(-1)?.motionHint, "settle");
+});
+
+test("shell-ball bubble zone keeps the latest message visible on feed updates", () => {
+  const effects: Array<() => void> = [];
+  const scrollElement = {
+    scrollHeight: 184,
+    scrollTop: 0,
+  };
+  const refs = [
+    { current: scrollElement },
+  ];
+
+  const { ShellBallBubbleZone: RuntimeShellBallBubbleZone } = withShellBallModuleRuntime("components/ShellBallBubbleZone.tsx", {
+    react: {
+      ...require("react"),
+      useEffect(callback: () => void) {
+        effects.push(callback);
+      },
+      useRef<T>() {
+        return refs.shift() as { current: T };
+      },
+    },
+    "./ShellBallBubbleMessage": {
+      ShellBallBubbleMessage() {
+        return null;
+      },
+    },
+  }, (moduleExports) => moduleExports as { ShellBallBubbleZone: typeof import("./components/ShellBallBubbleZone").ShellBallBubbleZone });
+
+  RuntimeShellBallBubbleZone({
+    visualState: "processing",
+    bubbleMessages: [
+      {
+        id: "msg-scroll-1",
+        role: "agent",
+        text: "Newest status.",
+        createdAt: "2026-04-11T10:08:00.000Z",
+      },
+    ],
+  });
+
+  assert.equal(effects.length, 1);
+  effects[0]?.();
+  assert.equal(scrollElement.scrollTop, scrollElement.scrollHeight);
 });
 
 test("shell-ball bubble window resolves bubble messages from the helper-window snapshot", () => {
@@ -2164,11 +2228,13 @@ test("shell-ball bubble window styles stay transparent, faded, and motion-ready"
   assert.match(shellBallStyles, /--shell-ball-helper-width:\s*min\(22rem, calc\(100vw - 1rem\)\);/);
   assert.match(shellBallStyles, /@media \(max-width: 720px\)\s*\{[\s\S]*--shell-ball-helper-width:\s*min\(20rem, calc\(100vw - 0\.75rem\)\);/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone\s*\{[\s\S]*width:\s*var\(--shell-ball-helper-width\);/);
+  assert.match(shellBallStyles, /\.shell-ball-bubble-zone\s*\{[\s\S]*overflow:\s*hidden;/);
   assert.match(shellBallStyles, /\.shell-ball-input-bar,\s*\.shell-ball-input-bar--hidden\s*\{[\s\S]*width:\s*var\(--shell-ball-helper-width\);/);
   assert.match(mobileBubbleZoneBlock, /min-height:\s*4\.6rem;/);
   assert.match(mobileBubbleZoneBlock, /padding-inline:\s*0;/);
   assert.doesNotMatch(mobileBubbleZoneBlock, /width:/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*scrollbar-width:\s*none;/);
+  assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*align-content:\s*end;/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll::-webkit-scrollbar\s*\{[\s\S]*display:\s*none;/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*mask-image:\s*linear-gradient\(/);
   assert.match(shellBallStyles, /@keyframes shell-ball-bubble-message-enter/);
@@ -2178,6 +2244,7 @@ test("shell-ball bubble window styles stay transparent, faded, and motion-ready"
   );
   assert.match(markup, /data-freshness="fresh"/);
   assert.match(markup, /data-motion="settle"/);
+  assert.match(markup, /shell-ball-bubble-zone__bottom-anchor/);
 });
 
 test("shell-ball input window owns the input rendering", () => {

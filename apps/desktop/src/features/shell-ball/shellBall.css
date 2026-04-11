@@ -95,6 +95,7 @@
   display: grid;
   justify-items: stretch;
   min-height: clamp(5.25rem, 12vw, 8.5rem);
+  overflow: hidden;
   padding: 0;
   pointer-events: auto;
   position: relative;
@@ -106,6 +107,7 @@
 }
 
 .shell-ball-bubble-zone__scroll {
+  align-content: end;
   display: grid;
   gap: 0.5rem;
   max-height: clamp(6.5rem, 28vh, 14rem);
@@ -124,6 +126,10 @@
 
 .shell-ball-bubble-zone__message-entry {
   display: grid;
+}
+
+.shell-ball-bubble-zone__bottom-anchor {
+  block-size: 0;
 }
 
 .shell-ball-bubble-zone__message-entry[data-freshness="fresh"][data-motion="settle"] {

@@ -46,6 +46,8 @@ const SHELL_BALL_LOCAL_BUBBLE_MESSAGES: ShellBallBubbleMessage[] = [
     role: "user",
     text: "Open the dashboard.",
     createdAt: "2026-04-11T10:05:00.000Z",
+    freshnessHint: "fresh",
+    motionHint: "settle",
   },
 ];
 

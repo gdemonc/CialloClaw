@@ -14,5 +14,5 @@ export type ShellBallBubbleMessage = {
 };
 
 export function cloneShellBallBubbleMessages(messages: ShellBallBubbleMessage[]): ShellBallBubbleMessage[] {
-  return [...messages];
+  return messages.map((message) => ({ ...message }));
 }
