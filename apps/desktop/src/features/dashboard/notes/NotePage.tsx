@@ -4,6 +4,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CircleDashed, NotebookPen, RefreshCcw } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { resolveDashboardModuleRoutePath, resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { dashboardModules } from "@/features/dashboard/shared/dashboardRoutes";
 import { cn } from "@/utils/cn";
 import { buildNoteSummary, describeNotePreview, groupClosedNotes, sortClosedNotes, sortNotesByUrgency } from "./notePage.mapper";
@@ -96,7 +97,7 @@ export function NotePage() {
     mutationFn: (itemId: string) => convertNoteToTask(itemId),
     onSuccess: (outcome) => {
       showFeedback("已为这条事项生成任务，正在跳转到任务页。");
-      navigate("/tasks", { state: { focusTaskId: outcome.result.task.task_id, openDetail: true } });
+      navigate(resolveDashboardModuleRoutePath("tasks"), { state: { focusTaskId: outcome.result.task.task_id, openDetail: true } });
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : "转交给 Agent 失败，请稍后再试。";

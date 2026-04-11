@@ -57,6 +57,7 @@
         "title": "CialloClaw Dashboard",
         "width": 1280,
         "height": 860,
+        "visible": false,
         "url": "dashboard.html"
       },
       {
@@ -64,6 +65,7 @@
         "title": "CialloClaw Control Panel",
         "width": 1080,
         "height": 760,
+        "visible": false,
         "url": "control-panel.html"
       }
     ]
