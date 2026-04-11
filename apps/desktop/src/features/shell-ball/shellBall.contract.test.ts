@@ -262,15 +262,20 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   const dashboardAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/DashboardApp.tsx"), "utf8");
 
   assert.match(controllerSource, /export type DesktopWindowLabel = "dashboard" \| "control-panel"/);
+  assert.match(controllerSource, /export type WindowRouteLabel = "dashboard" \| "security"/);
   assert.match(controllerSource, /export async function openOrFocusDesktopWindow\(label: DesktopWindowLabel\)/);
+  assert.match(controllerSource, /export function openWindowRoute\(label: WindowRouteLabel\)/);
   assert.match(controllerSource, /Window\.getByLabel\(label\)/);
   assert.match(controllerSource, /await windowHandle\.show\(\)/);
   assert.match(controllerSource, /await windowHandle\.setFocus\(\)/);
   assert.match(controllerSource, /if \(windowHandle === null\) \{\s+throw new Error\(`Desktop window not found: \$\{label\}`\);\s+\}/);
   assert.doesNotMatch(controllerSource, /new Window\(/);
+  assert.doesNotMatch(controllerSource, /export function openWindow\(/);
   assert.match(controllerSource, /window\.location\.assign\(`\.\/\$\{label\}\.html`\)/);
-  assert.match(securityAppSource, /openOrFocusDesktopWindow\("dashboard"\)/);
-  assert.match(dashboardAppSource, /openWindow\("security"\)/);
+  assert.match(securityAppSource, /openWindowRoute\("dashboard"\)/);
+  assert.doesNotMatch(securityAppSource, /openOrFocusDesktopWindow\("dashboard"\)/);
+  assert.match(dashboardAppSource, /openWindowRoute\("security"\)/);
+  assert.doesNotMatch(dashboardAppSource, /openOrFocusDesktopWindow\("security"\)/);
 });
 
 test("shell-ball input bar keeps hook order stable across hidden and visible states", () => {
