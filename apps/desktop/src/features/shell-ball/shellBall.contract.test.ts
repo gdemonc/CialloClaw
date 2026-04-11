@@ -231,6 +231,61 @@ function withWindowControllerRuntime<T>(getByLabel: (label: string) => Promise<u
   }
 }
 
+function withHideOnCloseRequestRuntime<T>(
+  currentWindow: {
+    hide: () => Promise<void> | void;
+    onCloseRequested: (handler: (event: { preventDefault: () => void }) => Promise<void> | void) => unknown;
+  },
+  callback: (mod: {
+    installHideOnCloseRequest: () => unknown;
+  }) => Promise<T> | T,
+) {
+  const NodeModule = require("node:module") as any;
+  const originalLoad = NodeModule._load;
+  const modulePath = resolve(desktopRoot, "src/platform/hideOnCloseRequest.ts");
+  const source = readFileSync(modulePath, "utf8");
+
+  NodeModule._load = function loadHideOnCloseRequest(request: string, parent: unknown, isMain: boolean) {
+    if (request === "@tauri-apps/api/window") {
+      return {
+        getCurrentWindow() {
+          return currentWindow;
+        },
+      };
+    }
+
+    return originalLoad(request, parent, isMain);
+  };
+
+  const transpiledModule = { exports: {} as Record<string, unknown> };
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+    },
+    fileName: modulePath,
+  });
+  const moduleFactory = new Function("require", "module", "exports", transpiled.outputText) as (
+    require: NodeRequire,
+    module: { exports: Record<string, unknown> },
+    exports: Record<string, unknown>,
+  ) => void;
+
+  moduleFactory(require, transpiledModule, transpiledModule.exports);
+
+  const finalize = () => {
+    NodeModule._load = originalLoad;
+  };
+
+  try {
+    return Promise.resolve(callback(transpiledModule.exports as { installHideOnCloseRequest: () => unknown })).finally(finalize);
+  } catch (error) {
+    finalize();
+    throw error;
+  }
+}
+
 function withDesktopAliasRuntime<T>(callback: () => T) {
   const NodeModule = require("node:module") as any;
   const originalResolveFilename = NodeModule._resolveFilename;
@@ -750,6 +805,45 @@ test("window controller throws when a desktop window handle is missing", async (
     withWindowControllerRuntime(() => null, ({ openOrFocusDesktopWindow }) => openOrFocusDesktopWindow("dashboard")),
     /Desktop window not found: dashboard/,
   );
+});
+
+test("hide-on-close helper prevents the close request and hides the current window", async () => {
+  const calls: string[] = [];
+  let closeHandler: ((event: { preventDefault: () => void }) => Promise<void> | void) | null = null;
+
+  await withHideOnCloseRequestRuntime({
+    onCloseRequested(handler) {
+      calls.push("onCloseRequested");
+      closeHandler = handler;
+      return "unlisten";
+    },
+    async hide() {
+      calls.push("hide");
+    },
+  }, async ({ installHideOnCloseRequest }) => {
+    const result = installHideOnCloseRequest();
+
+    assert.equal(result, "unlisten");
+    assert.notEqual(closeHandler, null);
+
+    await closeHandler?.({
+      preventDefault() {
+        calls.push("preventDefault");
+      },
+    });
+  });
+
+  assert.deepEqual(calls, ["onCloseRequested", "preventDefault", "hide"]);
+});
+
+test("dashboard and control-panel entrypoints install hide-on-close handling", () => {
+  const dashboardMainSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/main.tsx"), "utf8");
+  const controlPanelMainSource = readFileSync(resolve(desktopRoot, "src/app/control-panel/main.tsx"), "utf8");
+
+  assert.match(dashboardMainSource, /installHideOnCloseRequest/);
+  assert.match(dashboardMainSource, /void installHideOnCloseRequest\(\)/);
+  assert.match(controlPanelMainSource, /installHideOnCloseRequest/);
+  assert.match(controlPanelMainSource, /void installHideOnCloseRequest\(\)/);
 });
 
 test("tray controller opens the control panel through the desktop window API", async () => {
