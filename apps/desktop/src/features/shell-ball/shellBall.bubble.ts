@@ -2,7 +2,7 @@ export type ShellBallBubbleMessageRole = "user" | "agent";
 
 export type ShellBallBubbleMessageFreshnessHint = "fresh" | "stale";
 
-export type ShellBallBubbleMessageMotionHint = "pulse" | "settle";
+export type ShellBallBubbleMessageMotionHint = "settle";
 
 export type ShellBallBubbleMessage = {
   id: string;

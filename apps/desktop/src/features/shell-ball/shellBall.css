@@ -1,4 +1,5 @@
 .shell-ball-window {
+  --shell-ball-helper-width: min(22rem, calc(100vw - 1rem));
   display: grid;
   justify-items: center;
   width: max-content;
@@ -97,7 +98,7 @@
   padding: 0;
   pointer-events: auto;
   position: relative;
-  width: min(22rem, calc(100vw - 1rem));
+  width: var(--shell-ball-helper-width);
 }
 
 .shell-ball-bubble-zone::before {
@@ -208,7 +209,7 @@
 
 .shell-ball-input-bar,
 .shell-ball-input-bar--hidden {
-  width: min(22rem, calc(100vw - 1rem));
+  width: var(--shell-ball-helper-width);
 }
 
 .shell-ball-input-bar {

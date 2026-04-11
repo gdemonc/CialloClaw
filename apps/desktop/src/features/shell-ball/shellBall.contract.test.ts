@@ -1092,7 +1092,7 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
           text: "Still listening.",
           createdAt: "2026-04-11T10:00:00.000Z",
           freshnessHint: "fresh",
-          motionHint: "pulse",
+          motionHint: "settle",
         },
       ],
     }),
@@ -1108,7 +1108,7 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
           text: "Still listening.",
           createdAt: "2026-04-11T10:00:00.000Z",
           freshnessHint: "fresh",
-          motionHint: "pulse",
+          motionHint: "settle",
         },
       ],
       visibility: {
@@ -1120,6 +1120,7 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
 });
 
 test("shell-ball bubble message contract supports local bubble feed hints", () => {
+  const bubbleContractSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.bubble.ts"), "utf8");
   const bubbleMessage: ShellBallBubbleMessage = {
     id: "msg-local-1",
     role: "user",
@@ -1137,6 +1138,7 @@ test("shell-ball bubble message contract supports local bubble feed hints", () =
     freshnessHint: "stale",
     motionHint: "settle",
   });
+  assert.doesNotMatch(bubbleContractSource, /"pulse"/);
 
   assert.deepEqual(createShellBallWindowSnapshot({
     visualState: "idle",
@@ -2124,7 +2126,12 @@ test("shell-ball bubble zone renders a real message list without placeholder chr
   assert.match(markup, /Open it for me\./);
   assert.match(markup, /shell-ball-bubble-zone__message-row shell-ball-bubble-zone__message-row--agent/);
   assert.match(markup, /shell-ball-bubble-zone__message-row shell-ball-bubble-zone__message-row--user/);
+  assert.match(
+    markup,
+    /<section class="shell-ball-bubble-zone" data-state="processing"><div class="shell-ball-bubble-zone__scroll"><div class="shell-ball-bubble-zone__message-entry"/,
+  );
   assert.doesNotMatch(markup, /shell-ball-bubble-zone__shell/);
+  assert.doesNotMatch(markup, /shell-ball-bubble-zone__panel|shell-ball-bubble-zone__frame|shell-ball-bubble-zone__card/);
   assert.doesNotMatch(markup, /<header/);
   assert.doesNotMatch(markup, /<input/);
   assert.doesNotMatch(markup, /toolbar/i);
@@ -2151,6 +2158,9 @@ test("shell-ball bubble window styles stay transparent, faded, and motion-ready"
   assert.match(shellBallStyles, /\.shell-ball-window--bubble\s*\{[\s\S]*background:\s*transparent;/);
   assert.match(shellBallStyles, /\.shell-ball-window--bubble\s*\{[\s\S]*border:\s*0;/);
   assert.match(shellBallStyles, /\.shell-ball-window--bubble\s*\{[\s\S]*box-shadow:\s*none;/);
+  assert.match(shellBallStyles, /--shell-ball-helper-width:\s*min\(22rem, calc\(100vw - 1rem\)\);/);
+  assert.match(shellBallStyles, /\.shell-ball-bubble-zone\s*\{[\s\S]*width:\s*var\(--shell-ball-helper-width\);/);
+  assert.match(shellBallStyles, /\.shell-ball-input-bar,\s*\.shell-ball-input-bar--hidden\s*\{[\s\S]*width:\s*var\(--shell-ball-helper-width\);/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*scrollbar-width:\s*none;/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll::-webkit-scrollbar\s*\{[\s\S]*display:\s*none;/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*mask-image:\s*linear-gradient\(/);
