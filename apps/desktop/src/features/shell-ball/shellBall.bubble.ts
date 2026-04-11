@@ -12,3 +12,7 @@ export type ShellBallBubbleMessage = {
   freshnessHint?: ShellBallBubbleMessageFreshnessHint;
   motionHint?: ShellBallBubbleMessageMotionHint;
 };
+
+export function cloneShellBallBubbleMessages(messages: ShellBallBubbleMessage[]): ShellBallBubbleMessage[] {
+  return [...messages];
+}

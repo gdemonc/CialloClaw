@@ -1102,6 +1102,57 @@ test("shell-ball bubble message contract supports local bubble feed hints", () =
     voicePreview: null,
     bubbleMessages: [],
   }).bubbleMessages, []);
+
+  const minimalBubbleMessage: ShellBallBubbleMessage = {
+    id: "msg-local-2",
+    role: "agent",
+    text: "On it.",
+    createdAt: "2026-04-11T10:01:00.000Z",
+  };
+
+  assert.deepEqual(minimalBubbleMessage, {
+    id: "msg-local-2",
+    role: "agent",
+    text: "On it.",
+    createdAt: "2026-04-11T10:01:00.000Z",
+  });
+});
+
+test("shell-ball window snapshot copies bubble message arrays defensively", () => {
+  const sourceMessages: ShellBallBubbleMessage[] = [
+    {
+      id: "msg-copy-1",
+      role: "agent",
+      text: "Drafting update.",
+      createdAt: "2026-04-11T10:02:00.000Z",
+    },
+  ];
+
+  const snapshot = createShellBallWindowSnapshot({
+    visualState: "hover_input",
+    inputValue: "draft",
+    voicePreview: null,
+    bubbleMessages: sourceMessages,
+  });
+
+  assert.notEqual(snapshot.bubbleMessages, sourceMessages);
+  assert.deepEqual(snapshot.bubbleMessages, sourceMessages);
+
+  sourceMessages.push({
+    id: "msg-copy-2",
+    role: "user",
+    text: "Keep going.",
+    createdAt: "2026-04-11T10:03:00.000Z",
+  });
+
+  assert.deepEqual(snapshot.bubbleMessages, [
+    {
+      id: "msg-copy-1",
+      role: "agent",
+      text: "Drafting update.",
+      createdAt: "2026-04-11T10:02:00.000Z",
+    },
+  ]);
 });
 
 test("shell-ball window metrics compute safe frames and helper anchors", () => {

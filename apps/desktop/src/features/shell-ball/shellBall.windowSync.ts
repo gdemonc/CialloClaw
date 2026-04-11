@@ -1,3 +1,4 @@
+import { cloneShellBallBubbleMessages } from "./shellBall.bubble";
 import type { ShellBallBubbleMessage } from "./shellBall.bubble";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
 import { getShellBallInputBarMode } from "./shellBall.interaction";
@@ -88,7 +89,7 @@ export function createShellBallWindowSnapshot(input: {
     inputBarMode: getShellBallInputBarMode(input.visualState),
     inputValue: input.inputValue,
     voicePreview: input.voicePreview,
-    bubbleMessages: input.bubbleMessages ?? [],
+    bubbleMessages: cloneShellBallBubbleMessages(input.bubbleMessages ?? []),
     visibility: getShellBallHelperWindowVisibility(input.visualState),
   };
 }
