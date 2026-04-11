@@ -226,6 +226,130 @@ function withWindowControllerRuntime<T>(getByLabel: (label: string) => Promise<u
   }
 }
 
+function withDesktopAliasRuntime<T>(callback: () => T) {
+  const NodeModule = require("node:module") as any;
+  const originalResolveFilename = NodeModule._resolveFilename;
+  const originalCssLoader = require.extensions[".css"];
+  const originalPngLoader = require.extensions[".png"];
+
+  require.extensions[".css"] = (module) => {
+    module.exports = "";
+  };
+
+  require.extensions[".png"] = (module, filename) => {
+    module.exports = filename;
+  };
+
+  NodeModule._resolveFilename = function resolveDesktopAlias(
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+    options?: unknown,
+  ) {
+    if (request.startsWith("@/")) {
+      const modulePath = request.slice(2);
+
+      if (modulePath.endsWith(".css") || modulePath.endsWith(".png")) {
+        return resolve(desktopRoot, "src", modulePath);
+      }
+
+      const emittedBasePath = resolve(desktopRoot, ".cache/shell-ball-tests", modulePath);
+      const emittedCandidates = [`${emittedBasePath}.js`, resolve(emittedBasePath, "index.js")];
+
+      for (const candidate of emittedCandidates) {
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    if (request === "@cialloclaw/ui") {
+      return resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/test-stubs/ui.js");
+    }
+
+    if (request === "@cialloclaw/protocol") {
+      return resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/test-stubs/protocol.js");
+    }
+
+    return originalResolveFilename.call(this, request, parent, isMain, options);
+  };
+
+  try {
+    return callback();
+  } finally {
+    NodeModule._resolveFilename = originalResolveFilename;
+
+    if (originalCssLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".css");
+    } else {
+      require.extensions[".css"] = originalCssLoader;
+    }
+
+    if (originalPngLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".png");
+    } else {
+      require.extensions[".png"] = originalPngLoader;
+    }
+  }
+}
+
+function withTrayControllerRuntime<T>(
+  openOrFocusDesktopWindow: (label: "dashboard" | "control-panel") => Promise<string>,
+  callback: (mod: { openControlPanelFromTray: () => Promise<string>; calls: Array<"dashboard" | "control-panel"> }) => Promise<T> | T,
+) {
+  const NodeModule = require("node:module") as any;
+  const originalLoad = NodeModule._load;
+  const modulePath = resolve(desktopRoot, ".cache/shell-ball-tests/platform/trayController.js");
+  const calls: Array<"dashboard" | "control-panel"> = [];
+
+  delete require.cache[modulePath];
+
+  NodeModule._load = function loadTrayController(request: string, parent: unknown, isMain: boolean) {
+    if (request === "@/platform/windowController") {
+      return {
+        openOrFocusDesktopWindow(label: "dashboard" | "control-panel") {
+          calls.push(label);
+          return openOrFocusDesktopWindow(label);
+        },
+      };
+    }
+
+    return originalLoad(request, parent, isMain);
+  };
+
+  const loaded = require(modulePath) as {
+    openControlPanelFromTray: () => Promise<string>;
+  };
+
+  const finalize = () => {
+    NodeModule._load = originalLoad;
+    delete require.cache[modulePath];
+  };
+
+  try {
+    return Promise.resolve(callback({ ...loaded, calls })).finally(finalize);
+  } catch (error) {
+    finalize();
+    throw error;
+  }
+}
+
+function renderDashboardAppMarkup() {
+  return withDesktopAliasRuntime(() => {
+    const modulePath = resolve(desktopRoot, ".cache/shell-ball-tests/features/dashboard/DashboardApp.js");
+
+    delete require.cache[modulePath];
+
+    try {
+      const { DashboardApp } = require(modulePath) as { DashboardApp: unknown };
+
+      return renderToStaticMarkup(createElement(DashboardApp as never));
+    } finally {
+      delete require.cache[modulePath];
+    }
+  });
+}
+
 function renderDashboardRouteSurface(hash: string) {
   const originalWindow = globalThis.window;
   const originalDocument = globalThis.document;
@@ -508,8 +632,6 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
     "utf8",
   );
   const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
-  const dashboardAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/DashboardApp.tsx"), "utf8");
-  const trayControllerSource = readFileSync(resolve(desktopRoot, "src/platform/trayController.ts"), "utf8");
   const dashboardRouteTargetsSource = readFileSync(
     resolve(desktopRoot, "src/features/dashboard/shared/dashboardRouteTargets.ts"),
     "utf8",
@@ -561,11 +683,6 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   assert.match(securityAppSource, /useNavigate\(/);
   assert.match(securityAppSource, /navigate\(resolveDashboardRoutePath\("home"\)\)/);
   assert.doesNotMatch(securityAppSource, /openDashboardRoute/);
-  assert.match(dashboardAppSource, /resolveDashboardRouteHref\("safety"\)/);
-  assert.doesNotMatch(dashboardAppSource, /openDashboardRoute/);
-  assert.doesNotMatch(dashboardAppSource, /openOrFocusDesktopWindow\("safety"\)/);
-  assert.match(trayControllerSource, /openOrFocusDesktopWindow\("control-panel"\)/);
-  assert.doesNotMatch(trayControllerSource, /openWindowLabel\("control-panel"\)/);
 });
 
 test("window controller focuses an existing labeled desktop window", async () => {
@@ -594,6 +711,20 @@ test("window controller throws when a desktop window handle is missing", async (
     withWindowControllerRuntime(() => null, ({ openOrFocusDesktopWindow }) => openOrFocusDesktopWindow("dashboard")),
     /Desktop window not found: dashboard/,
   );
+});
+
+test("tray controller opens the control panel through the desktop window API", async () => {
+  await withTrayControllerRuntime(async () => "control-panel", async ({ openControlPanelFromTray, calls }) => {
+    await openControlPanelFromTray();
+
+    assert.deepEqual(calls, ["control-panel"]);
+  });
+});
+
+test("dashboard app safety CTA renders the shared safety href", () => {
+  const markup = renderDashboardAppMarkup();
+
+  assert.match(markup, /href="\.\/dashboard\.html#\/safety"/);
 });
 
 test("dashboard route surface renders the live home and safety routes", () => {
