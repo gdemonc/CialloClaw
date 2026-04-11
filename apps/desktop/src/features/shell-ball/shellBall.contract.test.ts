@@ -193,7 +193,10 @@ function withDashboardRouteRuntime<T>(callback: (components: { DashboardRoot: un
   }
 }
 
-function withWindowControllerRuntime<T>(getByLabel: (label: string) => Promise<unknown> | unknown, callback: (mod: {
+function withWindowControllerRuntime<T>(runtime: {
+  getByLabel: (label: string) => Promise<unknown> | unknown;
+  createWindow?: (label: string, options: Record<string, unknown>) => unknown;
+}, callback: (mod: {
   openOrFocusDesktopWindow: (label: "dashboard" | "control-panel") => Promise<string>;
 }) => Promise<T> | T) {
   const NodeModule = require("node:module") as any;
@@ -204,10 +207,14 @@ function withWindowControllerRuntime<T>(getByLabel: (label: string) => Promise<u
 
   NodeModule._load = function loadWindowController(request: string, parent: unknown, isMain: boolean) {
     if (request === "@tauri-apps/api/window") {
+      function FakeWindow(this: unknown, label: string, options: Record<string, unknown>) {
+        return runtime.createWindow?.(label, options);
+      }
+
+      FakeWindow.getByLabel = runtime.getByLabel;
+
       return {
-        Window: {
-          getByLabel,
-        },
+        Window: FakeWindow,
       };
     }
 
@@ -633,6 +640,7 @@ test("shell-ball desktop window controller and capabilities stay aligned", () =>
     "dashboard",
     "control-panel",
   ]);
+  assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-create"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-position"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-size"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-start-dragging"), true);
@@ -649,6 +657,7 @@ test("shell-ball desktop window controller and capabilities stay aligned", () =>
 
   assert.deepEqual(generatedCapabilitySchema.default.windows, parsedCapabilityConfig.windows);
   assert.deepEqual(generatedCapabilitySchema.default.permissions, parsedCapabilityConfig.permissions);
+  assert.equal(generatedCapabilitySchema.default.permissions.includes("core:window:allow-create"), true);
   assert.equal(generatedCapabilitySchema.default.permissions.includes("core:window:allow-unminimize"), true);
 });
 
@@ -760,7 +769,6 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   assert.match(dashboardRouteTargetsSource, /export const dashboardSafetyRoutePath = "\/safety"/);
 
   assert.match(controllerSource, /export type DesktopWindowLabel = "dashboard" \| "control-panel"/);
-  assert.doesNotMatch(controllerSource, /new Window\(/);
   assert.doesNotMatch(controllerSource, /resolveDashboardRouteHref/);
   assert.doesNotMatch(controllerSource, /openDashboardRoute/);
   assert.match(dashboardBackHomeLinkSource, /resolveDashboardRoutePath\("home"\)/);
@@ -830,9 +838,11 @@ test("window controller focuses an existing labeled desktop window", async () =>
 
   assert.equal(capabilityConfig.permissions.includes("core:window:allow-unminimize"), true);
 
-  await withWindowControllerRuntime((label) => {
-    calls.push(`label:${label}`);
-    return handle;
+  await withWindowControllerRuntime({
+    getByLabel(label) {
+      calls.push(`label:${label}`);
+      return handle;
+    },
   }, async ({ openOrFocusDesktopWindow }) => {
     await openOrFocusDesktopWindow("dashboard");
   });
@@ -840,11 +850,67 @@ test("window controller focuses an existing labeled desktop window", async () =>
   assert.deepEqual(calls, ["label:dashboard", "unminimize", "show", "setFocus"]);
 });
 
-test("window controller throws when a desktop window handle is missing", async () => {
-  await assert.rejects(
-    withWindowControllerRuntime(() => null, ({ openOrFocusDesktopWindow }) => openOrFocusDesktopWindow("dashboard")),
-    /Desktop window not found: dashboard/,
-  );
+test("window controller recreates missing known desktop windows before focusing them", async () => {
+  const reopenScenarios = [
+    {
+      label: "dashboard",
+      expectedOptions: {
+        title: "CialloClaw Dashboard",
+        width: 1280,
+        height: 860,
+        visible: false,
+        url: "dashboard.html",
+      },
+    },
+    {
+      label: "control-panel",
+      expectedOptions: {
+        title: "CialloClaw Control Panel",
+        width: 1080,
+        height: 760,
+        visible: false,
+        url: "control-panel.html",
+      },
+    },
+  ] as const;
+
+  for (const scenario of reopenScenarios) {
+    const calls: string[] = [];
+    const recreatedHandle = {
+      async unminimize() {
+        calls.push("unminimize");
+      },
+      async show() {
+        calls.push("show");
+      },
+      async setFocus() {
+        calls.push("setFocus");
+      },
+    };
+
+    await withWindowControllerRuntime({
+      getByLabel(label) {
+        calls.push(`label:${label}`);
+        return null;
+      },
+      createWindow(label, options) {
+        calls.push(`create:${label}`);
+        assert.equal(label, scenario.label);
+        assert.deepEqual(options, scenario.expectedOptions);
+        return recreatedHandle;
+      },
+    }, async ({ openOrFocusDesktopWindow }) => {
+      await openOrFocusDesktopWindow(scenario.label);
+    });
+
+    assert.deepEqual(calls, [
+      `label:${scenario.label}`,
+      `create:${scenario.label}`,
+      "unminimize",
+      "show",
+      "setFocus",
+    ]);
+  }
 });
 
 test("hide-on-close helper prevents the close request and hides the current window", async () => {

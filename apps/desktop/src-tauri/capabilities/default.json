@@ -5,6 +5,7 @@
   "windows": ["shell-ball", "shell-ball-bubble", "shell-ball-input", "dashboard", "control-panel"],
   "permissions": [
     "core:default",
+    "core:window:allow-create",
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-set-position",
