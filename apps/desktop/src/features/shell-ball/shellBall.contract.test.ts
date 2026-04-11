@@ -260,6 +260,7 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   const controllerSource = readFileSync(resolve(desktopRoot, "src/platform/windowController.ts"), "utf8");
   const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
   const dashboardAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/DashboardApp.tsx"), "utf8");
+  const trayControllerSource = readFileSync(resolve(desktopRoot, "src/platform/trayController.ts"), "utf8");
 
   assert.match(controllerSource, /export type DesktopWindowLabel = "dashboard" \| "control-panel"/);
   assert.match(controllerSource, /export type WindowRouteLabel = "dashboard" \| "security"/);
@@ -276,6 +277,8 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   assert.doesNotMatch(securityAppSource, /openOrFocusDesktopWindow\("dashboard"\)/);
   assert.match(dashboardAppSource, /openWindowRoute\("security"\)/);
   assert.doesNotMatch(dashboardAppSource, /openOrFocusDesktopWindow\("security"\)/);
+  assert.match(trayControllerSource, /openOrFocusDesktopWindow\("control-panel"\)/);
+  assert.doesNotMatch(trayControllerSource, /openWindowLabel\("control-panel"\)/);
 });
 
 test("shell-ball input bar keeps hook order stable across hidden and visible states", () => {
