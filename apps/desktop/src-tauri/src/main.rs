@@ -10,7 +10,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use tauri::ipc::Channel;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg(windows)]
 use once_cell::sync::Lazy;
@@ -33,6 +33,8 @@ const SHELL_BALL_WINDOW_LABEL: &str = "shell-ball";
 const SHELL_BALL_BUBBLE_WINDOW_LABEL: &str = "shell-ball-bubble";
 const SHELL_BALL_INPUT_WINDOW_LABEL: &str = "shell-ball-input";
 const SHELL_BALL_PINNED_WINDOW_PREFIX: &str = "shell-ball-bubble-pinned-";
+const SHELL_BALL_DASHBOARD_TRANSITION_REQUEST_EVENT: &str =
+    "desktop-shell-ball:dashboard-transition-request";
 const TRAY_ICON_ID: &str = "main-tray";
 const TRAY_MENU_SHOW_SHELL_BALL_ID: &str = "show-shell-ball";
 const TRAY_MENU_HIDE_SHELL_BALL_ID: &str = "hide-shell-ball";
@@ -323,6 +325,17 @@ fn focus_webview_window(app: &tauri::AppHandle, label: &str) -> Result<(), Strin
     Ok(())
 }
 
+fn request_shell_ball_dashboard_open_transition(app: &tauri::AppHandle) -> Result<(), String> {
+    app.emit_to(
+        SHELL_BALL_WINDOW_LABEL,
+        SHELL_BALL_DASHBOARD_TRANSITION_REQUEST_EVENT,
+        serde_json::json!({
+            "direction": "open"
+        }),
+    )
+    .map_err(|error| format!("failed to emit shell-ball dashboard transition request: {error}"))
+}
+
 fn hide_shell_ball_cluster(app: &tauri::AppHandle) -> Result<(), String> {
     let shell_ball_labels = [
         SHELL_BALL_WINDOW_LABEL,
@@ -407,6 +420,10 @@ fn install_system_tray(app: &mut tauri::App) -> tauri::Result<()> {
                 ..
             } = event
             {
+                if let Err(error) = request_shell_ball_dashboard_open_transition(tray.app_handle()) {
+                    eprintln!("failed to trigger shell-ball dashboard transition from tray: {error}");
+                }
+
                 if let Err(error) = focus_webview_window(tray.app_handle(), DASHBOARD_WINDOW_LABEL) {
                     eprintln!("failed to open dashboard from tray: {error}");
                 }
