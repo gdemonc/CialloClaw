@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { getShellBallDemoViewModel } from "./shellBall.demo";
 import {
   createShellBallInteractionController,
@@ -65,6 +66,90 @@ import {
 import { useShellBallStore } from "../../stores/shellBallStore";
 
 const desktopRoot = process.cwd();
+
+function withDashboardRouteRuntime<T>(callback: (components: { DashboardHome: unknown; SafetyPage: unknown }) => T) {
+  const NodeModule = require("node:module") as typeof import("node:module") & {
+    _resolveFilename: (request: string, parent: unknown, isMain: boolean, options?: unknown) => string;
+  };
+  const originalResolveFilename = NodeModule._resolveFilename;
+  const originalCssLoader = require.extensions[".css"];
+  const originalPngLoader = require.extensions[".png"];
+
+  require.extensions[".css"] = (module) => {
+    module.exports = "";
+  };
+
+  require.extensions[".png"] = (module, filename) => {
+    module.exports = filename;
+  };
+
+  NodeModule._resolveFilename = function resolveDashboardAlias(request, parent, isMain, options) {
+    if (request.startsWith("@/")) {
+      const modulePath = request.slice(2);
+
+      if (modulePath.endsWith(".css") || modulePath.endsWith(".png")) {
+        return resolve(desktopRoot, "src", modulePath);
+      }
+
+      const emittedBasePath = resolve(desktopRoot, ".cache/shell-ball-tests", modulePath);
+      const emittedCandidates = [`${emittedBasePath}.js`, resolve(emittedBasePath, "index.js")];
+
+      for (const candidate of emittedCandidates) {
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    return originalResolveFilename.call(this, request, parent, isMain, options);
+  };
+
+  try {
+    const { DashboardHome } = require(resolve(desktopRoot, ".cache/shell-ball-tests/app/dashboard/DashboardHome.js"));
+    const { DashboardBackHomeLink } = require(
+      resolve(desktopRoot, ".cache/shell-ball-tests/features/dashboard/shared/DashboardBackHomeLink.js"),
+    );
+
+    return callback({ DashboardHome, SafetyPage: DashboardBackHomeLink });
+  } finally {
+    NodeModule._resolveFilename = originalResolveFilename;
+
+    if (originalCssLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".css");
+    } else {
+      require.extensions[".css"] = originalCssLoader;
+    }
+
+    if (originalPngLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".png");
+    } else {
+      require.extensions[".png"] = originalPngLoader;
+    }
+  }
+}
+
+function renderDashboardRouteSurface(initialPath: string) {
+  return withDashboardRouteRuntime(({ DashboardHome, SafetyPage }) =>
+    renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        { initialEntries: [initialPath] },
+        createElement(
+          Routes,
+          null,
+          createElement(Route, {
+            path: resolveDashboardRoutePath("home"),
+            element: createElement(DashboardHome as never),
+          }),
+          createElement(Route, {
+            path: `${resolveDashboardRoutePath("safety")}/*`,
+            element: createElement(SafetyPage as never),
+          }),
+        ),
+      ),
+    ),
+  );
+}
 
 function createFakeScheduler() {
   let nextId = 0;
@@ -296,6 +381,14 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   assert.doesNotMatch(dashboardAppSource, /openOrFocusDesktopWindow\("safety"\)/);
   assert.match(trayControllerSource, /openOrFocusDesktopWindow\("control-panel"\)/);
   assert.doesNotMatch(trayControllerSource, /openWindowLabel\("control-panel"\)/);
+});
+
+test("dashboard route surface renders the live home and safety routes", () => {
+  const homeMarkup = renderDashboardRouteSurface(resolveDashboardRoutePath("home"));
+  const safetyMarkup = renderDashboardRouteSurface(resolveDashboardRoutePath("safety"));
+
+  assert.match(homeMarkup, /Dashboard Orbit/);
+  assert.match(safetyMarkup, /返回首页/);
 });
 
 test("shell-ball input bar keeps hook order stable across hidden and visible states", () => {

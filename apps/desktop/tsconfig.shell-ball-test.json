@@ -8,6 +8,10 @@
     "rootDir": "./src"
   },
   "include": [
+    "src/app/dashboard/DashboardHome.tsx",
+    "src/features/dashboard/home/**/*",
+    "src/features/dashboard/shared/DashboardBackHomeLink.tsx",
+    "src/features/dashboard/shared/dashboardRouteTargets.ts",
     "src/features/shell-ball/shellBall.contract.test.ts",
     "src/features/shell-ball/ShellBallApp.tsx",
     "src/features/shell-ball/ShellBallSurface.tsx",
