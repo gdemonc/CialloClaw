@@ -196,12 +196,15 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
       await emitToShellBallWindowLabel(shellBallWindowLabels[role], shellBallWindowSyncEvents.snapshot, snapshotRef.current);
     }
 
-    async function syncPinnedBubbleWindowAnchor(bubbleId: string) {
+    async function syncPinnedBubbleWindowAnchor(
+      bubbleId: string,
+      items: ShellBallBubbleItem[] = bubbleItemsRef.current,
+    ) {
       if (detachedPinnedBubbleIdsRef.current.has(bubbleId)) {
         return;
       }
 
-      const bubbleItem = bubbleItemsRef.current.find((item) => item.bubble.bubble_id === bubbleId && item.bubble.pinned);
+      const bubbleItem = items.find((item) => item.bubble.bubble_id === bubbleId && item.bubble.pinned);
 
       if (bubbleItem === undefined) {
         return;
@@ -252,11 +255,13 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
     }
 
     function handleBubbleAction(payload: ShellBallBubbleActionPayload) {
-      setBubbleItems((currentItems) => applyShellBallBubbleAction(currentItems, payload));
+      const nextItems = applyShellBallBubbleAction(bubbleItemsRef.current, payload);
+      bubbleItemsRef.current = nextItems;
+      setBubbleItems(nextItems);
 
       if (payload.action === "pin") {
         detachedPinnedBubbleIdsRef.current.delete(payload.bubbleId);
-        void syncPinnedBubbleWindowAnchor(payload.bubbleId);
+        void syncPinnedBubbleWindowAnchor(payload.bubbleId, nextItems);
         return;
       }
 
