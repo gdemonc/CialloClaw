@@ -62,7 +62,7 @@ import {
   getShellBallPostSubmitInputReset,
   getShellBallDashboardOpenGesturePolicy,
   getShellBallVoicePreviewFromEvent,
-  reduceShellBallInteractionConsumed,
+  mapShellBallInteractionConsumedEventToFlag,
   shouldKeepShellBallVoicePreviewOnRegionLeave,
   syncShellBallInteractionController,
   useShellBallInteraction,
@@ -1449,10 +1449,10 @@ test("shell-ball dashboard gesture policy stays task-2 explicit", () => {
 });
 
 test("shell-ball interaction consumed reducer keeps pointer sequence scope explicit", () => {
-  const afterPressStart = reduceShellBallInteractionConsumed(true, "press_start");
+  const afterPressStart = mapShellBallInteractionConsumedEventToFlag("press_start");
   assert.equal(afterPressStart, false);
 
-  const afterLongPressVoiceEntry = reduceShellBallInteractionConsumed(afterPressStart, "long_press_voice_entry");
+  const afterLongPressVoiceEntry = mapShellBallInteractionConsumedEventToFlag("long_press_voice_entry");
   assert.equal(afterLongPressVoiceEntry, true);
   assert.equal(
     getShellBallDashboardOpenGesturePolicy({
@@ -1463,10 +1463,10 @@ test("shell-ball interaction consumed reducer keeps pointer sequence scope expli
     false,
   );
 
-  const afterVoiceFlowConsumed = reduceShellBallInteractionConsumed(afterLongPressVoiceEntry, "voice_flow_consumed");
+  const afterVoiceFlowConsumed = mapShellBallInteractionConsumedEventToFlag("voice_flow_consumed");
   assert.equal(afterVoiceFlowConsumed, true);
 
-  const afterNextPressStart = reduceShellBallInteractionConsumed(afterVoiceFlowConsumed, "press_start");
+  const afterNextPressStart = mapShellBallInteractionConsumedEventToFlag("press_start");
   assert.equal(afterNextPressStart, false);
   assert.equal(
     getShellBallDashboardOpenGesturePolicy({
@@ -1477,7 +1477,7 @@ test("shell-ball interaction consumed reducer keeps pointer sequence scope expli
     true,
   );
 
-  const afterForceStateReset = reduceShellBallInteractionConsumed(afterVoiceFlowConsumed, "force_state_reset");
+  const afterForceStateReset = mapShellBallInteractionConsumedEventToFlag("force_state_reset");
   assert.equal(afterForceStateReset, false);
 });
 
