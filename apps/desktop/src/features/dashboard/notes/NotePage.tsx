@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CircleDashed, NotebookPen, RefreshCcw } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { resolveDashboardModuleRoutePath, resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
@@ -23,40 +23,41 @@ export function NotePage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const feedbackTimeoutRef = useRef<number | null>(null);
 
-  const upcomingQuery = useQuery({
-    queryKey: ["dashboard", "notes", "bucket", "upcoming"],
-    queryFn: () => loadNoteBucket("upcoming"),
-    retry: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
-  });
-  const laterQuery = useQuery({
-    queryKey: ["dashboard", "notes", "bucket", "later"],
-    queryFn: () => loadNoteBucket("later"),
-    enabled: !upcomingQuery.isPending,
-    retry: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
-  });
-  const recurringQuery = useQuery({
-    queryKey: ["dashboard", "notes", "bucket", "recurring_rule"],
-    queryFn: () => loadNoteBucket("recurring_rule"),
-    enabled: !upcomingQuery.isPending && !laterQuery.isPending,
-    retry: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
-  });
-  const closedQuery = useQuery({
-    queryKey: ["dashboard", "notes", "bucket", "closed"],
-    queryFn: () => loadNoteBucket("closed"),
-    enabled: !upcomingQuery.isPending && !laterQuery.isPending && !recurringQuery.isPending,
-    retry: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
+  const [upcomingQuery, laterQuery, recurringQuery, closedQuery] = useQueries({
+    queries: [
+      {
+        queryKey: ["dashboard", "notes", "bucket", "upcoming"],
+        queryFn: () => loadNoteBucket("upcoming"),
+        retry: false,
+        refetchOnMount: false,
+        refetchOnReconnect: false,
+        refetchOnWindowFocus: false,
+      },
+      {
+        queryKey: ["dashboard", "notes", "bucket", "later"],
+        queryFn: () => loadNoteBucket("later"),
+        retry: false,
+        refetchOnMount: false,
+        refetchOnReconnect: false,
+        refetchOnWindowFocus: false,
+      },
+      {
+        queryKey: ["dashboard", "notes", "bucket", "recurring_rule"],
+        queryFn: () => loadNoteBucket("recurring_rule"),
+        retry: false,
+        refetchOnMount: false,
+        refetchOnReconnect: false,
+        refetchOnWindowFocus: false,
+      },
+      {
+        queryKey: ["dashboard", "notes", "bucket", "closed"],
+        queryFn: () => loadNoteBucket("closed"),
+        retry: false,
+        refetchOnMount: false,
+        refetchOnReconnect: false,
+        refetchOnWindowFocus: false,
+      },
+    ],
   });
 
   const upcomingItems = sortNotesByUrgency(upcomingQuery.data?.items ?? []);
@@ -171,7 +172,7 @@ export function NotePage() {
     <main className="dashboard-page note-preview-page" style={pageStyle}>
       <>
         <header className="dashboard-page__topbar">
-            <Link className="dashboard-page__home-link" to="/">
+            <Link className="dashboard-page__home-link" to={resolveDashboardRoutePath("home")}>
               <ArrowLeft className="h-4 w-4" />
               返回首页
             </Link>

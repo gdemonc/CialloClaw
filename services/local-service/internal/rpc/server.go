@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -112,6 +113,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // handleHealthz 提供最小健康检查和 orchestrator 快照输出。
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeDebugCORSHeaders(w)
+	setDebugCORSOrigin(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -133,6 +135,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // 正式主链路仍以本地受控传输为主，这里主要服务于联调和测试。
 func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 	writeDebugCORSHeaders(w)
+	setDebugCORSOrigin(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -163,6 +166,7 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 // handleDebugEvents 返回指定 task 当前尚未消费的通知列表。
 func (s *Server) handleDebugEvents(w http.ResponseWriter, r *http.Request) {
 	writeDebugCORSHeaders(w)
+	setDebugCORSOrigin(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -200,6 +204,7 @@ func (s *Server) handleDebugEvents(w http.ResponseWriter, r *http.Request) {
 // 这条链路主要用于调试前端观察 task.updated、delivery.ready 等事件。
 func (s *Server) handleDebugEventStream(w http.ResponseWriter, r *http.Request) {
 	writeDebugCORSHeaders(w)
+	setDebugCORSOrigin(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -255,9 +260,28 @@ func (s *Server) handleDebugEventStream(w http.ResponseWriter, r *http.Request) 
 }
 
 func writeDebugCORSHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+func setDebugCORSOrigin(w http.ResponseWriter, r *http.Request) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return
+	}
+
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	if host != "localhost" && host != "127.0.0.1" {
+		return
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Vary", "Origin")
 }
 
 // handleStreamConn 处理当前模块的相关逻辑。
