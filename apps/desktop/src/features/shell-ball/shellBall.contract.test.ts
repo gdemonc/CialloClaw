@@ -50,8 +50,10 @@ import {
   resolveDashboardRoutePath,
 } from "../dashboard/shared/dashboardRouteTargets";
 import {
+  getShellBallBubbleRegionState,
   createShellBallWindowSnapshot,
   getShellBallHelperWindowVisibility,
+  getShellBallVisibleBubbleItems,
   shellBallWindowSyncEvents,
 } from "./shellBall.windowSync";
 import type { ShellBallBubbleItem } from "./shellBall.bubble";
@@ -776,7 +778,7 @@ test("shell-ball helper windows avoid auto-focus behavior", () => {
   assert.match(controllerSource, /setShellBallWindowFocusable\([^)]*focusable: boolean\)/);
   assert.match(controllerSource, /setShellBallWindowIgnoreCursorEvents\([^)]*ignore: boolean\)/);
   assert.match(metricsSource, /setShellBallWindowFocusable\(role, false\)/);
-  assert.match(metricsSource, /setShellBallWindowIgnoreCursorEvents\(role, true\)/);
+  assert.match(metricsSource, /setShellBallWindowIgnoreCursorEvents\(role, clickThrough\)/);
   assert.doesNotMatch(metricsSource, /setFocus\(\)/);
   assert.doesNotMatch(inputBarSource, /focus\(\{ preventScroll: true \}\)/);
   assert.doesNotMatch(planSource, /focusable: false/);
@@ -1072,7 +1074,7 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
   });
 
   assert.deepEqual(getShellBallHelperWindowVisibility("idle"), {
-    bubble: false,
+    bubble: true,
     input: false,
   });
 
@@ -1130,12 +1132,79 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
           },
         },
       ],
+      bubbleRegion: {
+        strategy: "persistent",
+        hasVisibleItems: true,
+        clickThrough: false,
+      },
       visibility: {
         bubble: true,
         input: true,
       },
     },
   );
+});
+
+test("shell-ball bubble region existence strategy is explicit and item-driven", () => {
+  const bubbleItems: ShellBallBubbleItem[] = [
+    {
+      bubble: {
+        bubble_id: "bubble-visible",
+        task_id: "task-visible",
+        type: "status",
+        text: "Visible bubble",
+        pinned: false,
+        hidden: false,
+        created_at: "2026-04-11T10:00:00.000Z",
+      },
+      role: "agent",
+      desktop: {
+        lifecycleState: "visible",
+      },
+    },
+    {
+      bubble: {
+        bubble_id: "bubble-pinned",
+        task_id: "task-pinned",
+        type: "result",
+        text: "Pinned bubble",
+        pinned: true,
+        hidden: false,
+        created_at: "2026-04-11T10:01:00.000Z",
+      },
+      role: "user",
+      desktop: {
+        lifecycleState: "visible",
+      },
+    },
+    {
+      bubble: {
+        bubble_id: "bubble-hidden",
+        task_id: "task-hidden",
+        type: "status",
+        text: "Hidden bubble",
+        pinned: false,
+        hidden: true,
+        created_at: "2026-04-11T10:02:00.000Z",
+      },
+      role: "agent",
+      desktop: {
+        lifecycleState: "hidden",
+      },
+    },
+  ];
+
+  assert.deepEqual(getShellBallVisibleBubbleItems(bubbleItems).map((item) => item.bubble.bubble_id), ["bubble-visible"]);
+  assert.deepEqual(getShellBallBubbleRegionState(bubbleItems), {
+    strategy: "persistent",
+    hasVisibleItems: true,
+    clickThrough: false,
+  });
+  assert.deepEqual(getShellBallBubbleRegionState([]), {
+    strategy: "persistent",
+    hasVisibleItems: false,
+    clickThrough: true,
+  });
 });
 
 test("shell-ball bubble item contract wraps protocol payload and keeps desktop-only state local", () => {
@@ -2122,6 +2191,9 @@ test("shell-ball coordinator snapshots carry shell-ball-local bubble messages", 
 
   assert.ok(Array.isArray(snapshot.bubbleItems));
   assert.ok(snapshot.bubbleItems.length > 0);
+  assert.equal(snapshot.bubbleRegion.strategy, "persistent");
+  assert.equal(snapshot.bubbleRegion.hasVisibleItems, true);
+  assert.equal(snapshot.bubbleRegion.clickThrough, false);
   assert.equal(snapshot.bubbleItems.at(-1)?.bubble.created_at, "2026-04-11T10:05:00.000Z");
   assert.equal(snapshot.bubbleItems.at(-1)?.desktop.freshnessHint, "fresh");
   assert.equal(snapshot.bubbleItems.at(-1)?.desktop.motionHint, "settle");
@@ -2203,6 +2275,7 @@ test("shell-ball bubble window resolves bubble items from the helper-window snap
       },
     ],
   });
+  helperSnapshot.bubbleRegion = getShellBallBubbleRegionState(helperSnapshot.bubbleItems);
   let capturedProps: Record<string, unknown> | null = null;
 
   const { ShellBallBubbleWindow: RuntimeShellBallBubbleWindow } = withShellBallModuleRuntime("ShellBallBubbleWindow.tsx", {
@@ -2219,7 +2292,7 @@ test("shell-ball bubble window resolves bubble items from the helper-window snap
     },
     "./components/ShellBallBubbleZone": {
       ShellBallBubbleZone(props: Record<string, unknown>) {
-        capturedProps = props;
+        capturedProps = { ...(capturedProps ?? {}), ...props };
         return createElement("section", { className: "shell-ball-bubble-zone-stub" });
       },
     },
@@ -2229,7 +2302,7 @@ test("shell-ball bubble window resolves bubble items from the helper-window snap
 
   assert.deepEqual(capturedProps, {
     visualState: "processing",
-    bubbleItems: helperSnapshot.bubbleItems,
+    bubbleItems: getShellBallVisibleBubbleItems(helperSnapshot.bubbleItems),
   });
 });
 
@@ -2256,6 +2329,7 @@ test("shell-ball bubble window does not depend on only visualState to render its
       },
     ],
   });
+  helperSnapshot.bubbleRegion = getShellBallBubbleRegionState(helperSnapshot.bubbleItems);
   let capturedProps: Record<string, unknown> | null = null;
 
   const { ShellBallBubbleWindow: RuntimeShellBallBubbleWindow } = withShellBallModuleRuntime("ShellBallBubbleWindow.tsx", {
@@ -2266,13 +2340,14 @@ test("shell-ball bubble window does not depend on only visualState to render its
       },
     },
     "./useShellBallWindowMetrics": {
-      useShellBallWindowMetrics() {
+      useShellBallWindowMetrics(input: Record<string, unknown>) {
+        capturedProps = { ...(capturedProps ?? {}), metricsInput: input };
         return { rootRef: null };
       },
     },
     "./components/ShellBallBubbleZone": {
       ShellBallBubbleZone(props: Record<string, unknown>) {
-        capturedProps = props;
+        capturedProps = { ...(capturedProps ?? {}), ...props };
         return createElement("section", { className: "shell-ball-bubble-zone-stub" });
       },
     },
@@ -2282,7 +2357,12 @@ test("shell-ball bubble window does not depend on only visualState to render its
 
   assert.deepEqual(capturedProps, {
     visualState: "voice_locked",
-    bubbleItems: helperSnapshot.bubbleItems,
+    bubbleItems: getShellBallVisibleBubbleItems(helperSnapshot.bubbleItems),
+    metricsInput: {
+      role: "bubble",
+      visible: true,
+      clickThrough: helperSnapshot.bubbleRegion.clickThrough,
+    },
   });
 });
 

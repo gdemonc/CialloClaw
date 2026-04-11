@@ -23,12 +23,19 @@ export type ShellBallHelperWindowVisibility = {
   input: boolean;
 };
 
+export type ShellBallBubbleRegionState = {
+  strategy: "persistent";
+  hasVisibleItems: boolean;
+  clickThrough: boolean;
+};
+
 export type ShellBallWindowSnapshot = {
   visualState: ShellBallVisualState;
   inputBarMode: ShellBallInputBarMode;
   inputValue: string;
   voicePreview: ShellBallVoicePreview;
   bubbleItems: ShellBallBubbleItem[];
+  bubbleRegion: ShellBallBubbleRegionState;
   visibility: ShellBallHelperWindowVisibility;
 };
 
@@ -73,8 +80,22 @@ export function getShellBallHelperWindowVisibility(
   visualState: ShellBallVisualState,
 ): ShellBallHelperWindowVisibility {
   return {
-    bubble: visualState !== "idle",
+    bubble: true,
     input: getShellBallInputBarMode(visualState) !== "hidden",
+  };
+}
+
+export function getShellBallVisibleBubbleItems(items: ShellBallBubbleItem[]): ShellBallBubbleItem[] {
+  return items.filter((item) => item.bubble.hidden === false && item.bubble.pinned === false);
+}
+
+export function getShellBallBubbleRegionState(items: ShellBallBubbleItem[]): ShellBallBubbleRegionState {
+  const visibleItems = getShellBallVisibleBubbleItems(items);
+
+  return {
+    strategy: "persistent",
+    hasVisibleItems: visibleItems.length > 0,
+    clickThrough: visibleItems.length === 0,
   };
 }
 
@@ -84,12 +105,15 @@ export function createShellBallWindowSnapshot(input: {
   voicePreview: ShellBallVoicePreview;
   bubbleItems?: ShellBallBubbleItem[];
 }): ShellBallWindowSnapshot {
+  const bubbleItems = cloneShellBallBubbleItems(input.bubbleItems ?? []);
+
   return {
     visualState: input.visualState,
     inputBarMode: getShellBallInputBarMode(input.visualState),
     inputValue: input.inputValue,
     voicePreview: input.voicePreview,
-    bubbleItems: cloneShellBallBubbleItems(input.bubbleItems ?? []),
+    bubbleItems,
+    bubbleRegion: getShellBallBubbleRegionState(bubbleItems),
     visibility: getShellBallHelperWindowVisibility(input.visualState),
   };
 }

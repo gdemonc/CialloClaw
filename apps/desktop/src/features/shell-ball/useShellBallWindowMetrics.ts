@@ -50,6 +50,7 @@ type ShellBallWindowBounds = {
 type UseShellBallWindowMetricsInput = {
   role: "ball" | ShellBallHelperWindowRole;
   visible?: boolean;
+  clickThrough?: boolean;
 };
 
 export function createShellBallWindowFrame(
@@ -132,7 +133,7 @@ function getShellBallBoundsFromMonitor(monitor: Monitor | null, geometry: ShellB
   };
 }
 
-export function useShellBallWindowMetrics({ role, visible = true }: UseShellBallWindowMetricsInput) {
+export function useShellBallWindowMetrics({ role, visible = true, clickThrough = false }: UseShellBallWindowMetricsInput) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [windowFrame, setWindowFrame] = useState<ShellBallWindowSize | null>(null);
   const geometryRef = useRef<ShellBallWindowGeometry | null>(null);
@@ -262,7 +263,7 @@ export function useShellBallWindowMetrics({ role, visible = true }: UseShellBall
 
     if (role === "bubble") {
       void setShellBallWindowFocusable(role, false);
-      void setShellBallWindowIgnoreCursorEvents(role, true);
+      void setShellBallWindowIgnoreCursorEvents(role, clickThrough);
     }
 
     let cleanup: (() => void) | null = null;
@@ -325,7 +326,7 @@ export function useShellBallWindowMetrics({ role, visible = true }: UseShellBall
       disposed = true;
       cleanup?.();
     };
-  }, [role, visible, windowFrame]);
+  }, [clickThrough, role, visible, windowFrame]);
 
   useEffect(() => {
     if (role === "ball") {
