@@ -1,5 +1,5 @@
 import type { ShellBallDualFormState, ShellBallVisualState } from "./shellBall.types";
-import { getShellBallDualFormDemoViewModel } from "./shellBall.demo";
+import { getShellBallDualFormRuntimeViewModel } from "./shellBall.runtime";
 import { getShellBallVisibleBubbleItems } from "./shellBall.windowSync";
 import { emitShellBallBubbleAction, useShellBallHelperWindowSnapshot } from "./useShellBallCoordinator";
 import { useShellBallWindowMetrics } from "./useShellBallWindowMetrics";
@@ -31,7 +31,7 @@ export function ShellBallBubbleWindow({ visualState, dualFormState }: ShellBallB
     clickThrough: snapshot.bubbleRegion.clickThrough,
   });
   const summary = shouldShowBubbleSummary(resolvedDualFormState)
-    ? getShellBallDualFormDemoViewModel(resolvedDualFormState)
+    ? getShellBallDualFormRuntimeViewModel(resolvedDualFormState)
     : null;
 
   return (

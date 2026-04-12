@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
 import type { ShellBallDualFormState, ShellBallInputBarMode } from "./shellBall.types";
-import { getShellBallDualFormDemoViewModel } from "./shellBall.demo";
+import { getShellBallDualFormRuntimeViewModel } from "./shellBall.runtime";
 import {
   emitShellBallInputDraft,
   emitShellBallInputFocus,
@@ -92,28 +92,8 @@ export function ShellBallInputWindow({
     void emitShellBallInputFocus(focused);
   }
 
-  function handleAction(label: string) {
-    if (label === "允许本次") {
-      void emitShellBallPrimaryAction("authorization_allow", "input");
-      return;
-    }
-
-    if (label === "拒绝") {
-      void emitShellBallPrimaryAction("authorization_reject", "input");
-      return;
-    }
-
-    if (label === "查看详情") {
-      void emitShellBallPrimaryAction("authorization_details", "input");
-      return;
-    }
-
-    if (label === "修改请求") {
-      handleFocusChange(true);
-      return;
-    }
-
-    handleSubmit();
+  function handleAction(action: NonNullable<typeof actionSummary>["actions"][number]) {
+    void emitShellBallPrimaryAction(action.emitAction, "input");
   }
 
   return (
@@ -130,17 +110,18 @@ export function ShellBallInputWindow({
     >
       {actionSummary === null ? null : (
         <div className="shell-ball-input-window__actions" aria-label="Shell-ball next actions">
-          {actionSummary.actionLabels.map((label) => (
+          {actionSummary.actions.map((action) => (
             <button
-              key={label}
+              key={action.id}
               type="button"
               className="shell-ball-input-window__action"
-              data-action-intent={getShellBallInputActionIntent(label)}
+              data-action-id={action.id}
+              data-action-intent={action.intent}
               onClick={() => {
-                handleAction(label);
+                handleAction(action);
               }}
             >
-              {label}
+              {action.label}
             </button>
           ))}
         </div>
@@ -165,29 +146,8 @@ function getShellBallInputActionSummary(state: ShellBallDualFormState) {
     (state.systemState === "completed" && state.engagementKind === "result") ||
     state.systemState === "abnormal"
   ) {
-    return getShellBallDualFormDemoViewModel(state);
+    return getShellBallDualFormRuntimeViewModel(state);
   }
 
   return null;
-}
-
-function getShellBallInputActionIntent(label: string) {
-  switch (label) {
-    case "允许本次":
-      return "allow";
-    case "拒绝":
-      return "reject";
-    case "查看详情":
-      return "details";
-    case "修改请求":
-      return "modify";
-    case "继续下一步":
-      return "next_step";
-    case "重试":
-      return "retry";
-    case "确认操作":
-      return "confirm";
-    default:
-      return "default";
-  }
 }

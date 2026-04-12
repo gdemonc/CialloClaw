@@ -23,9 +23,14 @@ export type ShellBallPrimaryAction =
   | "attach_file"
   | "submit"
   | "primary_click"
+  | "confirm_intent"
   | "authorization_allow"
   | "authorization_reject"
-  | "authorization_details";
+  | "authorization_details"
+  | "authorization_modify"
+  | "result_continue"
+  | "abnormal_retry"
+  | "abnormal_modify";
 
 export type ShellBallBubbleAction = "pin" | "unpin" | "delete";
 

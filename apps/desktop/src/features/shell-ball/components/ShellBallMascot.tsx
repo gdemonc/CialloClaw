@@ -4,6 +4,7 @@ import { AudioLines, ShieldAlert } from "lucide-react";
 import { cn } from "../../../utils/cn";
 import type { ShellBallVoicePreview } from "../shellBall.interaction";
 import type { ShellBallDualFormState, ShellBallMotionConfig, ShellBallVisualState } from "../shellBall.types";
+import { getShellBallMascotFallbackDualFormState } from "../shellBall.runtime";
 
 type ShellBallMascotProps = {
   visualState: ShellBallVisualState;
@@ -366,25 +367,6 @@ export function ShellBallMascot({
       />
     </div>
   );
-}
-
-function getShellBallMascotFallbackDualFormState(visualState: ShellBallVisualState): ShellBallDualFormState {
-  switch (visualState) {
-    case "idle":
-      return { systemState: "idle", engagementKind: "none" };
-    case "hover_input":
-      return { systemState: "awakenable", engagementKind: "none" };
-    case "confirming_intent":
-      return { systemState: "intent_confirming", engagementKind: "text_selection" };
-    case "processing":
-      return { systemState: "processing", engagementKind: "text_selection" };
-    case "waiting_auth":
-      return { systemState: "waiting_confirm", engagementKind: "file_drag", waitingConfirmReason: "authorization" };
-    case "voice_listening":
-      return { systemState: "capturing", engagementKind: "voice", voiceStage: "listening" };
-    case "voice_locked":
-      return { systemState: "capturing", engagementKind: "voice", voiceStage: "locked" };
-  }
 }
 
 function getShellBallMascotStateSigil(state: ShellBallDualFormState) {

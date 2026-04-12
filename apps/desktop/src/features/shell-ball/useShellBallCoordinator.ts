@@ -264,6 +264,9 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         case "submit":
           handlersRef.current.onSubmitText();
           break;
+        case "confirm_intent":
+          handlersRef.current.onSubmitText();
+          break;
         case "authorization_allow":
           handlersRef.current.onSubmitText();
           break;
@@ -271,6 +274,18 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
           handlersRef.current.onInputFocusChange(false);
           break;
         case "authorization_details":
+          handlersRef.current.onInputFocusChange(true);
+          break;
+        case "authorization_modify":
+          handlersRef.current.onInputFocusChange(true);
+          break;
+        case "result_continue":
+          handlersRef.current.onInputFocusChange(true);
+          break;
+        case "abnormal_retry":
+          handlersRef.current.onSubmitText();
+          break;
+        case "abnormal_modify":
           handlersRef.current.onInputFocusChange(true);
           break;
         case "primary_click":

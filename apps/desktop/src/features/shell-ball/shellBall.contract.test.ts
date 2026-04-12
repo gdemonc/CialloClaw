@@ -4090,6 +4090,13 @@ test("shell-ball input window keeps actions in the lower helper for authorizatio
   assert.match(authMarkup, /data-action-intent="reject"/);
   assert.match(authMarkup, /data-action-intent="details"/);
   assert.match(authMarkup, /data-action-intent="modify"/);
+  assert.match(authMarkup, /data-action-id="authorization_allow"/);
+  assert.match(authMarkup, /data-action-id="authorization_reject"/);
+  assert.match(authMarkup, /data-action-id="authorization_details"/);
+  assert.match(authMarkup, /data-action-id="authorization_modify"/);
+  assert.match(completedMarkup, /data-action-id="result_continue"/);
+  assert.match(abnormalMarkup, /data-action-id="abnormal_retry"/);
+  assert.match(abnormalMarkup, /data-action-id="abnormal_modify"/);
   assert.match(completedMarkup, /继续下一步/);
   assert.match(abnormalMarkup, /重试/);
   assert.match(abnormalMarkup, /修改请求/);
@@ -4101,13 +4108,37 @@ test("shell-ball input helper routes authorization actions through distinct loca
   const inputWindowSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallInputWindow.tsx"), "utf8");
   const windowSyncSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.windowSync.ts"), "utf8");
 
-  assert.doesNotMatch(inputWindowSource, /label === "拒绝" \|\| label === "查看详情"/);
-  assert.match(inputWindowSource, /emitShellBallPrimaryAction\("authorization_allow", "input"\)/);
-  assert.match(inputWindowSource, /emitShellBallPrimaryAction\("authorization_reject", "input"\)/);
-  assert.match(inputWindowSource, /emitShellBallPrimaryAction\("authorization_details", "input"\)/);
+  assert.doesNotMatch(inputWindowSource, /handleAction\(label: string\)/);
+  assert.doesNotMatch(inputWindowSource, /label === "允许本次"/);
+  assert.match(inputWindowSource, /handleAction\(action:/);
+  assert.match(inputWindowSource, /emitShellBallPrimaryAction\(action\.emitAction, "input"\)/);
   assert.match(windowSyncSource, /"authorization_allow"/);
   assert.match(windowSyncSource, /"authorization_reject"/);
   assert.match(windowSyncSource, /"authorization_details"/);
+  assert.match(windowSyncSource, /"authorization_modify"/);
+  assert.match(windowSyncSource, /"result_continue"/);
+  assert.match(windowSyncSource, /"abnormal_retry"/);
+  assert.match(windowSyncSource, /"abnormal_modify"/);
+});
+
+test("shell-ball runtime ui uses a dedicated runtime mapper instead of shell-ball demo fixtures", () => {
+  const inputWindowSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallInputWindow.tsx"), "utf8");
+  const bubbleWindowSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallBubbleWindow.tsx"), "utf8");
+  const surfaceSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallSurface.tsx"), "utf8");
+
+  assert.doesNotMatch(inputWindowSource, /from "\.\/shellBall\.demo"/);
+  assert.doesNotMatch(bubbleWindowSource, /from "\.\/shellBall\.demo"/);
+  assert.doesNotMatch(surfaceSource, /from "\.\/shellBall\.demo"/);
+  assert.match(inputWindowSource, /from "\.\/shellBall\.runtime"/);
+  assert.match(bubbleWindowSource, /from "\.\/shellBall\.runtime"/);
+  assert.match(surfaceSource, /from "\.\/shellBall\.runtime"/);
+});
+
+test("shell-ball mascot avoids in-file fallback dual-form derivation", () => {
+  const mascotSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/components/ShellBallMascot.tsx"), "utf8");
+
+  assert.doesNotMatch(mascotSource, /function getShellBallMascotFallbackDualFormState/);
+  assert.match(mascotSource, /getShellBallMascotFallbackDualFormState/);
 });
 
 test("shell-ball surface renders the mascot-only floating structure without the demo switcher", () => {

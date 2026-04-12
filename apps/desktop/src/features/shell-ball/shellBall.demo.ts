@@ -1,4 +1,5 @@
 import type { ShellBallDemoViewModel, ShellBallDualFormState, ShellBallVisualState } from "./shellBall.types";
+import { getShellBallDualFormRuntimeViewModel } from "./shellBall.runtime";
 
 export const shellBallDemoFixtures = {
   idle: {
@@ -89,55 +90,18 @@ export type ShellBallDualFormDemoViewModel = {
 };
 
 export function getShellBallDualFormDemoViewModel(state: ShellBallDualFormState): ShellBallDualFormDemoViewModel {
-  if (state.systemState === "awakenable" && state.engagementKind === "text_selection") {
-    return {
-      ballLabel: "文本可操作提示",
-      bubbleTitle: "已识别当前选中文本",
-      bubbleText: "可以直接解释、翻译或总结这段内容。",
-      actionLabels: ["确认操作", "修改请求"],
-    };
-  }
-
-  if (state.systemState === "processing" && state.engagementKind === "file_parsing") {
-    return {
-      ballLabel: "文件解析中",
-      bubbleTitle: "正在解析文件内容",
-      bubbleText: "先完成结构识别，再进入后续处理。",
-      actionLabels: ["处理中"],
-    };
-  }
-
-  if (state.systemState === "waiting_confirm" && state.waitingConfirmReason === "authorization") {
-    return {
-      ballLabel: "等待授权",
-      bubbleTitle: "此操作需要你的授权",
-      bubbleText: "已识别潜在影响范围，请先确认是否继续。",
-      actionLabels: ["允许本次", "拒绝", "查看详情", "修改请求"],
-    };
-  }
-
-  if (state.systemState === "completed" && state.engagementKind === "result") {
-    return {
-      ballLabel: "结果已就绪",
-      bubbleTitle: "轻量结果已准备好",
-      bubbleText: "你可以直接查看结果，或继续推进下一步。",
-      actionLabels: ["继续下一步"],
-    };
-  }
-
-  if (state.systemState === "abnormal") {
-    return {
-      ballLabel: "处理异常",
-      bubbleTitle: "当前对象处理失败",
-      bubbleText: "可以调整请求后重试，或回到上一步重新确认。",
-      actionLabels: ["重试", "修改请求"],
-    };
-  }
+  const runtimeViewModel = getShellBallDualFormRuntimeViewModel(state);
+  const actionLabels =
+    runtimeViewModel.actions.length > 0
+      ? runtimeViewModel.actions.map((action) => action.label)
+      : state.systemState === "processing" && state.engagementKind === "file_parsing"
+        ? ["处理中"]
+        : [];
 
   return {
-    ballLabel: "近场承接中",
-    bubbleTitle: "当前状态已同步",
-    bubbleText: "悬浮球将根据本地双层形态继续承接。",
-    actionLabels: ["继续"],
+    ballLabel: runtimeViewModel.ballLabel,
+    bubbleTitle: runtimeViewModel.bubbleTitle,
+    bubbleText: runtimeViewModel.bubbleText,
+    actionLabels,
   };
 }
