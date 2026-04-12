@@ -155,6 +155,24 @@ export function deriveShellBallLocalInteractionContext(input: {
   }
 }
 
+export function deriveShellBallEffectiveInteractionContext(input: {
+  storedContext: ShellBallLocalInteractionContext;
+  previousVisualState: ShellBallVisualState;
+  currentVisualState: ShellBallVisualState;
+  pendingHint?: ShellBallLocalInteractionHint;
+}): ShellBallLocalInteractionContext {
+  if (input.previousVisualState === input.currentVisualState && input.pendingHint === undefined) {
+    return input.storedContext;
+  }
+
+  return deriveShellBallLocalInteractionContext({
+    previousContext: input.storedContext,
+    previousVisualState: input.previousVisualState,
+    nextVisualState: input.currentVisualState,
+    hint: input.pendingHint,
+  });
+}
+
 function getShellBallActiveEngagementKind(input: {
   visualState: Extract<ShellBallVisualState, "confirming_intent" | "processing" | "waiting_auth">;
   context: ShellBallLocalInteractionContext;
@@ -488,9 +506,16 @@ export function useShellBallInteraction() {
     syncVisualState();
   }
 
+  const effectiveInteractionContext = deriveShellBallEffectiveInteractionContext({
+    storedContext: localInteractionContext,
+    previousVisualState: previousVisualStateRef.current,
+    currentVisualState: visualState,
+    pendingHint: pendingInteractionHintRef.current ?? undefined,
+  });
+
   const dualFormState = deriveShellBallDualFormState({
     visualState,
-    context: localInteractionContext,
+    context: effectiveInteractionContext,
   });
 
   useEffect(() => {
@@ -503,14 +528,7 @@ export function useShellBallInteraction() {
     }
 
     if (previousVisualStateRef.current !== visualState) {
-      setLocalInteractionContext((current) =>
-        deriveShellBallLocalInteractionContext({
-          previousContext: current,
-          previousVisualState: previousVisualStateRef.current,
-          nextVisualState: visualState,
-          hint: pendingInteractionHintRef.current ?? undefined,
-        }),
-      );
+      setLocalInteractionContext(effectiveInteractionContext);
       previousVisualStateRef.current = visualState;
       pendingInteractionHintRef.current = null;
     }

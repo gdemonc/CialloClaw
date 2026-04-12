@@ -82,6 +82,7 @@ import {
 import { applyShellBallBubbleAction } from "./useShellBallCoordinator";
 import {
   deriveShellBallDualFormState,
+  deriveShellBallEffectiveInteractionContext,
   deriveShellBallLocalInteractionContext,
   getShellBallPostSubmitInputReset,
   getShellBallDashboardOpenGesturePolicy,
@@ -915,6 +916,39 @@ test("shell-ball keeps frontend-local engagement context legal across force and 
     {
       hasRecommendation: false,
       activeEngagementKind: "voice",
+    },
+  );
+});
+
+test("shell-ball derives an effective interaction context during render for immediate dual-form transitions", () => {
+  const previousContext = {
+    hasRecommendation: false,
+    activeEngagementKind: null,
+  };
+
+  const effectiveContext = deriveShellBallEffectiveInteractionContext({
+    storedContext: previousContext,
+    previousVisualState: "hover_input",
+    currentVisualState: "waiting_auth",
+    pendingHint: {
+      activeEngagementKind: "file_drag" as const,
+    },
+  });
+
+  assert.deepEqual(effectiveContext, {
+    hasRecommendation: false,
+    activeEngagementKind: "file_drag",
+  });
+
+  assert.deepEqual(
+    deriveShellBallDualFormState({
+      visualState: "waiting_auth",
+      context: effectiveContext,
+    }),
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
     },
   );
 });
