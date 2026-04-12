@@ -689,11 +689,11 @@ test("shell-ball dual-form types freeze the local state axes and legal combinati
     { systemState: "capturing", engagementKind: "text_drag" },
     { systemState: "intent_confirming", engagementKind: "recommendation" },
     { systemState: "intent_confirming", engagementKind: "text_selection" },
+    { systemState: "intent_confirming", engagementKind: "text_drag" },
     { systemState: "intent_confirming", engagementKind: "file_drag" },
     { systemState: "intent_confirming", engagementKind: "voice" },
     { systemState: "processing", engagementKind: "recommendation" },
     { systemState: "processing", engagementKind: "voice" },
-    { systemState: "processing", engagementKind: "result" },
     { systemState: "processing", engagementKind: "file_parsing" },
     {
       systemState: "waiting_confirm",
@@ -746,9 +746,11 @@ test("shell-ball dual-form types freeze the local state axes and legal combinati
       engagementKind: "voice",
       waitingConfirmReason: "follow_up",
     },
+    { systemState: "processing", engagementKind: "result" },
     { systemState: "completed", engagementKind: "none" },
-    { systemState: "abnormal", engagementKind: "none" },
   ];
+
+  legalStates.push({ systemState: "abnormal", engagementKind: "none" });
 
   assert.deepEqual(shellBallSystemStates, [
     "idle",

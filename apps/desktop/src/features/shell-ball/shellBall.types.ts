@@ -64,11 +64,11 @@ const shellBallStateEngagementMatrix: Record<ShellBallSystemState, ReadonlySet<S
   idle: new Set(["none"]),
   awakenable: new Set(["none", "recommendation", "text_selection"]),
   capturing: new Set(["text_drag", "file_drag", "voice"]),
-  intent_confirming: new Set(["recommendation", "text_selection", "file_drag", "voice"]),
-  processing: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
+  intent_confirming: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "voice"]),
+  processing: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice"]),
   waiting_confirm: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
   completed: new Set(["result"]),
-  abnormal: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
+  abnormal: new Set(["none", "recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
 };
 
 export function isShellBallDualFormStateLegal(state: ShellBallDualFormState): boolean {
