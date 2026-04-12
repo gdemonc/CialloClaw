@@ -680,8 +680,20 @@ test("shell-ball demo fixtures preserve the frozen seven-state contract", () => 
 test("shell-ball dual-form types freeze the local state axes and legal combinations", () => {
   const legalStates: ShellBallDualFormState[] = [
     { systemState: "idle", engagementKind: "none" },
+    { systemState: "awakenable", engagementKind: "none" },
     { systemState: "awakenable", engagementKind: "recommendation" },
+    { systemState: "awakenable", engagementKind: "text_selection" },
     { systemState: "capturing", engagementKind: "voice", voiceStage: "listening" },
+    { systemState: "capturing", engagementKind: "voice", voiceStage: "locked" },
+    { systemState: "capturing", engagementKind: "file_drag" },
+    { systemState: "capturing", engagementKind: "text_drag" },
+    { systemState: "intent_confirming", engagementKind: "recommendation" },
+    { systemState: "intent_confirming", engagementKind: "text_selection" },
+    { systemState: "intent_confirming", engagementKind: "file_drag" },
+    { systemState: "intent_confirming", engagementKind: "voice" },
+    { systemState: "processing", engagementKind: "recommendation" },
+    { systemState: "processing", engagementKind: "voice" },
+    { systemState: "processing", engagementKind: "result" },
     { systemState: "processing", engagementKind: "file_parsing" },
     {
       systemState: "waiting_confirm",
@@ -690,23 +702,52 @@ test("shell-ball dual-form types freeze the local state axes and legal combinati
     },
     {
       systemState: "waiting_confirm",
+      engagementKind: "voice",
+      waitingConfirmReason: "authorization",
+    },
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "result",
+      waitingConfirmReason: "follow_up",
+    },
+    {
+      systemState: "waiting_confirm",
       engagementKind: "result",
       waitingConfirmReason: "delivery_choice",
     },
     { systemState: "completed", engagementKind: "result" },
+    { systemState: "abnormal", engagementKind: "text_selection" },
+    { systemState: "abnormal", engagementKind: "result" },
   ];
 
   const illegalStates: ShellBallDualFormState[] = [
     { systemState: "idle", engagementKind: "none", waitingConfirmReason: "authorization" },
+    { systemState: "idle", engagementKind: "recommendation" },
+    { systemState: "awakenable", engagementKind: "file_drag" },
     { systemState: "waiting_confirm", engagementKind: "file_drag" },
+    { systemState: "capturing", engagementKind: "none" },
     { systemState: "capturing", engagementKind: "voice" },
     { systemState: "capturing", engagementKind: "file_drag", voiceStage: "locked" },
+    { systemState: "intent_confirming", engagementKind: "none" },
+    { systemState: "intent_confirming", engagementKind: "file_parsing" },
+    { systemState: "processing", engagementKind: "none" },
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "result",
+      waitingConfirmReason: "authorization",
+    },
     {
       systemState: "waiting_confirm",
       engagementKind: "file_drag",
       waitingConfirmReason: "delivery_choice",
     },
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "voice",
+      waitingConfirmReason: "follow_up",
+    },
     { systemState: "completed", engagementKind: "none" },
+    { systemState: "abnormal", engagementKind: "none" },
   ];
 
   assert.deepEqual(shellBallSystemStates, [

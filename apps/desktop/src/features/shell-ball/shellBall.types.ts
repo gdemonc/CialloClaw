@@ -51,15 +51,43 @@ export type ShellBallDualFormState = {
   voiceStage?: ShellBallVoiceStage;
 };
 
+const shellBallAuthorizationEngagementKinds: ReadonlySet<ShellBallEngagementKind> = new Set([
+  "recommendation",
+  "text_selection",
+  "text_drag",
+  "file_drag",
+  "file_parsing",
+  "voice",
+]);
+
+const shellBallStateEngagementMatrix: Record<ShellBallSystemState, ReadonlySet<ShellBallEngagementKind>> = {
+  idle: new Set(["none"]),
+  awakenable: new Set(["none", "recommendation", "text_selection"]),
+  capturing: new Set(["text_drag", "file_drag", "voice"]),
+  intent_confirming: new Set(["recommendation", "text_selection", "file_drag", "voice"]),
+  processing: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
+  waiting_confirm: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
+  completed: new Set(["result"]),
+  abnormal: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
+};
+
 export function isShellBallDualFormStateLegal(state: ShellBallDualFormState): boolean {
   const { systemState, engagementKind, waitingConfirmReason, voiceStage } = state;
+
+  if (!shellBallStateEngagementMatrix[systemState].has(engagementKind)) {
+    return false;
+  }
 
   if (systemState === "waiting_confirm") {
     if (waitingConfirmReason === undefined) {
       return false;
     }
 
-    if (waitingConfirmReason !== "authorization" && engagementKind !== "result") {
+    if (waitingConfirmReason === "authorization") {
+      if (!shellBallAuthorizationEngagementKinds.has(engagementKind)) {
+        return false;
+      }
+    } else if (engagementKind !== "result") {
       return false;
     }
   } else if (waitingConfirmReason !== undefined) {
@@ -67,18 +95,14 @@ export function isShellBallDualFormStateLegal(state: ShellBallDualFormState): bo
   }
 
   if (engagementKind === "voice") {
-    if (systemState !== "capturing" || voiceStage === undefined) {
+    if (systemState === "capturing") {
+      if (voiceStage === undefined) {
+        return false;
+      }
+    } else if (voiceStage !== undefined) {
       return false;
     }
   } else if (voiceStage !== undefined) {
-    return false;
-  }
-
-  if (systemState === "completed" && engagementKind !== "result") {
-    return false;
-  }
-
-  if (systemState === "idle" && engagementKind !== "none") {
     return false;
   }
 
