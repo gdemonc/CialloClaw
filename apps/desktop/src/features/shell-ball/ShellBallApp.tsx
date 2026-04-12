@@ -124,6 +124,7 @@ async function animateShellBallDashboardWindow(input: {
 export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   const {
     visualState,
+    dualFormState,
     inputValue,
     voicePreview,
     handlePrimaryClick,
@@ -262,6 +263,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
   useShellBallCoordinator({
     visualState,
+    dualFormState,
     helperWindowsVisible: dashboardTransitionPhase === "idle",
     inputValue,
     voicePreview,

@@ -13,7 +13,7 @@ import {
 } from "../../platform/shellBallWindowController";
 import { cloneShellBallBubbleItems, type ShellBallBubbleItem } from "./shellBall.bubble";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
-import type { ShellBallInputBarMode, ShellBallVisualState } from "./shellBall.types";
+import type { ShellBallDualFormState, ShellBallVisualState } from "./shellBall.types";
 import {
   createDefaultShellBallWindowSnapshot,
   createShellBallWindowSnapshot,
@@ -35,6 +35,7 @@ import { getShellBallBubbleAnchor } from "./useShellBallWindowMetrics";
 
 type ShellBallCoordinatorInput = {
   visualState: ShellBallVisualState;
+  dualFormState?: ShellBallDualFormState;
   helperWindowsVisible?: boolean;
   inputValue: string;
   voicePreview: ShellBallVoicePreview;
@@ -132,12 +133,13 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
     () =>
       createShellBallWindowSnapshot({
         visualState: input.visualState,
+        dualFormState: input.dualFormState,
         helpersVisible: input.helperWindowsVisible ?? true,
         inputValue: input.inputValue,
         voicePreview: input.voicePreview,
         bubbleItems,
       }),
-    [bubbleItems, input.helperWindowsVisible, input.inputValue, input.visualState, input.voicePreview],
+    [bubbleItems, input.dualFormState, input.helperWindowsVisible, input.inputValue, input.visualState, input.voicePreview],
   );
   const snapshotRef = useRef(snapshot);
   const bubbleItemsRef = useRef(bubbleItems);

@@ -61,6 +61,7 @@ import {
   resolveDashboardRoutePath,
 } from "../dashboard/shared/dashboardRouteTargets";
 import {
+  createDefaultShellBallWindowSnapshot,
   getShellBallBubbleRegionState,
   createShellBallWindowSnapshot,
   getShellBallHelperWindowVisibility,
@@ -2773,6 +2774,11 @@ test("shell-ball coordinator snapshots carry shell-ball-local bubble messages", 
 test("shell-ball helper snapshots carry dual-form state only through an explicit frontend-local snapshot path", () => {
   const directSnapshot = createShellBallWindowSnapshot({
     visualState: "waiting_auth",
+    dualFormState: {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    },
     inputValue: "approve this",
     voicePreview: null,
     bubbleItems: [],
@@ -2780,7 +2786,7 @@ test("shell-ball helper snapshots carry dual-form state only through an explicit
 
   assert.deepEqual(directSnapshot.frontendLocal.dualFormState, {
     systemState: "waiting_confirm",
-    engagementKind: "text_selection",
+    engagementKind: "file_drag",
     waitingConfirmReason: "authorization",
   });
   assert.equal("task" in directSnapshot, false);
@@ -2812,7 +2818,11 @@ test("shell-ball helper snapshots carry dual-form state only through an explicit
   }, (moduleExports) => moduleExports as { useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator });
 
   const { snapshot } = useShellBallCoordinator({
-    visualState: "voice_locked",
+    visualState: "hover_input",
+    dualFormState: {
+      systemState: "awakenable",
+      engagementKind: "recommendation",
+    },
     inputValue: "",
     voicePreview: null,
     setInputValue: () => {},
@@ -2825,9 +2835,102 @@ test("shell-ball helper snapshots carry dual-form state only through an explicit
   });
 
   assert.deepEqual(snapshot.frontendLocal.dualFormState, {
-    systemState: "capturing",
-    engagementKind: "voice",
-    voiceStage: "locked",
+    systemState: "awakenable",
+    engagementKind: "recommendation",
+  });
+});
+
+test("shell-ball bubble and input helper snapshot hooks consume the same forwarded dual-form state", async () => {
+  async function consumeHelperSnapshot(role: "bubble" | "input", payload: ReturnType<typeof createShellBallWindowSnapshot>) {
+    let state: unknown = createDefaultShellBallWindowSnapshot();
+    const listeners = new Map<string, (event: { payload: unknown }) => void>();
+    const emitted: Array<{ label: string; event: string; payload: unknown }> = [];
+
+    const { useShellBallHelperWindowSnapshot } = withShellBallModuleRuntime("useShellBallCoordinator.ts", {
+      react: {
+        useState<T>(initial: T | (() => T)) {
+          void initial;
+
+          const setState = (next: T | ((current: T) => T)) => {
+            state = typeof next === "function" ? (next as (current: T) => T)(state as T) : next;
+          };
+
+          return [state as T, setState] as const;
+        },
+        useEffect(callback: () => void | (() => void)) {
+          callback();
+        },
+        useMemo<T>(factory: () => T) {
+          return factory();
+        },
+        useRef<T>(value: T) {
+          return { current: value };
+        },
+      },
+      "@tauri-apps/api/window": {
+        getCurrentWindow() {
+          return {
+            label: shellBallWindowLabels[role],
+            listen(event: string, callback: (event: { payload: unknown }) => void) {
+              listeners.set(event, callback);
+              return Promise.resolve(() => {});
+            },
+            emitTo(label: string, event: string, eventPayload: unknown) {
+              emitted.push({ label, event, payload: eventPayload });
+              return Promise.resolve();
+            },
+          };
+        },
+      },
+      "../../platform/shellBallWindowController": {
+        getShellBallPinnedBubbleIdFromLabel() {
+          return null;
+        },
+        shellBallWindowLabels,
+      },
+      "./shellBall.windowSync": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.windowSync.js")),
+    }, (moduleExports) => moduleExports as {
+      useShellBallHelperWindowSnapshot: typeof import("./useShellBallCoordinator").useShellBallHelperWindowSnapshot;
+    });
+
+    useShellBallHelperWindowSnapshot({ role });
+    await Promise.resolve();
+    listeners.get(shellBallWindowSyncEvents.snapshot)?.({ payload });
+    const consumed = useShellBallHelperWindowSnapshot({ role });
+
+    return {
+      consumed,
+      emitted,
+    };
+  }
+
+  const helperSnapshot = createShellBallWindowSnapshot({
+    visualState: "waiting_auth",
+    dualFormState: {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    },
+    inputValue: "ship it",
+    voicePreview: null,
+    bubbleItems: [],
+  });
+
+  const bubbleResult = await consumeHelperSnapshot("bubble", helperSnapshot);
+  const inputResult = await consumeHelperSnapshot("input", helperSnapshot);
+
+  assert.deepEqual(bubbleResult.consumed.frontendLocal.dualFormState, helperSnapshot.frontendLocal.dualFormState);
+  assert.deepEqual(inputResult.consumed.frontendLocal.dualFormState, helperSnapshot.frontendLocal.dualFormState);
+  assert.deepEqual(bubbleResult.consumed.frontendLocal.dualFormState, inputResult.consumed.frontendLocal.dualFormState);
+  assert.deepEqual(bubbleResult.emitted.at(-1), {
+    label: shellBallWindowLabels.ball,
+    event: shellBallWindowSyncEvents.helperReady,
+    payload: { role: "bubble" },
+  });
+  assert.deepEqual(inputResult.emitted.at(-1), {
+    label: shellBallWindowLabels.ball,
+    event: shellBallWindowSyncEvents.helperReady,
+    payload: { role: "input" },
   });
 });
 

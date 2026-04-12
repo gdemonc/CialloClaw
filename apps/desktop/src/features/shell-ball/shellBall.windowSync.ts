@@ -137,6 +137,7 @@ export function getShellBallBubbleRegionState(items: ShellBallBubbleItem[]): She
 
 export function createShellBallWindowSnapshot(input: {
   visualState: ShellBallVisualState;
+  dualFormState?: ShellBallDualFormState;
   inputValue: string;
   voicePreview: ShellBallVoicePreview;
   bubbleItems?: ShellBallBubbleItem[];
@@ -153,9 +154,11 @@ export function createShellBallWindowSnapshot(input: {
     bubbleRegion: getShellBallBubbleRegionState(bubbleItems),
     visibility: getShellBallHelperWindowVisibility(input.visualState, input.helpersVisible),
     frontendLocal: {
-      dualFormState: deriveShellBallDualFormState({
-        visualState: input.visualState,
-      }),
+      dualFormState:
+        input.dualFormState ??
+        deriveShellBallDualFormState({
+          visualState: input.visualState,
+        }),
     },
   };
 }
