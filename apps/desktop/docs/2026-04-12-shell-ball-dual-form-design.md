@@ -378,9 +378,12 @@
 - `apps/desktop/src/features/shell-ball/useShellBallInteraction.ts`
 - `apps/desktop/src/features/shell-ball/shellBall.windowSync.ts`
 - `apps/desktop/src/features/shell-ball/shellBall.demo.ts`
+- `apps/desktop/src/features/shell-ball/ShellBallApp.tsx`
 - `apps/desktop/src/features/shell-ball/ShellBallSurface.tsx`
 - `apps/desktop/src/features/shell-ball/ShellBallBubbleWindow.tsx`
 - `apps/desktop/src/features/shell-ball/ShellBallInputWindow.tsx`
+
+其中 `ShellBallApp.tsx` 仅允许承担“同一前端派生状态在 hooks 之间的最小传递”职责，不应用于重新发明双层形态逻辑，也不应在这里新增 UI 语义判断。
 
 ### 17.2 不应直接做的事
 

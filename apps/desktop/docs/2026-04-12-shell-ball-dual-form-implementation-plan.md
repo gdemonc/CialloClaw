@@ -133,6 +133,7 @@ Expected: 新增派生映射测试通过，旧状态机行为不回归。
 ### Task 3: 让 helper snapshot 感知双层形态
 
 **Files:**
+- Modify: `apps/desktop/src/features/shell-ball/ShellBallApp.tsx`
 - Modify: `apps/desktop/src/features/shell-ball/shellBall.windowSync.ts`
 - Modify: `apps/desktop/src/features/shell-ball/useShellBallCoordinator.ts`
 - Test: `apps/desktop/src/features/shell-ball/shellBall.contract.test.ts`
@@ -157,7 +158,7 @@ Expected: helper snapshot 尚未包含这些本地形态信息，测试失败。
 
 - [ ] **Step 3: Write minimal implementation**
 
-在 `shellBall.windowSync.ts` 中扩展 snapshot 类型和构造逻辑，只增加前端本地字段，并在 `useShellBallCoordinator.ts` 中同步发出。
+在 `shellBall.windowSync.ts` 中扩展 snapshot 类型和构造逻辑，只增加前端本地字段，并在 `useShellBallCoordinator.ts` 中同步发出。若要把 Task 2 已派生的双层形态原样转发给 helper snapshot，允许在 `ShellBallApp.tsx` 中增加最小的参数透传，但不得在该文件新增新的 UI 语义判断。
 
 - [ ] **Step 4: Run test to verify it passes**
 
