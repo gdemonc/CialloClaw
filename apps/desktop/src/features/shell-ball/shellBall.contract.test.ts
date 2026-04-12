@@ -43,6 +43,7 @@ import { ShellBallInputBar } from "./components/ShellBallInputBar";
 import type {
   ShellBallDualFormState,
   ShellBallTransitionResult,
+  ShellBallVisualState,
 } from "./shellBall.types";
 import {
   isShellBallDualFormStateLegal,
@@ -399,6 +400,123 @@ function withDesktopAliasRuntime<T>(callback: () => T) {
     } else {
       require.extensions[".png"] = originalPngLoader;
     }
+  }
+}
+
+function withShellBallInteractionHookRuntime<T>(
+  callback: (runtime: {
+    render: () => ReturnType<typeof useShellBallInteraction>;
+    flushEffects: () => void;
+    setStoreVisualState: (state: ShellBallVisualState) => void;
+  }) => T,
+) {
+  const NodeModule = require("node:module") as any;
+  const originalLoad = NodeModule._load;
+  const modulePath = resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/useShellBallInteraction.js");
+
+  delete require.cache[modulePath];
+
+  const hookState: unknown[] = [];
+  const hookRefs: Array<{ current: unknown }> = [];
+  const effectDeps: Array<unknown[] | undefined> = [];
+  let pendingEffects: Array<() => void> = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  let effectIndex = 0;
+
+  const store = {
+    visualState: "idle" as ShellBallVisualState,
+    setVisualState(next: ShellBallVisualState) {
+      store.visualState = next;
+    },
+  };
+
+  const fakeReact = {
+    useState<T>(initial: T | (() => T)) {
+      const currentIndex = stateIndex++;
+      if (!(currentIndex in hookState)) {
+        hookState[currentIndex] = typeof initial === "function" ? (initial as () => T)() : initial;
+      }
+
+      const setState = (next: T | ((current: T) => T)) => {
+        const current = hookState[currentIndex] as T;
+        hookState[currentIndex] = typeof next === "function" ? (next as (current: T) => T)(current) : next;
+      };
+
+      return [hookState[currentIndex] as T, setState] as const;
+    },
+    useRef<T>(initial: T) {
+      const currentIndex = refIndex++;
+      if (!(currentIndex in hookRefs)) {
+        hookRefs[currentIndex] = { current: initial };
+      }
+
+      return hookRefs[currentIndex] as { current: T };
+    },
+    useEffect(callback: () => void | (() => void), deps?: unknown[]) {
+      const currentIndex = effectIndex++;
+      const previousDeps = effectDeps[currentIndex];
+      const changed =
+        deps === undefined ||
+        previousDeps === undefined ||
+        deps.length !== previousDeps.length ||
+        deps.some((value, index) => !Object.is(value, previousDeps[index]));
+
+      effectDeps[currentIndex] = deps;
+
+      if (changed) {
+        pendingEffects.push(() => {
+          callback();
+        });
+      }
+    },
+  };
+
+  NodeModule._load = function loadInteractionHookRuntime(request: string, parent: unknown, isMain: boolean) {
+    if (request === "react") {
+      return fakeReact;
+    }
+
+    if (request === "../../stores/shellBallStore") {
+      return {
+        useShellBallStore(selector: (state: typeof store) => unknown) {
+          return selector(store);
+        },
+      };
+    }
+
+    return originalLoad(request, parent, isMain);
+  };
+
+  const loaded = require(modulePath) as {
+    useShellBallInteraction: typeof useShellBallInteraction;
+  };
+
+  const runtime = {
+    render() {
+      stateIndex = 0;
+      refIndex = 0;
+      effectIndex = 0;
+      pendingEffects = [];
+      return loaded.useShellBallInteraction();
+    },
+    flushEffects() {
+      const effectsToRun = [...pendingEffects];
+      pendingEffects = [];
+      for (const effect of effectsToRun) {
+        effect();
+      }
+    },
+    setStoreVisualState(state: ShellBallVisualState) {
+      store.visualState = state;
+    },
+  };
+
+  try {
+    return callback(runtime);
+  } finally {
+    NodeModule._load = originalLoad;
+    delete require.cache[modulePath];
   }
 }
 
@@ -951,6 +1069,45 @@ test("shell-ball derives an effective interaction context during render for imme
       waitingConfirmReason: "authorization",
     },
   );
+});
+
+test("shell-ball hook seeds waiting-auth provenance for forceState and external sync flows", () => {
+  withShellBallInteractionHookRuntime((runtime) => {
+    let interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "idle",
+      engagementKind: "none",
+    });
+
+    interaction.handleForceState("waiting_auth");
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    });
+
+    runtime.flushEffects();
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    });
+  });
+
+  withShellBallInteractionHookRuntime((runtime) => {
+    let interaction = runtime.render();
+    assert.equal(interaction.visualState, "idle");
+
+    runtime.setStoreVisualState("waiting_auth");
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    });
+  });
 });
 
 test("shell-ball desktop host declares bubble and input helper windows", () => {

@@ -36,6 +36,20 @@ type ShellBallLocalInteractionHint = {
   hasRecommendation?: boolean;
 };
 
+function getShellBallVisualStateProvenanceHint(
+  visualState: ShellBallVisualState,
+): ShellBallLocalInteractionHint | undefined {
+  switch (visualState) {
+    case "waiting_auth":
+      return { activeEngagementKind: "file_drag" };
+    case "voice_listening":
+    case "voice_locked":
+      return { activeEngagementKind: "voice" };
+    default:
+      return undefined;
+  }
+}
+
 type ShellBallInteractionConsumedEvent =
   | "press_start"
   | "long_press_voice_entry"
@@ -161,7 +175,9 @@ export function deriveShellBallEffectiveInteractionContext(input: {
   currentVisualState: ShellBallVisualState;
   pendingHint?: ShellBallLocalInteractionHint;
 }): ShellBallLocalInteractionContext {
-  if (input.previousVisualState === input.currentVisualState && input.pendingHint === undefined) {
+  const effectiveHint = input.pendingHint ?? getShellBallVisualStateProvenanceHint(input.currentVisualState);
+
+  if (input.previousVisualState === input.currentVisualState && effectiveHint === undefined) {
     return input.storedContext;
   }
 
@@ -169,7 +185,7 @@ export function deriveShellBallEffectiveInteractionContext(input: {
     previousContext: input.storedContext,
     previousVisualState: input.previousVisualState,
     nextVisualState: input.currentVisualState,
-    hint: input.pendingHint,
+    hint: effectiveHint,
   });
 }
 
@@ -502,6 +518,7 @@ export function useShellBallInteraction() {
     pressStartXRef.current = null;
     pressStartYRef.current = null;
     setCurrentVoicePreview(null);
+    pendingInteractionHintRef.current = getShellBallVisualStateProvenanceHint(state) ?? null;
     controllerRef.current?.forceState(state, { regionActive: regionActiveRef.current });
     syncVisualState();
   }
