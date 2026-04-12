@@ -420,10 +420,13 @@ function withShellBallInteractionHookRuntime<T>(
   const hookState: unknown[] = [];
   const hookRefs: Array<{ current: unknown }> = [];
   const effectDeps: Array<unknown[] | undefined> = [];
+  const memoDeps: Array<unknown[] | undefined> = [];
+  const memoValues: unknown[] = [];
   let pendingEffects: Array<() => void> = [];
   let stateIndex = 0;
   let refIndex = 0;
   let effectIndex = 0;
+  let memoIndex = 0;
 
   const store = {
     visualState: "idle" as ShellBallVisualState,
@@ -471,6 +474,21 @@ function withShellBallInteractionHookRuntime<T>(
         });
       }
     },
+    useMemo<T>(factory: () => T, deps: unknown[]) {
+      const currentIndex = memoIndex++;
+      const previousDeps = memoDeps[currentIndex];
+      const changed =
+        previousDeps === undefined ||
+        deps.length !== previousDeps.length ||
+        deps.some((value, index) => !Object.is(value, previousDeps[index]));
+
+      if (changed) {
+        memoValues[currentIndex] = factory();
+        memoDeps[currentIndex] = deps;
+      }
+
+      return memoValues[currentIndex] as T;
+    },
   };
 
   NodeModule._load = function loadInteractionHookRuntime(request: string, parent: unknown, isMain: boolean) {
@@ -498,6 +516,7 @@ function withShellBallInteractionHookRuntime<T>(
       stateIndex = 0;
       refIndex = 0;
       effectIndex = 0;
+      memoIndex = 0;
       pendingEffects = [];
       return loaded.useShellBallInteraction();
     },
@@ -1111,6 +1130,15 @@ test("shell-ball hook seeds waiting-auth provenance for forceState and external 
   });
 });
 
+test("shell-ball hook keeps dual-form state identity stable across unchanged renders", () => {
+  withShellBallInteractionHookRuntime((runtime) => {
+    const firstRender = runtime.render();
+    const secondRender = runtime.render();
+
+    assert.equal(secondRender.dualFormState, firstRender.dualFormState);
+  });
+});
+
 test("shell-ball desktop host declares bubble and input helper windows", () => {
   assert.equal(existsSync(resolve(desktopRoot, "shell-ball-bubble.html")), true);
   assert.equal(existsSync(resolve(desktopRoot, "shell-ball-input.html")), true);
@@ -1648,6 +1676,11 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
   assert.deepEqual(
     createShellBallWindowSnapshot({
       visualState: "voice_locked",
+      dualFormState: {
+        systemState: "capturing",
+        engagementKind: "voice",
+        voiceStage: "locked",
+      },
       inputValue: "draft",
       voicePreview: "lock",
       bubbleItems: [
@@ -1712,6 +1745,14 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
       },
     },
   );
+});
+
+test("shell-ball window snapshot factory keeps forwarded dual-form state as its single source of truth", () => {
+  const windowSyncSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.windowSync.ts"), "utf8");
+
+  assert.match(windowSyncSource, /dualFormState: ShellBallDualFormState;/);
+  assert.doesNotMatch(windowSyncSource, /deriveShellBallDualFormState/);
+  assert.match(windowSyncSource, /dualFormState:\s*\{\s*systemState: "idle",\s*engagementKind: "none",\s*\}/);
 });
 
 test("shell-ball bubble region existence strategy is explicit and item-driven", () => {
@@ -1820,6 +1861,10 @@ test("shell-ball bubble item contract wraps protocol payload and keeps desktop-o
 
   assert.deepEqual(createShellBallWindowSnapshot({
     visualState: "idle",
+    dualFormState: {
+      systemState: "idle",
+      engagementKind: "none",
+    },
     inputValue: "",
     voicePreview: null,
     bubbleItems: [],
@@ -1884,6 +1929,10 @@ test("shell-ball window snapshot copies bubble item arrays defensively", () => {
 
   const snapshot = createShellBallWindowSnapshot({
     visualState: "hover_input",
+    dualFormState: {
+      systemState: "awakenable",
+      engagementKind: "none",
+    },
     inputValue: "draft",
     voicePreview: null,
     bubbleItems: sourceItems,
@@ -2750,6 +2799,10 @@ test("shell-ball coordinator snapshots carry shell-ball-local bubble messages", 
 
   const { snapshot } = useShellBallCoordinator({
     visualState: "hover_input",
+    dualFormState: {
+      systemState: "awakenable",
+      engagementKind: "none",
+    },
     inputValue: "draft",
     voicePreview: null,
     setInputValue: () => {},
@@ -2990,6 +3043,10 @@ test("shell-ball bubble zone keeps the latest message visible on feed updates", 
 test("shell-ball bubble window resolves bubble items from the helper-window snapshot", () => {
   const helperSnapshot = createShellBallWindowSnapshot({
     visualState: "processing",
+    dualFormState: {
+      systemState: "processing",
+      engagementKind: "text_selection",
+    },
     inputValue: "",
     voicePreview: null,
     bubbleItems: [
@@ -3047,6 +3104,10 @@ test("shell-ball bubble window resolves bubble items from the helper-window snap
 test("shell-ball bubble window does not depend on only visualState to render its body", () => {
   const helperSnapshot = createShellBallWindowSnapshot({
     visualState: "idle",
+    dualFormState: {
+      systemState: "idle",
+      engagementKind: "none",
+    },
     inputValue: "",
     voicePreview: null,
     bubbleItems: [
@@ -3493,6 +3554,10 @@ test("shell-ball detached bubble actions close pinned windows and delete detache
 
   useShellBallCoordinator({
     visualState: "hover_input",
+    dualFormState: {
+      systemState: "awakenable",
+      engagementKind: "none",
+    },
     inputValue: "",
     voicePreview: null,
     setInputValue: () => {},
@@ -3554,6 +3619,10 @@ test("shell-ball bubble actions stay coordinator-owned and detached-position fre
 test("shell-ball pinned bubble windows render one coordinator-owned pinned item and emit detached actions", () => {
   const helperSnapshot = createShellBallWindowSnapshot({
     visualState: "processing",
+    dualFormState: {
+      systemState: "processing",
+      engagementKind: "text_selection",
+    },
     inputValue: "",
     voicePreview: null,
     bubbleItems: [

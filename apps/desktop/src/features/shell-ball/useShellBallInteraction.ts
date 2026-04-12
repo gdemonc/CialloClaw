@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import {
   createShellBallInteractionController,
@@ -530,10 +530,14 @@ export function useShellBallInteraction() {
     pendingHint: pendingInteractionHintRef.current ?? undefined,
   });
 
-  const dualFormState = deriveShellBallDualFormState({
-    visualState,
-    context: effectiveInteractionContext,
-  });
+  const dualFormState = useMemo(
+    () =>
+      deriveShellBallDualFormState({
+        visualState,
+        context: effectiveInteractionContext,
+      }),
+    [effectiveInteractionContext.activeEngagementKind, effectiveInteractionContext.hasRecommendation, visualState],
+  );
 
   useEffect(() => {
     syncHoverRetention();

@@ -2,7 +2,6 @@ import { cloneShellBallBubbleItems } from "./shellBall.bubble";
 import type { ShellBallBubbleItem } from "./shellBall.bubble";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
 import { getShellBallInputBarMode } from "./shellBall.interaction";
-import { deriveShellBallDualFormState } from "./useShellBallInteraction";
 import type { ShellBallDualFormState, ShellBallInputBarMode, ShellBallVisualState } from "./shellBall.types";
 
 export const shellBallWindowSyncEvents = Object.freeze({
@@ -137,7 +136,7 @@ export function getShellBallBubbleRegionState(items: ShellBallBubbleItem[]): She
 
 export function createShellBallWindowSnapshot(input: {
   visualState: ShellBallVisualState;
-  dualFormState?: ShellBallDualFormState;
+  dualFormState: ShellBallDualFormState;
   inputValue: string;
   voicePreview: ShellBallVoicePreview;
   bubbleItems?: ShellBallBubbleItem[];
@@ -154,11 +153,7 @@ export function createShellBallWindowSnapshot(input: {
     bubbleRegion: getShellBallBubbleRegionState(bubbleItems),
     visibility: getShellBallHelperWindowVisibility(input.visualState, input.helpersVisible),
     frontendLocal: {
-      dualFormState:
-        input.dualFormState ??
-        deriveShellBallDualFormState({
-          visualState: input.visualState,
-        }),
+      dualFormState: input.dualFormState,
     },
   };
 }
@@ -166,6 +161,10 @@ export function createShellBallWindowSnapshot(input: {
 export function createDefaultShellBallWindowSnapshot(): ShellBallWindowSnapshot {
   return createShellBallWindowSnapshot({
     visualState: "idle",
+    dualFormState: {
+      systemState: "idle",
+      engagementKind: "none",
+    },
     inputValue: "",
     voicePreview: null,
     bubbleItems: [],

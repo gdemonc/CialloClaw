@@ -35,7 +35,7 @@ import { getShellBallBubbleAnchor } from "./useShellBallWindowMetrics";
 
 type ShellBallCoordinatorInput = {
   visualState: ShellBallVisualState;
-  dualFormState?: ShellBallDualFormState;
+  dualFormState: ShellBallDualFormState;
   helperWindowsVisible?: boolean;
   inputValue: string;
   voicePreview: ShellBallVoicePreview;
@@ -139,7 +139,17 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         voicePreview: input.voicePreview,
         bubbleItems,
       }),
-    [bubbleItems, input.dualFormState, input.helperWindowsVisible, input.inputValue, input.visualState, input.voicePreview],
+    [
+      bubbleItems,
+      input.dualFormState.engagementKind,
+      input.dualFormState.systemState,
+      input.dualFormState.voiceStage,
+      input.dualFormState.waitingConfirmReason,
+      input.helperWindowsVisible,
+      input.inputValue,
+      input.visualState,
+      input.voicePreview,
+    ],
   );
   const snapshotRef = useRef(snapshot);
   const bubbleItemsRef = useRef(bubbleItems);
