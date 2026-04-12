@@ -855,7 +855,7 @@ test("shell-ball dual-form demo fixtures cover the P0 shell-ball UI states", () 
       ballLabel: "等待授权",
       bubbleTitle: "此操作需要你的授权",
       bubbleText: "已识别潜在影响范围，请先确认是否继续。",
-      actionLabels: ["授权继续", "修改请求"],
+      actionLabels: ["允许本次", "拒绝", "查看详情", "修改请求"],
     },
   );
 
@@ -3881,7 +3881,7 @@ test("shell-ball input window owns the input rendering", () => {
   assert.doesNotMatch(markup, /shell-ball-bubble-zone/);
 });
 
-test("shell-ball surface exposes P0 dual-form state on the ball host", () => {
+test("shell-ball surface visibly maps P0 dual-form state on the ball itself", () => {
   const awakenableMarkup = renderToStaticMarkup(
     createElement(ShellBallSurface, {
       visualState: "hover_input",
@@ -3926,8 +3926,18 @@ test("shell-ball surface exposes P0 dual-form state on the ball host", () => {
 
   assert.match(awakenableMarkup, /data-system-state="awakenable"/);
   assert.match(awakenableMarkup, /data-engagement-kind="text_selection"/);
+  assert.match(awakenableMarkup, /文本可操作提示/);
   assert.match(processingMarkup, /data-system-state="processing"/);
   assert.match(processingMarkup, /data-engagement-kind="file_parsing"/);
+  assert.match(processingMarkup, /文件解析中/);
+});
+
+test("shell-ball surface contract uses the already-derived dual-form state without guessed fallback mapping", () => {
+  const surfaceSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallSurface.tsx"), "utf8");
+
+  assert.doesNotMatch(surfaceSource, /dualFormState\s*\?\?/);
+  assert.doesNotMatch(surfaceSource, /visualState === "hover_input"/);
+  assert.match(surfaceSource, /dualFormState: ShellBallDualFormState;/);
 });
 
 test("shell-ball bubble window adds authorization, result, and abnormal summaries from dual-form state", () => {
@@ -3998,12 +4008,7 @@ test("shell-ball input window keeps actions in the lower helper for authorizatio
     });
 
     const { ShellBallInputWindow: RuntimeShellBallInputWindow } = withShellBallModuleRuntime("ShellBallInputWindow.tsx", {
-      react: {
-        ...require("react"),
-        useEffect(callback: () => void) {
-          callback();
-        },
-      },
+      react: require("react"),
       "./useShellBallCoordinator": {
         useShellBallHelperWindowSnapshot() {
           return helperSnapshot;
@@ -4054,17 +4059,29 @@ test("shell-ball input window keeps actions in the lower helper for authorizatio
     mode: "readonly",
   });
 
-  assert.match(authMarkup, /授权继续/);
+  assert.match(authMarkup, /允许本次/);
+  assert.match(authMarkup, /拒绝/);
+  assert.match(authMarkup, /查看详情/);
   assert.match(authMarkup, /修改请求/);
+  assert.match(authMarkup, /data-action-intent="allow"/);
+  assert.match(authMarkup, /data-action-intent="reject"/);
+  assert.match(authMarkup, /data-action-intent="details"/);
+  assert.match(authMarkup, /data-action-intent="modify"/);
   assert.match(completedMarkup, /继续下一步/);
   assert.match(abnormalMarkup, /重试/);
   assert.match(abnormalMarkup, /修改请求/);
+  assert.doesNotMatch(completedMarkup, /查看详情/);
+  assert.doesNotMatch(completedMarkup, /拒绝/);
 });
 
 test("shell-ball surface renders the mascot-only floating structure without the demo switcher", () => {
   const markup = renderToStaticMarkup(
     createElement(ShellBallSurface, {
       visualState: "hover_input",
+      dualFormState: {
+        systemState: "awakenable",
+        engagementKind: "none",
+      },
       voicePreview: null,
       motionConfig: getShellBallMotionConfig("hover_input"),
       onPrimaryClick: () => {},
@@ -4091,6 +4108,10 @@ test("shell-ball surface keeps drag and click on the mascot hotspot only", () =>
   const markup = renderToStaticMarkup(
     createElement(ShellBallSurface, {
       visualState: "hover_input",
+      dualFormState: {
+        systemState: "awakenable",
+        engagementKind: "none",
+      },
       voicePreview: null,
       motionConfig: getShellBallMotionConfig("hover_input"),
       onPrimaryClick: () => {},

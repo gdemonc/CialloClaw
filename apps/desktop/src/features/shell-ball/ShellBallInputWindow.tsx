@@ -93,6 +93,10 @@ export function ShellBallInputWindow({
   }
 
   function handleAction(label: string) {
+    if (label === "拒绝" || label === "查看详情") {
+      return;
+    }
+
     if (label === "修改请求") {
       handleFocusChange(true);
       return;
@@ -120,6 +124,7 @@ export function ShellBallInputWindow({
               key={label}
               type="button"
               className="shell-ball-input-window__action"
+              data-action-intent={getShellBallInputActionIntent(label)}
               onClick={() => {
                 handleAction(label);
               }}
@@ -153,4 +158,25 @@ function getShellBallInputActionSummary(state: ShellBallDualFormState) {
   }
 
   return null;
+}
+
+function getShellBallInputActionIntent(label: string) {
+  switch (label) {
+    case "允许本次":
+      return "allow";
+    case "拒绝":
+      return "reject";
+    case "查看详情":
+      return "details";
+    case "修改请求":
+      return "modify";
+    case "继续下一步":
+      return "next_step";
+    case "重试":
+      return "retry";
+    case "确认操作":
+      return "confirm";
+    default:
+      return "default";
+  }
 }

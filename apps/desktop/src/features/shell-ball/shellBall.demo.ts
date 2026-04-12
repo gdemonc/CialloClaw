@@ -112,7 +112,7 @@ export function getShellBallDualFormDemoViewModel(state: ShellBallDualFormState)
       ballLabel: "等待授权",
       bubbleTitle: "此操作需要你的授权",
       bubbleText: "已识别潜在影响范围，请先确认是否继续。",
-      actionLabels: ["授权继续", "修改请求"],
+      actionLabels: ["允许本次", "拒绝", "查看详情", "修改请求"],
     };
   }
 

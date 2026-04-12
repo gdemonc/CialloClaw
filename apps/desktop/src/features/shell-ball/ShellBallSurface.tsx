@@ -8,7 +8,7 @@ type ShellBallSurfaceProps = {
   containerRef?: RefObject<HTMLDivElement>;
   dashboardTransitionPhase?: "idle" | "opening" | "hidden" | "closing";
   visualState: ShellBallVisualState;
-  dualFormState?: ShellBallDualFormState;
+  dualFormState: ShellBallDualFormState;
   voicePreview: ShellBallVoicePreview;
   motionConfig: ShellBallMotionConfig;
   onDragStart: () => void;
@@ -40,38 +40,13 @@ export function ShellBallSurface({
   onPressEnd,
   onPressCancel,
 }: ShellBallSurfaceProps) {
-  const resolvedDualFormState = dualFormState ?? {
-    systemState:
-      visualState === "idle"
-        ? "idle"
-        : visualState === "hover_input"
-          ? "awakenable"
-          : visualState === "confirming_intent"
-            ? "intent_confirming"
-            : visualState === "processing"
-              ? "processing"
-              : visualState === "waiting_auth"
-                ? "waiting_confirm"
-                : "capturing",
-    engagementKind:
-      visualState === "idle"
-        ? "none"
-        : visualState === "hover_input"
-          ? "none"
-          : visualState === "waiting_auth"
-            ? "file_drag"
-            : visualState === "voice_listening" || visualState === "voice_locked"
-              ? "voice"
-              : "text_selection",
-  };
-
   return (
     <div
       ref={containerRef}
       className="shell-ball-surface"
       data-dashboard-transition-phase={dashboardTransitionPhase}
-      data-system-state={resolvedDualFormState.systemState}
-      data-engagement-kind={resolvedDualFormState.engagementKind}
+      data-system-state={dualFormState.systemState}
+      data-engagement-kind={dualFormState.engagementKind}
       aria-label="Shell-ball floating surface"
     >
       <div className="shell-ball-surface__core">
@@ -83,6 +58,9 @@ export function ShellBallSurface({
             onPointerLeave={onRegionLeave}
           >
             <div className="shell-ball-surface__body">
+              <div className="shell-ball-surface__state-chip" aria-live="polite">
+                {getShellBallBallLabel(dualFormState)}
+              </div>
               <div className="shell-ball-surface__mascot-shell">
                 <ShellBallMascot
                   visualState={visualState}
@@ -104,4 +82,28 @@ export function ShellBallSurface({
       {children}
     </div>
   );
+}
+
+function getShellBallBallLabel(state: ShellBallDualFormState) {
+  if (state.systemState === "awakenable" && state.engagementKind === "text_selection") {
+    return "文本可操作提示";
+  }
+
+  if (state.systemState === "processing" && state.engagementKind === "file_parsing") {
+    return "文件解析中";
+  }
+
+  if (state.systemState === "waiting_confirm" && state.waitingConfirmReason === "authorization") {
+    return "等待授权";
+  }
+
+  if (state.systemState === "completed" && state.engagementKind === "result") {
+    return "结果已就绪";
+  }
+
+  if (state.systemState === "abnormal") {
+    return "处理异常";
+  }
+
+  return "近场承接中";
 }
