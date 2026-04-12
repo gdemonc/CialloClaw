@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import {
   createShellBallInteractionController,
+  getShellBallHoverEngagementKind,
   getShellBallInputBarMode,
   getShellBallVoicePreview,
   resolveShellBallVoiceReleaseEvent,
@@ -9,7 +10,12 @@ import {
   shouldRetainShellBallHoverInput,
   type ShellBallVoicePreview,
 } from "./shellBall.interaction";
-import type { ShellBallInteractionEvent, ShellBallVisualState } from "./shellBall.types";
+import type {
+  ShellBallDualFormState,
+  ShellBallEngagementKind,
+  ShellBallInteractionEvent,
+  ShellBallVisualState,
+} from "./shellBall.types";
 import { useShellBallStore } from "../../stores/shellBallStore";
 
 type TimeoutHandle = ReturnType<typeof globalThis.setTimeout>;
@@ -96,12 +102,68 @@ export function syncShellBallInteractionController(input: {
   return input.controller.forceState(input.visualState, { regionActive: input.regionActive });
 }
 
+export function deriveShellBallDualFormState(input: {
+  visualState: ShellBallVisualState;
+  engagementKind?: ShellBallEngagementKind;
+  hasRecommendation?: boolean;
+}): ShellBallDualFormState {
+  const engagementKind = input.engagementKind ?? "none";
+
+  switch (input.visualState) {
+    case "idle":
+      return {
+        systemState: "idle",
+        engagementKind: "none",
+      };
+
+    case "hover_input":
+      return {
+        systemState: "awakenable",
+        engagementKind: getShellBallHoverEngagementKind(input.hasRecommendation ?? engagementKind === "recommendation"),
+      };
+
+    case "confirming_intent":
+      return {
+        systemState: "intent_confirming",
+        engagementKind,
+      };
+
+    case "processing":
+      return {
+        systemState: "processing",
+        engagementKind,
+      };
+
+    case "waiting_auth":
+      return {
+        systemState: "waiting_confirm",
+        engagementKind,
+        waitingConfirmReason: "authorization",
+      };
+
+    case "voice_listening":
+      return {
+        systemState: "capturing",
+        engagementKind: "voice",
+        voiceStage: "listening",
+      };
+
+    case "voice_locked":
+      return {
+        systemState: "capturing",
+        engagementKind: "voice",
+        voiceStage: "locked",
+      };
+  }
+}
+
 export function useShellBallInteraction() {
   const visualState = useShellBallStore((state) => state.visualState);
   const setVisualState = useShellBallStore((state) => state.setVisualState);
   const [inputValue, setInputValue] = useState("");
   const [voicePreview, setVoicePreview] = useState<ShellBallVoicePreview>(null);
   const [interactionConsumed, setInteractionConsumed] = useState(false);
+  const [engagementKind, setEngagementKind] = useState<ShellBallEngagementKind>("none");
   const regionActiveRef = useRef(false);
   const inputFocusedRef = useRef(false);
   const pressStartXRef = useRef<number | null>(null);
@@ -221,12 +283,14 @@ export function useShellBallInteraction() {
       return;
     }
 
+    setEngagementKind((current) => (current === "none" ? "recommendation" : current));
     dispatch("submit_text");
     setInputValue(reset.nextInputValue);
     inputFocusedRef.current = reset.nextFocused;
   }
 
   function handleAttachFile() {
+    setEngagementKind("file_drag");
     dispatch("attach_file");
   }
 
@@ -247,6 +311,7 @@ export function useShellBallInteraction() {
     longPressHandleRef.current = globalThis.setTimeout(() => {
       longPressHandleRef.current = null;
       setInteractionConsumed(mapShellBallInteractionConsumedEventToFlag("long_press_voice_entry"));
+      setEngagementKind("voice");
       dispatch("press_start");
     }, SHELL_BALL_LONG_PRESS_MS);
   }
@@ -332,9 +397,21 @@ export function useShellBallInteraction() {
     pressStartXRef.current = null;
     pressStartYRef.current = null;
     setCurrentVoicePreview(null);
+    setEngagementKind(
+      state === "waiting_auth"
+        ? "file_drag"
+        : state === "voice_listening" || state === "voice_locked"
+          ? "voice"
+          : "none",
+    );
     controllerRef.current?.forceState(state, { regionActive: regionActiveRef.current });
     syncVisualState();
   }
+
+  const dualFormState = deriveShellBallDualFormState({
+    visualState,
+    engagementKind,
+  });
 
   useEffect(() => {
     syncHoverRetention();
@@ -364,6 +441,7 @@ export function useShellBallInteraction() {
 
   return {
     visualState,
+    dualFormState,
     inputValue,
     setInputValue,
     voicePreview,

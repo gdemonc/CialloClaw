@@ -1,4 +1,5 @@
 import type {
+  ShellBallEngagementKind,
   ShellBallInputBarMode,
   ShellBallInteractionEvent,
   ShellBallTransitionResult,
@@ -65,6 +66,13 @@ type ShellBallInteractionController = {
 
 export function getShellBallProcessingReturnState(regionActive: boolean): ShellBallVisualState {
   return regionActive ? "hover_input" : "idle";
+}
+
+export function getShellBallHoverEngagementKind(hasRecommendation: boolean): Extract<
+  ShellBallEngagementKind,
+  "none" | "recommendation"
+> {
+  return hasRecommendation ? "recommendation" : "none";
 }
 
 export function getShellBallInputBarMode(state: ShellBallVisualState): ShellBallInputBarMode {

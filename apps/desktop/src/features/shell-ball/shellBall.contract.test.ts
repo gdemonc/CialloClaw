@@ -81,6 +81,7 @@ import {
 } from "./useShellBallWindowMetrics";
 import { applyShellBallBubbleAction } from "./useShellBallCoordinator";
 import {
+  deriveShellBallDualFormState,
   getShellBallPostSubmitInputReset,
   getShellBallDashboardOpenGesturePolicy,
   getShellBallPressCancelEvent,
@@ -782,6 +783,70 @@ test("shell-ball dual-form types freeze the local state axes and legal combinati
   for (const state of illegalStates) {
     assert.equal(isShellBallDualFormStateLegal(state), false, `expected illegal state: ${JSON.stringify(state)}`);
   }
+});
+
+test("shell-ball derives dual-form view state from the legacy visual state machine", () => {
+  assert.deepEqual(deriveShellBallDualFormState({ visualState: "idle" }), {
+    systemState: "idle",
+    engagementKind: "none",
+  });
+
+  assert.deepEqual(
+    deriveShellBallDualFormState({
+      visualState: "hover_input",
+      hasRecommendation: false,
+    }),
+    {
+      systemState: "awakenable",
+      engagementKind: "none",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormState({
+      visualState: "hover_input",
+      hasRecommendation: true,
+    }),
+    {
+      systemState: "awakenable",
+      engagementKind: "recommendation",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormState({
+      visualState: "confirming_intent",
+      engagementKind: "text_selection",
+    }),
+    {
+      systemState: "intent_confirming",
+      engagementKind: "text_selection",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormState({
+      visualState: "waiting_auth",
+      engagementKind: "file_drag",
+    }),
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    },
+  );
+
+  assert.deepEqual(deriveShellBallDualFormState({ visualState: "voice_listening" }), {
+    systemState: "capturing",
+    engagementKind: "voice",
+    voiceStage: "listening",
+  });
+
+  assert.deepEqual(deriveShellBallDualFormState({ visualState: "voice_locked" }), {
+    systemState: "capturing",
+    engagementKind: "voice",
+    voiceStage: "locked",
+  });
 });
 
 test("shell-ball desktop host declares bubble and input helper windows", () => {
