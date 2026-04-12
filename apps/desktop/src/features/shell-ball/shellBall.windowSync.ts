@@ -2,7 +2,8 @@ import { cloneShellBallBubbleItems } from "./shellBall.bubble";
 import type { ShellBallBubbleItem } from "./shellBall.bubble";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
 import { getShellBallInputBarMode } from "./shellBall.interaction";
-import type { ShellBallInputBarMode, ShellBallVisualState } from "./shellBall.types";
+import { deriveShellBallDualFormState } from "./useShellBallInteraction";
+import type { ShellBallDualFormState, ShellBallInputBarMode, ShellBallVisualState } from "./shellBall.types";
 
 export const shellBallWindowSyncEvents = Object.freeze({
   snapshot: "desktop-shell-ball:snapshot",
@@ -36,6 +37,10 @@ export type ShellBallBubbleRegionState = {
   clickThrough: boolean;
 };
 
+export type ShellBallWindowSnapshotFrontendLocal = {
+  dualFormState: ShellBallDualFormState;
+};
+
 export type ShellBallWindowSnapshot = {
   visualState: ShellBallVisualState;
   inputBarMode: ShellBallInputBarMode;
@@ -44,6 +49,7 @@ export type ShellBallWindowSnapshot = {
   bubbleItems: ShellBallBubbleItem[];
   bubbleRegion: ShellBallBubbleRegionState;
   visibility: ShellBallHelperWindowVisibility;
+  frontendLocal: ShellBallWindowSnapshotFrontendLocal;
 };
 
 export type ShellBallWindowGeometry = {
@@ -146,6 +152,11 @@ export function createShellBallWindowSnapshot(input: {
     bubbleItems,
     bubbleRegion: getShellBallBubbleRegionState(bubbleItems),
     visibility: getShellBallHelperWindowVisibility(input.visualState, input.helpersVisible),
+    frontendLocal: {
+      dualFormState: deriveShellBallDualFormState({
+        visualState: input.visualState,
+      }),
+    },
   };
 }
 

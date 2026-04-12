@@ -19,6 +19,7 @@ import {
   createShellBallWindowSnapshot,
   type ShellBallBubbleAction,
   type ShellBallBubbleActionPayload,
+  type ShellBallWindowSnapshot,
   shellBallWindowSyncEvents,
   type ShellBallHelperReadyPayload,
   type ShellBallHelperWindowRole,
@@ -342,7 +343,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
 }
 
 export function useShellBallHelperWindowSnapshot({ role }: ShellBallHelperSnapshotInput) {
-  const [snapshot, setSnapshot] = useState(createDefaultShellBallWindowSnapshot);
+  const [snapshot, setSnapshot] = useState<ShellBallWindowSnapshot>(createDefaultShellBallWindowSnapshot);
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
@@ -362,7 +363,7 @@ export function useShellBallHelperWindowSnapshot({ role }: ShellBallHelperSnapsh
 
     void currentWindow
       .listen(shellBallWindowSyncEvents.snapshot, ({ payload }) => {
-        setSnapshot(payload as ReturnType<typeof createDefaultShellBallWindowSnapshot>);
+        setSnapshot(payload as ShellBallWindowSnapshot);
       })
       .then((unlisten) => {
         if (disposed) {

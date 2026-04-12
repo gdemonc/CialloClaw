@@ -1702,6 +1702,13 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
         bubble: true,
         input: true,
       },
+      frontendLocal: {
+        dualFormState: {
+          systemState: "capturing",
+          engagementKind: "voice",
+          voiceStage: "locked",
+        },
+      },
     },
   );
 });
@@ -2761,6 +2768,67 @@ test("shell-ball coordinator snapshots carry shell-ball-local bubble messages", 
   assert.equal(snapshot.bubbleItems.at(-1)?.bubble.created_at, "2026-04-11T10:05:00.000Z");
   assert.equal(snapshot.bubbleItems.at(-1)?.desktop.freshnessHint, "fresh");
   assert.equal(snapshot.bubbleItems.at(-1)?.desktop.motionHint, "settle");
+});
+
+test("shell-ball helper snapshots carry dual-form state only through an explicit frontend-local snapshot path", () => {
+  const directSnapshot = createShellBallWindowSnapshot({
+    visualState: "waiting_auth",
+    inputValue: "approve this",
+    voicePreview: null,
+    bubbleItems: [],
+  });
+
+  assert.deepEqual(directSnapshot.frontendLocal.dualFormState, {
+    systemState: "waiting_confirm",
+    engagementKind: "text_selection",
+    waitingConfirmReason: "authorization",
+  });
+  assert.equal("task" in directSnapshot, false);
+  assert.equal("approval_request" in directSnapshot, false);
+  assert.equal("delivery_result" in directSnapshot, false);
+
+  const { useShellBallCoordinator } = withShellBallModuleRuntime("useShellBallCoordinator.ts", {
+    react: {
+      useEffect() {},
+      useMemo<T>(factory: () => T) {
+        return factory();
+      },
+      useRef<T>(value: T) {
+        return { current: value };
+      },
+      useState<T>(value: T) {
+        return [typeof value === "function" ? (value as () => T)() : value, () => {}] as const;
+      },
+    },
+    "@tauri-apps/api/window": {
+      getCurrentWindow() {
+        return { label: shellBallWindowLabels.input };
+      },
+    },
+    "../../platform/shellBallWindowController": {
+      shellBallWindowLabels,
+    },
+    "./shellBall.windowSync": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.windowSync.js")),
+  }, (moduleExports) => moduleExports as { useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator });
+
+  const { snapshot } = useShellBallCoordinator({
+    visualState: "voice_locked",
+    inputValue: "",
+    voicePreview: null,
+    setInputValue: () => {},
+    onRegionEnter: () => {},
+    onRegionLeave: () => {},
+    onInputFocusChange: () => {},
+    onSubmitText: () => {},
+    onAttachFile: () => {},
+    onPrimaryClick: () => {},
+  });
+
+  assert.deepEqual(snapshot.frontendLocal.dualFormState, {
+    systemState: "capturing",
+    engagementKind: "voice",
+    voiceStage: "locked",
+  });
 });
 
 test("shell-ball bubble zone keeps the latest message visible on feed updates", () => {
