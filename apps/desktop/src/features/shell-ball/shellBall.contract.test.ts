@@ -40,8 +40,18 @@ import { ShellBallSurface } from "./ShellBallSurface";
 import { shouldShowShellBallDemoSwitcher } from "./shellBall.dev";
 import { shellBallWindowLabels, shellBallWindowPermissions } from "../../platform/shellBallWindowController";
 import { ShellBallInputBar } from "./components/ShellBallInputBar";
-import type { ShellBallTransitionResult } from "./shellBall.types";
-import { shellBallVisualStates } from "./shellBall.types";
+import type {
+  ShellBallDualFormState,
+  ShellBallTransitionResult,
+} from "./shellBall.types";
+import {
+  isShellBallDualFormStateLegal,
+  shellBallEngagementKinds,
+  shellBallSystemStates,
+  shellBallVisualStates,
+  shellBallVoiceStages,
+  shellBallWaitingConfirmReasons,
+} from "./shellBall.types";
 import {
   dashboardSafetyRoutePath,
   resolveDashboardModuleRoutePath,
@@ -665,6 +675,70 @@ test("shell-ball demo fixtures preserve the frozen seven-state contract", () => 
     showVoiceHint: true,
     voiceHintText: "持续收音中，结束前不会自动退出。",
   });
+});
+
+test("shell-ball dual-form types freeze the local state axes and legal combinations", () => {
+  const legalStates: ShellBallDualFormState[] = [
+    { systemState: "idle", engagementKind: "none" },
+    { systemState: "awakenable", engagementKind: "recommendation" },
+    { systemState: "capturing", engagementKind: "voice", voiceStage: "listening" },
+    { systemState: "processing", engagementKind: "file_parsing" },
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    },
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "result",
+      waitingConfirmReason: "delivery_choice",
+    },
+    { systemState: "completed", engagementKind: "result" },
+  ];
+
+  const illegalStates: ShellBallDualFormState[] = [
+    { systemState: "idle", engagementKind: "none", waitingConfirmReason: "authorization" },
+    { systemState: "waiting_confirm", engagementKind: "file_drag" },
+    { systemState: "capturing", engagementKind: "voice" },
+    { systemState: "capturing", engagementKind: "file_drag", voiceStage: "locked" },
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "delivery_choice",
+    },
+    { systemState: "completed", engagementKind: "none" },
+  ];
+
+  assert.deepEqual(shellBallSystemStates, [
+    "idle",
+    "awakenable",
+    "capturing",
+    "intent_confirming",
+    "processing",
+    "waiting_confirm",
+    "completed",
+    "abnormal",
+  ]);
+  assert.deepEqual(shellBallEngagementKinds, [
+    "none",
+    "recommendation",
+    "text_selection",
+    "text_drag",
+    "file_drag",
+    "file_parsing",
+    "voice",
+    "result",
+  ]);
+  assert.deepEqual(shellBallWaitingConfirmReasons, ["authorization", "follow_up", "delivery_choice"]);
+  assert.deepEqual(shellBallVoiceStages, ["listening", "locked"]);
+
+  for (const state of legalStates) {
+    assert.equal(isShellBallDualFormStateLegal(state), true, `expected legal state: ${JSON.stringify(state)}`);
+  }
+
+  for (const state of illegalStates) {
+    assert.equal(isShellBallDualFormStateLegal(state), false, `expected illegal state: ${JSON.stringify(state)}`);
+  }
 });
 
 test("shell-ball desktop host declares bubble and input helper windows", () => {

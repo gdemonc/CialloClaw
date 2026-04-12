@@ -10,6 +10,81 @@ export const shellBallVisualStates = [
 
 export type ShellBallVisualState = (typeof shellBallVisualStates)[number];
 
+export const shellBallSystemStates = [
+  "idle",
+  "awakenable",
+  "capturing",
+  "intent_confirming",
+  "processing",
+  "waiting_confirm",
+  "completed",
+  "abnormal",
+] as const;
+
+export type ShellBallSystemState = (typeof shellBallSystemStates)[number];
+
+export const shellBallEngagementKinds = [
+  "none",
+  "recommendation",
+  "text_selection",
+  "text_drag",
+  "file_drag",
+  "file_parsing",
+  "voice",
+  "result",
+] as const;
+
+export type ShellBallEngagementKind = (typeof shellBallEngagementKinds)[number];
+
+export const shellBallWaitingConfirmReasons = ["authorization", "follow_up", "delivery_choice"] as const;
+
+export type ShellBallWaitingConfirmReason = (typeof shellBallWaitingConfirmReasons)[number];
+
+export const shellBallVoiceStages = ["listening", "locked"] as const;
+
+export type ShellBallVoiceStage = (typeof shellBallVoiceStages)[number];
+
+export type ShellBallDualFormState = {
+  systemState: ShellBallSystemState;
+  engagementKind: ShellBallEngagementKind;
+  waitingConfirmReason?: ShellBallWaitingConfirmReason;
+  voiceStage?: ShellBallVoiceStage;
+};
+
+export function isShellBallDualFormStateLegal(state: ShellBallDualFormState): boolean {
+  const { systemState, engagementKind, waitingConfirmReason, voiceStage } = state;
+
+  if (systemState === "waiting_confirm") {
+    if (waitingConfirmReason === undefined) {
+      return false;
+    }
+
+    if (waitingConfirmReason !== "authorization" && engagementKind !== "result") {
+      return false;
+    }
+  } else if (waitingConfirmReason !== undefined) {
+    return false;
+  }
+
+  if (engagementKind === "voice") {
+    if (systemState !== "capturing" || voiceStage === undefined) {
+      return false;
+    }
+  } else if (voiceStage !== undefined) {
+    return false;
+  }
+
+  if (systemState === "completed" && engagementKind !== "result") {
+    return false;
+  }
+
+  if (systemState === "idle" && engagementKind !== "none") {
+    return false;
+  }
+
+  return true;
+}
+
 export type ShellBallInteractionEvent =
   | "pointer_enter_hotspot"
   | "pointer_leave_region"
