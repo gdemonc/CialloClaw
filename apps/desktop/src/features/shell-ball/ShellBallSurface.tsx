@@ -64,6 +64,7 @@ export function ShellBallSurface({
               <div className="shell-ball-surface__mascot-shell">
                 <ShellBallMascot
                   visualState={visualState}
+                  dualFormState={dualFormState}
                   voicePreview={voicePreview}
                   motionConfig={motionConfig}
                   onPrimaryClick={onPrimaryClick}

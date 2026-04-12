@@ -3,10 +3,11 @@ import type { CSSProperties, MouseEvent, PointerEvent } from "react";
 import { AudioLines, ShieldAlert } from "lucide-react";
 import { cn } from "../../../utils/cn";
 import type { ShellBallVoicePreview } from "../shellBall.interaction";
-import type { ShellBallMotionConfig, ShellBallVisualState } from "../shellBall.types";
+import type { ShellBallDualFormState, ShellBallMotionConfig, ShellBallVisualState } from "../shellBall.types";
 
 type ShellBallMascotProps = {
   visualState: ShellBallVisualState;
+  dualFormState?: ShellBallDualFormState;
   voicePreview?: ShellBallVoicePreview;
   motionConfig: ShellBallMotionConfig;
   onPrimaryClick?: () => void;
@@ -93,6 +94,7 @@ export function shouldStartShellBallMascotWindowDrag(input: {
 
 export function ShellBallMascot({
   visualState,
+  dualFormState,
   voicePreview = null,
   motionConfig,
   onPrimaryClick = () => {},
@@ -103,6 +105,7 @@ export function ShellBallMascot({
   onPressEnd = () => false,
   onPressCancel = () => {},
 }: ShellBallMascotProps) {
+  const resolvedDualFormState = dualFormState ?? getShellBallMascotFallbackDualFormState(visualState);
   const activeSequenceRef = useRef(false);
   const draggingSequenceRef = useRef(false);
   const pointerStartXRef = useRef<number | null>(null);
@@ -283,6 +286,9 @@ export function ShellBallMascot({
     <div
       className={cn("shell-ball-mascot", voicePreview !== null && `shell-ball-mascot--preview-${voicePreview}`)}
       data-state={visualState}
+      data-system-state={resolvedDualFormState.systemState}
+      data-engagement-kind={resolvedDualFormState.engagementKind}
+      data-waiting-confirm-reason={resolvedDualFormState.waitingConfirmReason}
       data-tone={motionConfig.accentTone}
       data-voice-preview={voicePreview ?? undefined}
     >
@@ -320,6 +326,9 @@ export function ShellBallMascot({
             </div>
 
             <div className="shell-ball-mascot__body">
+              <div className="shell-ball-mascot__state-sigil" aria-hidden="true">
+                {getShellBallMascotStateSigil(resolvedDualFormState)}
+              </div>
               <div className="shell-ball-mascot__belly" />
               <div className="shell-ball-mascot__cheek shell-ball-mascot__cheek--left" />
               <div className="shell-ball-mascot__cheek shell-ball-mascot__cheek--right" />
@@ -357,4 +366,47 @@ export function ShellBallMascot({
       />
     </div>
   );
+}
+
+function getShellBallMascotFallbackDualFormState(visualState: ShellBallVisualState): ShellBallDualFormState {
+  switch (visualState) {
+    case "idle":
+      return { systemState: "idle", engagementKind: "none" };
+    case "hover_input":
+      return { systemState: "awakenable", engagementKind: "none" };
+    case "confirming_intent":
+      return { systemState: "intent_confirming", engagementKind: "text_selection" };
+    case "processing":
+      return { systemState: "processing", engagementKind: "text_selection" };
+    case "waiting_auth":
+      return { systemState: "waiting_confirm", engagementKind: "file_drag", waitingConfirmReason: "authorization" };
+    case "voice_listening":
+      return { systemState: "capturing", engagementKind: "voice", voiceStage: "listening" };
+    case "voice_locked":
+      return { systemState: "capturing", engagementKind: "voice", voiceStage: "locked" };
+  }
+}
+
+function getShellBallMascotStateSigil(state: ShellBallDualFormState) {
+  if (state.systemState === "awakenable" && state.engagementKind === "text_selection") {
+    return "选中";
+  }
+
+  if (state.systemState === "processing" && state.engagementKind === "file_parsing") {
+    return "解析";
+  }
+
+  if (state.systemState === "waiting_confirm" && state.waitingConfirmReason === "authorization") {
+    return "授权";
+  }
+
+  if (state.systemState === "completed" && state.engagementKind === "result") {
+    return "完成";
+  }
+
+  if (state.systemState === "abnormal") {
+    return "异常";
+  }
+
+  return "待命";
 }

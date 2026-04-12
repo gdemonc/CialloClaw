@@ -93,7 +93,18 @@ export function ShellBallInputWindow({
   }
 
   function handleAction(label: string) {
-    if (label === "拒绝" || label === "查看详情") {
+    if (label === "允许本次") {
+      void emitShellBallPrimaryAction("authorization_allow", "input");
+      return;
+    }
+
+    if (label === "拒绝") {
+      void emitShellBallPrimaryAction("authorization_reject", "input");
+      return;
+    }
+
+    if (label === "查看详情") {
+      void emitShellBallPrimaryAction("authorization_details", "input");
       return;
     }
 

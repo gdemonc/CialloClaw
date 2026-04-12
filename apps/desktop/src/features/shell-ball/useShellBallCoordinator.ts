@@ -264,6 +264,15 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         case "submit":
           handlersRef.current.onSubmitText();
           break;
+        case "authorization_allow":
+          handlersRef.current.onSubmitText();
+          break;
+        case "authorization_reject":
+          handlersRef.current.onInputFocusChange(false);
+          break;
+        case "authorization_details":
+          handlersRef.current.onInputFocusChange(true);
+          break;
         case "primary_click":
           handlersRef.current.onPrimaryClick();
           break;

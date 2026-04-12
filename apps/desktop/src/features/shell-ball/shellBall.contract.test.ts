@@ -2654,6 +2654,10 @@ test("shell-ball mascot supports passive rendering outside the floating ball hos
   const markup = renderToStaticMarkup(
     createElement(ShellBallMascot, {
       visualState: "processing",
+      dualFormState: {
+        systemState: "processing",
+        engagementKind: "text_selection",
+      },
       motionConfig: getShellBallMotionConfig("processing"),
     }),
   );
@@ -3940,6 +3944,25 @@ test("shell-ball surface contract uses the already-derived dual-form state witho
   assert.match(surfaceSource, /dualFormState: ShellBallDualFormState;/);
 });
 
+test("shell-ball mascot reflects P0 dual-form state on the actual ball presentation", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ShellBallMascot, {
+      visualState: "waiting_auth",
+      dualFormState: {
+        systemState: "waiting_confirm",
+        engagementKind: "file_drag",
+        waitingConfirmReason: "authorization",
+      },
+      motionConfig: getShellBallMotionConfig("waiting_auth"),
+    }),
+  );
+
+  assert.match(markup, /data-system-state="waiting_confirm"/);
+  assert.match(markup, /data-engagement-kind="file_drag"/);
+  assert.match(markup, /data-waiting-confirm-reason="authorization"/);
+  assert.match(markup, /授权/);
+});
+
 test("shell-ball bubble window adds authorization, result, and abnormal summaries from dual-form state", () => {
   function renderBubbleMarkup(dualFormState: ShellBallDualFormState) {
     const helperSnapshot = createShellBallWindowSnapshot({
@@ -4072,6 +4095,19 @@ test("shell-ball input window keeps actions in the lower helper for authorizatio
   assert.match(abnormalMarkup, /修改请求/);
   assert.doesNotMatch(completedMarkup, /查看详情/);
   assert.doesNotMatch(completedMarkup, /拒绝/);
+});
+
+test("shell-ball input helper routes authorization actions through distinct local primary actions", () => {
+  const inputWindowSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallInputWindow.tsx"), "utf8");
+  const windowSyncSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.windowSync.ts"), "utf8");
+
+  assert.doesNotMatch(inputWindowSource, /label === "拒绝" \|\| label === "查看详情"/);
+  assert.match(inputWindowSource, /emitShellBallPrimaryAction\("authorization_allow", "input"\)/);
+  assert.match(inputWindowSource, /emitShellBallPrimaryAction\("authorization_reject", "input"\)/);
+  assert.match(inputWindowSource, /emitShellBallPrimaryAction\("authorization_details", "input"\)/);
+  assert.match(windowSyncSource, /"authorization_allow"/);
+  assert.match(windowSyncSource, /"authorization_reject"/);
+  assert.match(windowSyncSource, /"authorization_details"/);
 });
 
 test("shell-ball surface renders the mascot-only floating structure without the demo switcher", () => {

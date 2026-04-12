@@ -19,7 +19,13 @@ export const shellBallWindowSyncEvents = Object.freeze({
 
 export type ShellBallHelperWindowRole = "bubble" | "input" | "pinned";
 
-export type ShellBallPrimaryAction = "attach_file" | "submit" | "primary_click";
+export type ShellBallPrimaryAction =
+  | "attach_file"
+  | "submit"
+  | "primary_click"
+  | "authorization_allow"
+  | "authorization_reject"
+  | "authorization_details";
 
 export type ShellBallBubbleAction = "pin" | "unpin" | "delete";
 
