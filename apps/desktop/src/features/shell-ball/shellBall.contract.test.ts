@@ -2882,7 +2882,10 @@ test("shell-ball coordinator snapshots carry shell-ball-local bubble messages", 
     onRegionLeave: () => {},
     onInputFocusChange: () => {},
     onSubmitText: () => {},
+    onConfirmIntent: () => {},
     onAttachFile: () => {},
+    onAuthorizationAllow: () => {},
+    onAbnormalRetry: () => {},
     onPrimaryClick: () => {},
   });
 
@@ -2955,7 +2958,10 @@ test("shell-ball helper snapshots carry dual-form state only through an explicit
     onRegionLeave: () => {},
     onInputFocusChange: () => {},
     onSubmitText: () => {},
+    onConfirmIntent: () => {},
     onAttachFile: () => {},
+    onAuthorizationAllow: () => {},
+    onAbnormalRetry: () => {},
     onPrimaryClick: () => {},
   });
 
@@ -3637,7 +3643,10 @@ test("shell-ball detached bubble actions close pinned windows and delete detache
     onRegionLeave: () => {},
     onInputFocusChange: () => {},
     onSubmitText: () => {},
+    onConfirmIntent: () => {},
     onAttachFile: () => {},
+    onAuthorizationAllow: () => {},
+    onAbnormalRetry: () => {},
     onPrimaryClick: () => {},
   });
 
@@ -4107,6 +4116,7 @@ test("shell-ball input window keeps actions in the lower helper for authorizatio
 test("shell-ball input helper routes authorization actions through distinct local primary actions", () => {
   const inputWindowSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallInputWindow.tsx"), "utf8");
   const windowSyncSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.windowSync.ts"), "utf8");
+  const coordinatorSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"), "utf8");
 
   assert.doesNotMatch(inputWindowSource, /handleAction\(label: string\)/);
   assert.doesNotMatch(inputWindowSource, /label === "允许本次"/);
@@ -4119,6 +4129,9 @@ test("shell-ball input helper routes authorization actions through distinct loca
   assert.match(windowSyncSource, /"result_continue"/);
   assert.match(windowSyncSource, /"abnormal_retry"/);
   assert.match(windowSyncSource, /"abnormal_modify"/);
+  assert.doesNotMatch(coordinatorSource, /case "confirm_intent":\s+handlersRef\.current\.onSubmitText\(\)/);
+  assert.doesNotMatch(coordinatorSource, /case "authorization_allow":\s+handlersRef\.current\.onSubmitText\(\)/);
+  assert.doesNotMatch(coordinatorSource, /case "abnormal_retry":\s+handlersRef\.current\.onSubmitText\(\)/);
 });
 
 test("shell-ball runtime ui uses a dedicated runtime mapper instead of shell-ball demo fixtures", () => {
@@ -4139,6 +4152,13 @@ test("shell-ball mascot avoids in-file fallback dual-form derivation", () => {
 
   assert.doesNotMatch(mascotSource, /function getShellBallMascotFallbackDualFormState/);
   assert.match(mascotSource, /getShellBallMascotFallbackDualFormState/);
+});
+
+test("shell-ball runtime mapper imports dual-form derivation from a pure module", () => {
+  const runtimeSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.runtime.ts"), "utf8");
+
+  assert.doesNotMatch(runtimeSource, /from "\.\/useShellBallInteraction"/);
+  assert.match(runtimeSource, /from "\.\/shellBall\.dualForm"/);
 });
 
 test("shell-ball surface renders the mascot-only floating structure without the demo switcher", () => {

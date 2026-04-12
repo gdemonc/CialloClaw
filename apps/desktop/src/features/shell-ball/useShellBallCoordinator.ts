@@ -44,7 +44,10 @@ type ShellBallCoordinatorInput = {
   onRegionLeave: () => void;
   onInputFocusChange: (focused: boolean) => void;
   onSubmitText: () => void;
+  onConfirmIntent: () => void;
   onAttachFile: () => void;
+  onAuthorizationAllow: () => void;
+  onAbnormalRetry: () => void;
   onPrimaryClick: () => void;
 };
 
@@ -160,7 +163,10 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
     onRegionLeave: input.onRegionLeave,
     onInputFocusChange: input.onInputFocusChange,
     onSubmitText: input.onSubmitText,
+    onConfirmIntent: input.onConfirmIntent,
     onAttachFile: input.onAttachFile,
+    onAuthorizationAllow: input.onAuthorizationAllow,
+    onAbnormalRetry: input.onAbnormalRetry,
     onPrimaryClick: input.onPrimaryClick,
   });
 
@@ -172,7 +178,10 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
     onRegionLeave: input.onRegionLeave,
     onInputFocusChange: input.onInputFocusChange,
     onSubmitText: input.onSubmitText,
+    onConfirmIntent: input.onConfirmIntent,
     onAttachFile: input.onAttachFile,
+    onAuthorizationAllow: input.onAuthorizationAllow,
+    onAbnormalRetry: input.onAbnormalRetry,
     onPrimaryClick: input.onPrimaryClick,
   };
 
@@ -265,10 +274,10 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
           handlersRef.current.onSubmitText();
           break;
         case "confirm_intent":
-          handlersRef.current.onSubmitText();
+          handlersRef.current.onConfirmIntent();
           break;
         case "authorization_allow":
-          handlersRef.current.onSubmitText();
+          handlersRef.current.onAuthorizationAllow();
           break;
         case "authorization_reject":
           handlersRef.current.onInputFocusChange(false);
@@ -283,7 +292,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
           handlersRef.current.onInputFocusChange(true);
           break;
         case "abnormal_retry":
-          handlersRef.current.onSubmitText();
+          handlersRef.current.onAbnormalRetry();
           break;
         case "abnormal_modify":
           handlersRef.current.onInputFocusChange(true);

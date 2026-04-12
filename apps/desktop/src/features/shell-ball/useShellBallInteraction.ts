@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import {
   createShellBallInteractionController,
-  getShellBallHoverEngagementKind,
   getShellBallInputBarMode,
   getShellBallVoicePreview,
   resolveShellBallVoiceReleaseEvent,
@@ -10,8 +9,8 @@ import {
   shouldRetainShellBallHoverInput,
   type ShellBallVoicePreview,
 } from "./shellBall.interaction";
+import { deriveShellBallDualFormState } from "./shellBall.dualForm";
 import type {
-  ShellBallDualFormState,
   ShellBallEngagementKind,
   ShellBallInteractionEvent,
   ShellBallVisualState,
@@ -189,87 +188,7 @@ export function deriveShellBallEffectiveInteractionContext(input: {
   });
 }
 
-function getShellBallActiveEngagementKind(input: {
-  visualState: Extract<ShellBallVisualState, "confirming_intent" | "processing" | "waiting_auth">;
-  context: ShellBallLocalInteractionContext;
-}): ShellBallLocalInteractionEngagement {
-  if (input.context.activeEngagementKind !== null) {
-    return input.context.activeEngagementKind;
-  }
-
-  if (input.context.hasRecommendation) {
-    return "recommendation";
-  }
-
-  return "text_selection";
-}
-
-export function deriveShellBallDualFormState(input: {
-  visualState: ShellBallVisualState;
-  context?: ShellBallLocalInteractionContext;
-  hasRecommendation?: boolean;
-}): ShellBallDualFormState {
-  const context: ShellBallLocalInteractionContext = input.context ?? {
-    hasRecommendation: input.hasRecommendation ?? false,
-    activeEngagementKind: null,
-  };
-
-  switch (input.visualState) {
-    case "idle":
-      return {
-        systemState: "idle",
-        engagementKind: "none",
-      };
-
-    case "hover_input":
-      return {
-        systemState: "awakenable",
-        engagementKind: getShellBallHoverEngagementKind(context.hasRecommendation),
-      };
-
-    case "confirming_intent":
-      return {
-        systemState: "intent_confirming",
-        engagementKind: getShellBallActiveEngagementKind({
-          visualState: input.visualState,
-          context,
-        }),
-      };
-
-    case "processing":
-      return {
-        systemState: "processing",
-        engagementKind: getShellBallActiveEngagementKind({
-          visualState: input.visualState,
-          context,
-        }),
-      };
-
-    case "waiting_auth":
-      return {
-        systemState: "waiting_confirm",
-        engagementKind: getShellBallActiveEngagementKind({
-          visualState: input.visualState,
-          context,
-        }),
-        waitingConfirmReason: "authorization",
-      };
-
-    case "voice_listening":
-      return {
-        systemState: "capturing",
-        engagementKind: "voice",
-        voiceStage: "listening",
-      };
-
-    case "voice_locked":
-      return {
-        systemState: "capturing",
-        engagementKind: "voice",
-        voiceStage: "locked",
-      };
-  }
-}
+export { deriveShellBallDualFormState } from "./shellBall.dualForm";
 
 export function useShellBallInteraction() {
   const visualState = useShellBallStore((state) => state.visualState);
@@ -410,9 +329,31 @@ export function useShellBallInteraction() {
     inputFocusedRef.current = reset.nextFocused;
   }
 
+  function handleConfirmIntentAction() {
+    pendingInteractionHintRef.current = {
+      activeEngagementKind: localInteractionContext.hasRecommendation ? "recommendation" : localInteractionContext.activeEngagementKind,
+    };
+    dispatch("submit_text");
+  }
+
   function handleAttachFile() {
     pendingInteractionHintRef.current = { activeEngagementKind: "file_drag" };
     dispatch("attach_file");
+  }
+
+  function handleAuthorizationAllowAction() {
+    pendingInteractionHintRef.current = { activeEngagementKind: "file_drag" };
+    controllerRef.current?.forceState("processing", { regionActive: regionActiveRef.current });
+    syncVisualState();
+  }
+
+  function handleAbnormalRetryAction() {
+    pendingInteractionHintRef.current = {
+      activeEngagementKind: effectiveInteractionContext.activeEngagementKind,
+      hasRecommendation: effectiveInteractionContext.hasRecommendation,
+    };
+    controllerRef.current?.forceState("processing", { regionActive: regionActiveRef.current });
+    syncVisualState();
   }
 
   function handlePressStart(event: PointerEvent<HTMLButtonElement>) {
@@ -588,7 +529,10 @@ export function useShellBallInteraction() {
     handleRegionEnter,
     handleRegionLeave,
     handleSubmitText,
+    handleConfirmIntentAction,
     handleAttachFile,
+    handleAuthorizationAllowAction,
+    handleAbnormalRetryAction,
     handlePressStart,
     handlePressMove,
     handlePressEnd,

@@ -1,4 +1,4 @@
-import { deriveShellBallDualFormState } from "./useShellBallInteraction";
+import { deriveShellBallDualFormState } from "./shellBall.dualForm";
 import type { ShellBallPrimaryAction } from "./shellBall.windowSync";
 import type { ShellBallDualFormState, ShellBallVisualState } from "./shellBall.types";
 

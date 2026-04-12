@@ -136,7 +136,10 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     handlePressEnd,
     handlePressCancel,
     handleSubmitText,
+    handleConfirmIntentAction,
     handleAttachFile,
+    handleAuthorizationAllowAction,
+    handleAbnormalRetryAction,
     handleInputFocusChange,
     setInputValue,
     handleForceState,
@@ -272,7 +275,10 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     onRegionLeave: handleRegionLeave,
     onInputFocusChange: handleInputFocusChange,
     onSubmitText: handleSubmitText,
+    onConfirmIntent: handleConfirmIntentAction,
     onAttachFile: handleAttachFile,
+    onAuthorizationAllow: handleAuthorizationAllowAction,
+    onAbnormalRetry: handleAbnormalRetryAction,
     onPrimaryClick: handlePrimaryClick,
   });
 
