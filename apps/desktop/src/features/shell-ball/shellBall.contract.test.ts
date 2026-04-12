@@ -82,6 +82,7 @@ import {
 import { applyShellBallBubbleAction } from "./useShellBallCoordinator";
 import {
   deriveShellBallDualFormState,
+  deriveShellBallLocalInteractionContext,
   getShellBallPostSubmitInputReset,
   getShellBallDashboardOpenGesturePolicy,
   getShellBallPressCancelEvent,
@@ -816,7 +817,10 @@ test("shell-ball derives dual-form view state from the legacy visual state machi
   assert.deepEqual(
     deriveShellBallDualFormState({
       visualState: "confirming_intent",
-      engagementKind: "text_selection",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: "text_selection",
+      },
     }),
     {
       systemState: "intent_confirming",
@@ -827,7 +831,10 @@ test("shell-ball derives dual-form view state from the legacy visual state machi
   assert.deepEqual(
     deriveShellBallDualFormState({
       visualState: "waiting_auth",
-      engagementKind: "file_drag",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: "file_drag",
+      },
     }),
     {
       systemState: "waiting_confirm",
@@ -847,6 +854,69 @@ test("shell-ball derives dual-form view state from the legacy visual state machi
     engagementKind: "voice",
     voiceStage: "locked",
   });
+
+  assert.deepEqual(
+    deriveShellBallDualFormState({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: "file_drag",
+      },
+    }),
+    {
+      systemState: "awakenable",
+      engagementKind: "none",
+    },
+  );
+});
+
+test("shell-ball keeps frontend-local engagement context legal across force and sync style state changes", () => {
+  const fileDragContext = {
+    hasRecommendation: false,
+    activeEngagementKind: "file_drag" as const,
+  };
+
+  assert.deepEqual(
+    deriveShellBallLocalInteractionContext({
+      previousContext: fileDragContext,
+      previousVisualState: "processing",
+      nextVisualState: "waiting_auth",
+    }),
+    fileDragContext,
+  );
+
+  assert.deepEqual(
+    deriveShellBallLocalInteractionContext({
+      previousContext: fileDragContext,
+      previousVisualState: "waiting_auth",
+      nextVisualState: "processing",
+    }),
+    fileDragContext,
+  );
+
+  assert.deepEqual(
+    deriveShellBallLocalInteractionContext({
+      previousContext: fileDragContext,
+      previousVisualState: "waiting_auth",
+      nextVisualState: "hover_input",
+    }),
+    {
+      hasRecommendation: false,
+      activeEngagementKind: null,
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallLocalInteractionContext({
+      previousContext: fileDragContext,
+      previousVisualState: "confirming_intent",
+      nextVisualState: "voice_locked",
+    }),
+    {
+      hasRecommendation: false,
+      activeEngagementKind: "voice",
+    },
+  );
 });
 
 test("shell-ball desktop host declares bubble and input helper windows", () => {
