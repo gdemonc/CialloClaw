@@ -1,4 +1,4 @@
-import type { ShellBallDemoViewModel, ShellBallVisualState } from "./shellBall.types";
+import type { ShellBallDemoViewModel, ShellBallDualFormState, ShellBallVisualState } from "./shellBall.types";
 
 export const shellBallDemoFixtures = {
   idle: {
@@ -79,4 +79,65 @@ export const shellBallDemoFixtures = {
 
 export function getShellBallDemoViewModel(visualState: ShellBallVisualState) {
   return shellBallDemoFixtures[visualState];
+}
+
+export type ShellBallDualFormDemoViewModel = {
+  ballLabel: string;
+  bubbleTitle: string;
+  bubbleText: string;
+  actionLabels: string[];
+};
+
+export function getShellBallDualFormDemoViewModel(state: ShellBallDualFormState): ShellBallDualFormDemoViewModel {
+  if (state.systemState === "awakenable" && state.engagementKind === "text_selection") {
+    return {
+      ballLabel: "文本可操作提示",
+      bubbleTitle: "已识别当前选中文本",
+      bubbleText: "可以直接解释、翻译或总结这段内容。",
+      actionLabels: ["确认操作", "修改请求"],
+    };
+  }
+
+  if (state.systemState === "processing" && state.engagementKind === "file_parsing") {
+    return {
+      ballLabel: "文件解析中",
+      bubbleTitle: "正在解析文件内容",
+      bubbleText: "先完成结构识别，再进入后续处理。",
+      actionLabels: ["处理中"],
+    };
+  }
+
+  if (state.systemState === "waiting_confirm" && state.waitingConfirmReason === "authorization") {
+    return {
+      ballLabel: "等待授权",
+      bubbleTitle: "此操作需要你的授权",
+      bubbleText: "已识别潜在影响范围，请先确认是否继续。",
+      actionLabels: ["授权继续", "修改请求"],
+    };
+  }
+
+  if (state.systemState === "completed" && state.engagementKind === "result") {
+    return {
+      ballLabel: "结果已就绪",
+      bubbleTitle: "轻量结果已准备好",
+      bubbleText: "你可以直接查看结果，或继续推进下一步。",
+      actionLabels: ["继续下一步"],
+    };
+  }
+
+  if (state.systemState === "abnormal") {
+    return {
+      ballLabel: "处理异常",
+      bubbleTitle: "当前对象处理失败",
+      bubbleText: "可以调整请求后重试，或回到上一步重新确认。",
+      actionLabels: ["重试", "修改请求"],
+    };
+  }
+
+  return {
+    ballLabel: "近场承接中",
+    bubbleTitle: "当前状态已同步",
+    bubbleText: "悬浮球将根据本地双层形态继续承接。",
+    actionLabels: ["继续"],
+  };
 }

@@ -281,6 +281,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       containerRef={rootRef}
       dashboardTransitionPhase={dashboardTransitionPhase}
       visualState={visualState}
+      dualFormState={dualFormState}
       voicePreview={voicePreview}
       motionConfig={motionConfig}
       onDragStart={() => {

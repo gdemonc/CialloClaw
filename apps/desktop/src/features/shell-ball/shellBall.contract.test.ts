@@ -5,7 +5,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
-import { getShellBallDemoViewModel } from "./shellBall.demo";
+import { getShellBallDemoViewModel, getShellBallDualFormDemoViewModel } from "./shellBall.demo";
 import {
   createShellBallInteractionController,
   getShellBallGestureAxisIntent,
@@ -816,6 +816,74 @@ test("shell-ball demo fixtures preserve the frozen seven-state contract", () => 
     showVoiceHint: true,
     voiceHintText: "持续收音中，结束前不会自动退出。",
   });
+});
+
+test("shell-ball dual-form demo fixtures cover the P0 shell-ball UI states", () => {
+  assert.deepEqual(
+    getShellBallDualFormDemoViewModel({
+      systemState: "awakenable",
+      engagementKind: "text_selection",
+    }),
+    {
+      ballLabel: "文本可操作提示",
+      bubbleTitle: "已识别当前选中文本",
+      bubbleText: "可以直接解释、翻译或总结这段内容。",
+      actionLabels: ["确认操作", "修改请求"],
+    },
+  );
+
+  assert.deepEqual(
+    getShellBallDualFormDemoViewModel({
+      systemState: "processing",
+      engagementKind: "file_parsing",
+    }),
+    {
+      ballLabel: "文件解析中",
+      bubbleTitle: "正在解析文件内容",
+      bubbleText: "先完成结构识别，再进入后续处理。",
+      actionLabels: ["处理中"],
+    },
+  );
+
+  assert.deepEqual(
+    getShellBallDualFormDemoViewModel({
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    }),
+    {
+      ballLabel: "等待授权",
+      bubbleTitle: "此操作需要你的授权",
+      bubbleText: "已识别潜在影响范围，请先确认是否继续。",
+      actionLabels: ["授权继续", "修改请求"],
+    },
+  );
+
+  assert.deepEqual(
+    getShellBallDualFormDemoViewModel({
+      systemState: "completed",
+      engagementKind: "result",
+    }),
+    {
+      ballLabel: "结果已就绪",
+      bubbleTitle: "轻量结果已准备好",
+      bubbleText: "你可以直接查看结果，或继续推进下一步。",
+      actionLabels: ["继续下一步"],
+    },
+  );
+
+  assert.deepEqual(
+    getShellBallDualFormDemoViewModel({
+      systemState: "abnormal",
+      engagementKind: "text_selection",
+    }),
+    {
+      ballLabel: "处理异常",
+      bubbleTitle: "当前对象处理失败",
+      bubbleText: "可以调整请求后重试，或回到上一步重新确认。",
+      actionLabels: ["重试", "修改请求"],
+    },
+  );
 });
 
 test("shell-ball dual-form types freeze the local state axes and legal combinations", () => {
@@ -3811,6 +3879,186 @@ test("shell-ball input window owns the input rendering", () => {
 
   assert.match(markup, /shell-ball-input-bar/);
   assert.doesNotMatch(markup, /shell-ball-bubble-zone/);
+});
+
+test("shell-ball surface exposes P0 dual-form state on the ball host", () => {
+  const awakenableMarkup = renderToStaticMarkup(
+    createElement(ShellBallSurface, {
+      visualState: "hover_input",
+      dualFormState: {
+        systemState: "awakenable",
+        engagementKind: "text_selection",
+      },
+      voicePreview: null,
+      motionConfig: getShellBallMotionConfig("hover_input"),
+      onPrimaryClick: () => {},
+      onDoubleClick: () => {},
+      onRegionEnter: () => {},
+      onRegionLeave: () => {},
+      onDragStart: () => {},
+      onPressStart: () => {},
+      onPressMove: () => {},
+      onPressEnd: () => false,
+      onPressCancel: () => {},
+    }),
+  );
+
+  const processingMarkup = renderToStaticMarkup(
+    createElement(ShellBallSurface, {
+      visualState: "processing",
+      dualFormState: {
+        systemState: "processing",
+        engagementKind: "file_parsing",
+      },
+      voicePreview: null,
+      motionConfig: getShellBallMotionConfig("processing"),
+      onPrimaryClick: () => {},
+      onDoubleClick: () => {},
+      onRegionEnter: () => {},
+      onRegionLeave: () => {},
+      onDragStart: () => {},
+      onPressStart: () => {},
+      onPressMove: () => {},
+      onPressEnd: () => false,
+      onPressCancel: () => {},
+    }),
+  );
+
+  assert.match(awakenableMarkup, /data-system-state="awakenable"/);
+  assert.match(awakenableMarkup, /data-engagement-kind="text_selection"/);
+  assert.match(processingMarkup, /data-system-state="processing"/);
+  assert.match(processingMarkup, /data-engagement-kind="file_parsing"/);
+});
+
+test("shell-ball bubble window adds authorization, result, and abnormal summaries from dual-form state", () => {
+  function renderBubbleMarkup(dualFormState: ShellBallDualFormState) {
+    const helperSnapshot = createShellBallWindowSnapshot({
+      visualState: "processing",
+      dualFormState,
+      inputValue: "",
+      voicePreview: null,
+      bubbleItems: [],
+    });
+
+    const { ShellBallBubbleWindow: RuntimeShellBallBubbleWindow } = withShellBallModuleRuntime("ShellBallBubbleWindow.tsx", {
+      react: require("react"),
+      "./useShellBallCoordinator": {
+        useShellBallHelperWindowSnapshot() {
+          return helperSnapshot;
+        },
+        emitShellBallBubbleAction() {
+          return Promise.resolve();
+        },
+      },
+      "./useShellBallWindowMetrics": {
+        useShellBallWindowMetrics() {
+          return { rootRef: null };
+        },
+      },
+      "./components/ShellBallBubbleZone": {
+        ShellBallBubbleZone() {
+          return createElement("section", { className: "shell-ball-bubble-zone-stub" });
+        },
+      },
+    }, (moduleExports) => moduleExports as { ShellBallBubbleWindow: typeof import("./ShellBallBubbleWindow").ShellBallBubbleWindow });
+
+    return renderToStaticMarkup(createElement(RuntimeShellBallBubbleWindow, null));
+  }
+
+  const authMarkup = renderBubbleMarkup({
+    systemState: "waiting_confirm",
+    engagementKind: "file_drag",
+    waitingConfirmReason: "authorization",
+  });
+  const completedMarkup = renderBubbleMarkup({
+    systemState: "completed",
+    engagementKind: "result",
+  });
+  const abnormalMarkup = renderBubbleMarkup({
+    systemState: "abnormal",
+    engagementKind: "text_selection",
+  });
+
+  assert.match(authMarkup, /此操作需要你的授权/);
+  assert.match(authMarkup, /已识别潜在影响范围，请先确认是否继续。/);
+  assert.match(completedMarkup, /轻量结果已准备好/);
+  assert.match(completedMarkup, /你可以直接查看结果，或继续推进下一步。/);
+  assert.match(abnormalMarkup, /当前对象处理失败/);
+  assert.match(abnormalMarkup, /可以调整请求后重试，或回到上一步重新确认。/);
+});
+
+test("shell-ball input window keeps actions in the lower helper for authorization, result, and abnormal states", () => {
+  function renderInputMarkup(input: { dualFormState: ShellBallDualFormState; mode?: "interactive" | "readonly" | "voice" | "hidden" }) {
+    const helperSnapshot = createShellBallWindowSnapshot({
+      visualState: "processing",
+      dualFormState: input.dualFormState,
+      inputValue: "draft",
+      voicePreview: null,
+      bubbleItems: [],
+    });
+
+    const { ShellBallInputWindow: RuntimeShellBallInputWindow } = withShellBallModuleRuntime("ShellBallInputWindow.tsx", {
+      react: {
+        ...require("react"),
+        useEffect(callback: () => void) {
+          callback();
+        },
+      },
+      "./useShellBallCoordinator": {
+        useShellBallHelperWindowSnapshot() {
+          return helperSnapshot;
+        },
+        emitShellBallInputDraft() {
+          return Promise.resolve();
+        },
+        emitShellBallInputFocus() {
+          return Promise.resolve();
+        },
+        emitShellBallInputHover() {
+          return Promise.resolve();
+        },
+        emitShellBallPrimaryAction() {
+          return Promise.resolve();
+        },
+      },
+      "./useShellBallWindowMetrics": {
+        useShellBallWindowMetrics() {
+          return { rootRef: null };
+        },
+      },
+    }, (moduleExports) => moduleExports as { ShellBallInputWindow: typeof import("./ShellBallInputWindow").ShellBallInputWindow });
+
+    return renderToStaticMarkup(createElement(RuntimeShellBallInputWindow, { mode: input.mode }));
+  }
+
+  const authMarkup = renderInputMarkup({
+    dualFormState: {
+      systemState: "waiting_confirm",
+      engagementKind: "file_drag",
+      waitingConfirmReason: "authorization",
+    },
+    mode: "readonly",
+  });
+  const completedMarkup = renderInputMarkup({
+    dualFormState: {
+      systemState: "completed",
+      engagementKind: "result",
+    },
+    mode: "readonly",
+  });
+  const abnormalMarkup = renderInputMarkup({
+    dualFormState: {
+      systemState: "abnormal",
+      engagementKind: "text_selection",
+    },
+    mode: "readonly",
+  });
+
+  assert.match(authMarkup, /授权继续/);
+  assert.match(authMarkup, /修改请求/);
+  assert.match(completedMarkup, /继续下一步/);
+  assert.match(abnormalMarkup, /重试/);
+  assert.match(abnormalMarkup, /修改请求/);
 });
 
 test("shell-ball surface renders the mascot-only floating structure without the demo switcher", () => {

@@ -1,6 +1,6 @@
 import type { PointerEvent, ReactNode, RefObject } from "react";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
-import type { ShellBallMotionConfig, ShellBallVisualState } from "./shellBall.types";
+import type { ShellBallDualFormState, ShellBallMotionConfig, ShellBallVisualState } from "./shellBall.types";
 import { ShellBallMascot } from "./components/ShellBallMascot";
 
 type ShellBallSurfaceProps = {
@@ -8,6 +8,7 @@ type ShellBallSurfaceProps = {
   containerRef?: RefObject<HTMLDivElement>;
   dashboardTransitionPhase?: "idle" | "opening" | "hidden" | "closing";
   visualState: ShellBallVisualState;
+  dualFormState?: ShellBallDualFormState;
   voicePreview: ShellBallVoicePreview;
   motionConfig: ShellBallMotionConfig;
   onDragStart: () => void;
@@ -26,6 +27,7 @@ export function ShellBallSurface({
   containerRef,
   dashboardTransitionPhase = "idle",
   visualState,
+  dualFormState,
   voicePreview,
   motionConfig,
   onDragStart,
@@ -38,11 +40,38 @@ export function ShellBallSurface({
   onPressEnd,
   onPressCancel,
 }: ShellBallSurfaceProps) {
+  const resolvedDualFormState = dualFormState ?? {
+    systemState:
+      visualState === "idle"
+        ? "idle"
+        : visualState === "hover_input"
+          ? "awakenable"
+          : visualState === "confirming_intent"
+            ? "intent_confirming"
+            : visualState === "processing"
+              ? "processing"
+              : visualState === "waiting_auth"
+                ? "waiting_confirm"
+                : "capturing",
+    engagementKind:
+      visualState === "idle"
+        ? "none"
+        : visualState === "hover_input"
+          ? "none"
+          : visualState === "waiting_auth"
+            ? "file_drag"
+            : visualState === "voice_listening" || visualState === "voice_locked"
+              ? "voice"
+              : "text_selection",
+  };
+
   return (
     <div
       ref={containerRef}
       className="shell-ball-surface"
       data-dashboard-transition-phase={dashboardTransitionPhase}
+      data-system-state={resolvedDualFormState.systemState}
+      data-engagement-kind={resolvedDualFormState.engagementKind}
       aria-label="Shell-ball floating surface"
     >
       <div className="shell-ball-surface__core">
