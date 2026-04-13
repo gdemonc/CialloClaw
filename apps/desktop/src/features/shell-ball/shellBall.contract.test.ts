@@ -68,6 +68,10 @@ import {
   getShellBallVisibleBubbleItems,
   shellBallWindowSyncEvents,
 } from "./shellBall.windowSync";
+import {
+  deriveShellBallDualFormViewModel,
+  type ShellBallRegisteredTruthSnapshot,
+} from "./shellBall.registeredTruths";
 import type { ShellBallBubbleItem } from "./shellBall.bubble";
 import { cloneShellBallBubbleItems } from "./shellBall.bubble";
 import {
@@ -1075,6 +1079,139 @@ test("shell-ball derives dual-form view state from the legacy visual state machi
     {
       systemState: "awakenable",
       engagementKind: "none",
+    },
+  );
+});
+
+test("shell-ball derives dual-form view state from registered backend truths with precedence", () => {
+  const localFirstTruth: ShellBallRegisteredTruthSnapshot = {
+    task: {
+      task_id: "task-local-first",
+      source_type: "voice",
+      status: "processing",
+    },
+  };
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "processing",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: "file_drag",
+      },
+      registeredTruths: localFirstTruth,
+    }),
+    {
+      systemState: "processing",
+      engagementKind: "file_drag",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: null,
+      },
+      registeredTruths: {
+        task: {
+          task_id: "task-confirm",
+          source_type: "voice",
+          status: "confirming_intent",
+        },
+      },
+    }),
+    {
+      systemState: "intent_confirming",
+      engagementKind: "voice",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: null,
+      },
+      registeredTruths: {
+        task: {
+          task_id: "task-auth",
+          source_type: "voice",
+          status: "waiting_auth",
+        },
+        approvalRequest: {
+          approval_id: "approval-auth",
+          task_id: "task-auth",
+          operation_name: "write_file",
+          risk_level: "yellow",
+          target_object: "workspace/file.txt",
+          reason: "needs confirmation",
+          status: "pending",
+        },
+      },
+    }),
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "voice",
+      waitingConfirmReason: "authorization",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "processing",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: "voice",
+      },
+      registeredTruths: {
+        task: {
+          task_id: "task-delivery",
+          source_type: "voice",
+          status: "completed",
+        },
+        deliveryResult: {
+          type: "bubble",
+          title: "ready",
+          payload: {
+            path: null,
+            url: null,
+            task_id: "task-delivery",
+          },
+          preview_text: "done",
+        },
+      },
+    }),
+    {
+      systemState: "completed",
+      engagementKind: "result",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: null,
+      },
+      registeredTruths: {
+        task: {
+          task_id: "task-failed",
+          source_type: "dragged_file",
+          status: "failed",
+        },
+        failure: {
+          code: "RPC_INTERNAL_ERROR",
+          message: "backend failed",
+        },
+      },
+    }),
+    {
+      systemState: "abnormal",
+      engagementKind: "file_drag",
     },
   );
 });

@@ -9,7 +9,6 @@ import {
   shouldRetainShellBallHoverInput,
   type ShellBallVoicePreview,
 } from "./shellBall.interaction";
-import { deriveShellBallDualFormState } from "./shellBall.dualForm";
 import type {
   ShellBallEngagementKind,
   ShellBallInteractionEvent,
@@ -22,9 +21,17 @@ import {
   getShellBallSpeechRecognitionLanguage,
   type ShellBallSpeechRecognition,
 } from "./shellBall.speech";
+import {
+  createShellBallFailureTruth,
+  createShellBallRegisteredTruthSnapshotFromTaskResult,
+  deriveShellBallDualFormViewModel,
+  type ShellBallRegisteredTruthSnapshot,
+} from "./shellBall.registeredTruths";
 import { useShellBallStore } from "../../stores/shellBallStore";
 
 type TimeoutHandle = ReturnType<typeof globalThis.setTimeout>;
+
+type ShellBallInputSubmitResult = Parameters<typeof createShellBallRegisteredTruthSnapshotFromTaskResult>[0];
 
 type ShellBallInteractionController = ReturnType<typeof createShellBallInteractionController>;
 
@@ -108,7 +115,7 @@ async function submitShellBallInput(input: {
   text: string;
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
-}) {
+}): Promise<ShellBallInputSubmitResult | null> {
   const params = createShellBallInputSubmitParams(input);
 
   if (params === null) {
@@ -119,7 +126,7 @@ async function submitShellBallInput(input: {
     submitInput: (request: AgentInputSubmitParams) => Promise<unknown>;
   }>;
   const rpcMethods = await importRpcMethods();
-  return rpcMethods.submitInput(params);
+  return rpcMethods.submitInput(params) as Promise<ShellBallInputSubmitResult>;
 }
 
 export function mapShellBallInteractionConsumedEventToFlag(event: ShellBallInteractionConsumedEvent) {
@@ -260,6 +267,7 @@ export function deriveShellBallEffectiveInteractionContext(input: {
 }
 
 export { deriveShellBallDualFormState } from "./shellBall.dualForm";
+export { deriveShellBallDualFormViewModel } from "./shellBall.registeredTruths";
 
 export function resolveShellBallVoiceRecognitionFinalState(input: {
   reason: Exclude<ShellBallVoiceRecognitionStopReason, "none">;
@@ -295,6 +303,7 @@ export function useShellBallInteraction() {
   const [voicePreview, setVoicePreview] = useState<ShellBallVoicePreview>(null);
   const [voiceHoldProgress, setVoiceHoldProgress] = useState(0);
   const [interactionConsumed, setInteractionConsumed] = useState(false);
+  const [registeredTruths, setRegisteredTruths] = useState<ShellBallRegisteredTruthSnapshot | undefined>(undefined);
   const [localInteractionContext, setLocalInteractionContext] = useState<ShellBallLocalInteractionContext>({
     hasRecommendation: false,
     activeEngagementKind: null,
@@ -375,6 +384,14 @@ export function useShellBallInteraction() {
     setVoicePreview(preview);
   }
 
+  function clearRegisteredTruths() {
+    setRegisteredTruths(undefined);
+  }
+
+  function commitRegisteredTruths(nextTruths: ShellBallRegisteredTruthSnapshot) {
+    setRegisteredTruths(nextTruths);
+  }
+
   function getHoverRetained() {
     return shouldRetainShellBallHoverInput({
       regionActive: regionActiveRef.current,
@@ -422,13 +439,18 @@ export function useShellBallInteraction() {
     }
 
     try {
-      await submitShellBallInput({
+      clearRegisteredTruths();
+      const result = await submitShellBallInput({
         text: resolution.finalizedSpeechPayload,
         trigger: "voice_commit",
         inputMode: "voice",
       });
+      if (result !== null) {
+        commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskResult(result));
+      }
       setFinalizedSpeechPayload(resolution.finalizedSpeechPayload);
     } catch (error) {
+      commitRegisteredTruths(createShellBallFailureTruth({ message: error instanceof Error ? error.message : String(error) }));
       console.warn("shell-ball voice submit failed", error);
     }
   }
@@ -599,24 +621,30 @@ export function useShellBallInteraction() {
       activeEngagementKind: localInteractionContext.hasRecommendation ? "recommendation" : localInteractionContext.activeEngagementKind,
       hasRecommendation: localInteractionContext.hasRecommendation,
     };
+    clearRegisteredTruths();
     void (async () => {
       try {
-        await submitShellBallInput({
+        const result = await submitShellBallInput({
           text: currentDraft,
           trigger: "hover_text_input",
           inputMode: "text",
         });
+        if (result !== null) {
+          commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskResult(result));
+        }
         dispatch("submit_text");
         setInputValue(reset.nextInputValue);
         inputFocusedRef.current = reset.nextFocused;
         setInputFocused(reset.nextFocused);
       } catch (error) {
+        commitRegisteredTruths(createShellBallFailureTruth({ message: error instanceof Error ? error.message : String(error) }));
         console.warn("shell-ball text submit failed", error);
       }
     })();
   }
 
   function handleConfirmIntentAction() {
+    clearRegisteredTruths();
     pendingInteractionHintRef.current = {
       activeEngagementKind: localInteractionContext.hasRecommendation ? "recommendation" : localInteractionContext.activeEngagementKind,
     };
@@ -624,17 +652,20 @@ export function useShellBallInteraction() {
   }
 
   function handleAttachFile() {
+    clearRegisteredTruths();
     pendingInteractionHintRef.current = { activeEngagementKind: "file_drag" };
     dispatch("attach_file");
   }
 
   function handleAuthorizationAllowAction() {
+    clearRegisteredTruths();
     pendingInteractionHintRef.current = { activeEngagementKind: "file_drag" };
     controllerRef.current?.forceState("processing", { regionActive: regionActiveRef.current });
     syncVisualState();
   }
 
   function handleAbnormalRetryAction() {
+    clearRegisteredTruths();
     pendingInteractionHintRef.current = {
       activeEngagementKind: effectiveInteractionContext.activeEngagementKind,
       hasRecommendation: effectiveInteractionContext.hasRecommendation,
@@ -829,11 +860,12 @@ export function useShellBallInteraction() {
 
   const dualFormState = useMemo(
     () =>
-      deriveShellBallDualFormState({
+      deriveShellBallDualFormViewModel({
         visualState,
         context: effectiveInteractionContext,
+        registeredTruths,
       }),
-    [effectiveInteractionContext.activeEngagementKind, effectiveInteractionContext.hasRecommendation, visualState],
+    [effectiveInteractionContext.activeEngagementKind, effectiveInteractionContext.hasRecommendation, registeredTruths, visualState],
   );
 
   useEffect(() => {
