@@ -1,13 +1,5 @@
-import type {
-  AgentTaskDetailGetResult,
-  AgentTaskControlParams,
-  RequestMeta,
-  SecuritySummary,
-  Task,
-  TaskControlAction,
-  TaskListGroup,
-  TaskStep,
-} from "@cialloclaw/protocol";
+import type { AgentTaskDetailGetResult, AgentTaskControlParams, RequestMeta, Task, TaskControlAction, TaskListGroup, TaskStep } from "@cialloclaw/protocol";
+import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@cialloclaw/protocol";
 import { controlTask, getTaskDetail, listTasks } from "@/rpc/methods";
 import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskExperience, TaskListItem } from "./taskPage.types";
@@ -96,25 +88,39 @@ function createFallbackTaskDetail(task: Task): AgentTaskDetailGetResult {
   };
 }
 
-function createSafeSecuritySummary(task: Task, summary: Partial<SecuritySummary> | null | undefined): SecuritySummary {
-  return {
-    latest_restore_point: summary?.latest_restore_point ?? null,
-    pending_authorizations: typeof summary?.pending_authorizations === "number" ? summary.pending_authorizations : task.status === "waiting_auth" ? 1 : 0,
-    risk_level: summary?.risk_level ?? task.risk_level,
-    security_status: summary?.security_status ?? (task.status === "waiting_auth" ? "pending_confirmation" : "normal"),
-  };
+const riskLevels = new Set<string>(RISK_LEVELS);
+const securityStatuses = new Set<string>(SECURITY_STATUSES);
+const taskStepStatuses = new Set<string>(TASK_STEP_STATUSES);
+
+function isTaskStep(step: unknown): step is TaskStep {
+  if (!step || typeof step !== "object") {
+    return false;
+  }
+
+  const candidate = step as Partial<TaskStep>;
+  return (
+    typeof candidate.step_id === "string" &&
+    typeof candidate.task_id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.order_index === "number" &&
+    typeof candidate.input_summary === "string" &&
+    typeof candidate.output_summary === "string" &&
+    typeof candidate.status === "string" &&
+    taskStepStatuses.has(candidate.status)
+  );
 }
 
-function normalizeTaskStep(step: TaskStep, taskId: string, index: number): TaskStep {
-  return {
-    input_summary: step?.input_summary ?? "",
-    name: step?.name ?? `步骤 ${index + 1}`,
-    order_index: typeof step?.order_index === "number" ? step.order_index : index + 1,
-    output_summary: step?.output_summary ?? "",
-    status: step?.status ?? "pending",
-    step_id: step?.step_id ?? `${taskId}-step-${index + 1}`,
-    task_id: step?.task_id ?? taskId,
-  };
+function hasValidSecuritySummary(detail: AgentTaskDetailGetResult): boolean {
+  const summary = detail.security_summary as Partial<AgentTaskDetailGetResult["security_summary"]> | null | undefined;
+  return Boolean(
+    summary &&
+      typeof summary.pending_authorizations === "number" &&
+      typeof summary.risk_level === "string" &&
+      typeof summary.security_status === "string" &&
+      riskLevels.has(summary.risk_level) &&
+      securityStatuses.has(summary.security_status) &&
+      "latest_restore_point" in summary,
+  );
 }
 
 function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): AgentTaskDetailGetResult {
@@ -122,14 +128,16 @@ function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): AgentTaskD
     throw new Error("task detail payload is missing task information");
   }
 
-  const safeTask = detail.task;
+  if (!hasValidSecuritySummary(detail)) {
+    throw new Error("task detail payload is missing security summary");
+  }
 
   return {
     artifacts: Array.isArray(detail.artifacts) ? detail.artifacts : [],
     mirror_references: Array.isArray(detail.mirror_references) ? detail.mirror_references : [],
-    security_summary: createSafeSecuritySummary(safeTask, detail.security_summary),
-    task: safeTask,
-    timeline: Array.isArray(detail.timeline) ? detail.timeline.map((step, index) => normalizeTaskStep(step, safeTask.task_id, index)) : [],
+    security_summary: detail.security_summary,
+    task: detail.task,
+    timeline: Array.isArray(detail.timeline) ? detail.timeline.filter(isTaskStep) : [],
   };
 }
 
