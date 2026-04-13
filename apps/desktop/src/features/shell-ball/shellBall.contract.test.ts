@@ -1551,6 +1551,187 @@ test("shell-ball hook keeps dual-form state identity stable across unchanged ren
   });
 });
 
+test("shell-ball hook wires registered-truth adapters into production interaction bindings", () => {
+  withShellBallInteractionHookRuntime((runtime) => {
+    let interaction = runtime.render();
+
+    interaction.applyTaskStartResultTruth({
+      task: {
+        task_id: "task-start-hook",
+        source_type: "voice",
+        status: "confirming_intent",
+      },
+      bubble_message: null,
+      delivery_result: null,
+    });
+
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "intent_confirming",
+      engagementKind: "voice",
+    });
+
+    interaction.applyTaskUpdatedTruth({
+      task_id: "task-start-hook",
+      status: "processing",
+    });
+
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "processing",
+      engagementKind: "voice",
+    });
+
+    interaction.applyApprovalPendingTruth({
+      task_id: "task-start-hook",
+      approval_request: {
+        approval_id: "approval-hook",
+        task_id: "task-start-hook",
+        operation_name: "write_file",
+        risk_level: "yellow",
+        target_object: "workspace/file.txt",
+        reason: "needs confirmation",
+        status: "pending",
+      },
+    });
+
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "waiting_confirm",
+      engagementKind: "voice",
+      waitingConfirmReason: "authorization",
+    });
+
+    interaction.applyDeliveryReadyTruth({
+      task_id: "task-start-hook",
+      delivery_result: {
+        type: "bubble",
+        title: "ready",
+        payload: {
+          path: null,
+          url: null,
+          task_id: "task-start-hook",
+        },
+        preview_text: "done",
+      },
+    });
+
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "completed",
+      engagementKind: "result",
+    });
+
+    interaction.applyRpcFailureTruth({
+      code: invalidParamsErrorCode,
+      rpcMessage: "invalid params",
+      detail: "task payload invalid",
+    });
+
+    interaction = runtime.render();
+    assert.deepEqual(interaction.dualFormState, {
+      systemState: "abnormal",
+      engagementKind: "none",
+    });
+  });
+});
+
+test("shell-ball derives engagement precedence through local context, task source, truth context, then none", () => {
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "processing",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: "file_drag",
+      },
+      registeredTruths: {
+        task: {
+          task_id: "precedence-local",
+          source_type: "voice",
+          status: "processing",
+        },
+      },
+    }),
+    {
+      systemState: "processing",
+      engagementKind: "file_drag",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: null,
+      },
+      registeredTruths: {
+        task: {
+          task_id: "precedence-task",
+          source_type: "voice",
+          status: "processing",
+        },
+      },
+    }),
+    {
+      systemState: "processing",
+      engagementKind: "voice",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: null,
+      },
+      registeredTruths: {
+        deliveryResult: {
+          type: "bubble",
+          title: "ready",
+          payload: {
+            path: null,
+            url: null,
+            task_id: "precedence-delivery",
+          },
+          preview_text: "done",
+        },
+      },
+    }),
+    {
+      systemState: "completed",
+      engagementKind: "result",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: null,
+      },
+      registeredTruths: {
+        approvalRequest: {
+          approval_id: "precedence-none",
+          task_id: "precedence-none",
+          operation_name: "write_file",
+          risk_level: "yellow",
+          target_object: "workspace/file.txt",
+          reason: "needs confirmation",
+          status: "pending",
+        },
+      },
+    }),
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "none",
+      waitingConfirmReason: "authorization",
+    },
+  );
+});
+
 test("shell-ball desktop host declares bubble and input helper windows", () => {
   assert.equal(existsSync(resolve(desktopRoot, "shell-ball-bubble.html")), true);
   assert.equal(existsSync(resolve(desktopRoot, "shell-ball-input.html")), true);
@@ -4867,11 +5048,12 @@ test("shell-ball cancel callback path is wired from mascot through app interacti
   assert.match(interactionSource, /dispatch\(cancelEvent\);/);
 });
 
-test("shell-ball interaction hook does not center registered-truth mapping on agent.input.submit success payloads", () => {
+test("shell-ball interaction hook keeps explicit registered-truth bindings separate from agent.input.submit success handling", () => {
   const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");
 
-  assert.doesNotMatch(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskStartResult/);
-  assert.doesNotMatch(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskConfirmResult/);
+  assert.match(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskStartResult/);
+  assert.match(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskConfirmResult/);
+  assert.doesNotMatch(interactionSource, /const result = await submitShellBallInput/);
 });
 
 test("shell-ball surface passes mascot double-click and drag wiring through the mascot only", () => {

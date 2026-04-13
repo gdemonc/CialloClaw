@@ -22,7 +22,12 @@ import {
   type ShellBallSpeechRecognition,
 } from "./shellBall.speech";
 import {
+  applyShellBallApprovalPendingTruth,
+  applyShellBallDeliveryReadyTruth,
+  applyShellBallTaskUpdatedTruth,
   createShellBallRegisteredTruthSnapshotFromRpcFailure,
+  createShellBallRegisteredTruthSnapshotFromTaskConfirmResult,
+  createShellBallRegisteredTruthSnapshotFromTaskStartResult,
   deriveShellBallDualFormViewModel,
   type ShellBallRegisteredTruthSnapshot,
 } from "./shellBall.registeredTruths";
@@ -406,6 +411,30 @@ export function useShellBallInteraction() {
     setRegisteredTruths(nextTruths);
   }
 
+  function applyTaskStartResultTruth(result: Parameters<typeof createShellBallRegisteredTruthSnapshotFromTaskStartResult>[0]) {
+    commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskStartResult(result));
+  }
+
+  function applyTaskConfirmResultTruth(result: Parameters<typeof createShellBallRegisteredTruthSnapshotFromTaskConfirmResult>[0]) {
+    commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskConfirmResult(result));
+  }
+
+  function applyTaskUpdatedTruth(notification: Parameters<typeof applyShellBallTaskUpdatedTruth>[1]) {
+    setRegisteredTruths((current) => applyShellBallTaskUpdatedTruth(current, notification));
+  }
+
+  function applyApprovalPendingTruth(notification: Parameters<typeof applyShellBallApprovalPendingTruth>[1]) {
+    setRegisteredTruths((current) => applyShellBallApprovalPendingTruth(current, notification));
+  }
+
+  function applyDeliveryReadyTruth(notification: Parameters<typeof applyShellBallDeliveryReadyTruth>[1]) {
+    setRegisteredTruths((current) => applyShellBallDeliveryReadyTruth(current, notification));
+  }
+
+  function applyRpcFailureTruth(failure: Parameters<typeof createShellBallRegisteredTruthSnapshotFromRpcFailure>[0]) {
+    commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromRpcFailure(failure));
+  }
+
   function getHoverRetained() {
     return shouldRetainShellBallHoverInput({
       regionActive: regionActiveRef.current,
@@ -654,9 +683,9 @@ export function useShellBallInteraction() {
         setInputFocused(reset.nextFocused);
       } catch (error) {
         if (isShellBallFormalRpcFailure(error) && error.code !== null) {
-          commitRegisteredTruths(
-            createShellBallRegisteredTruthSnapshotFromRpcFailure({
-              code: error.code,
+        commitRegisteredTruths(
+          createShellBallRegisteredTruthSnapshotFromRpcFailure({
+            code: error.code,
               rpcMessage: error.rpcMessage,
               detail: error.detail,
             }),
@@ -928,6 +957,12 @@ export function useShellBallInteraction() {
   return {
     visualState,
     dualFormState,
+    applyTaskStartResultTruth,
+    applyTaskConfirmResultTruth,
+    applyTaskUpdatedTruth,
+    applyApprovalPendingTruth,
+    applyDeliveryReadyTruth,
+    applyRpcFailureTruth,
     inputValue,
     setInputValue,
     finalizedSpeechPayload,

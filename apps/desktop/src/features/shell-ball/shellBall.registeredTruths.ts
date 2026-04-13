@@ -99,6 +99,20 @@ function getShellBallEngagementKindFromLocalContext(context: ShellBallLocalInter
   return null;
 }
 
+function getShellBallEngagementKindFromApprovalOrDeliveryContext(
+  truths: ShellBallRegisteredTruthSnapshot | undefined,
+): ShellBallEngagementKind | null {
+  if (truths?.deliveryResult !== undefined && truths.deliveryResult !== null) {
+    return "result";
+  }
+
+  if (truths?.approvalRequest !== undefined && truths.approvalRequest !== null) {
+    return null;
+  }
+
+  return null;
+}
+
 function resolveShellBallRegisteredTruthEngagement(input: {
   context?: ShellBallLocalInteractionContext;
   truths?: ShellBallRegisteredTruthSnapshot;
@@ -114,6 +128,12 @@ function resolveShellBallRegisteredTruthEngagement(input: {
 
   if (taskEngagement !== null) {
     return taskEngagement;
+  }
+
+  const truthContextEngagement = getShellBallEngagementKindFromApprovalOrDeliveryContext(truths);
+
+  if (truthContextEngagement !== null) {
+    return truthContextEngagement;
   }
 
   return "none";
