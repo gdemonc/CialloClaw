@@ -83,6 +83,29 @@ func (e *ToolExecutor) ExecuteTool(ctx context.Context, name string, input map[s
 	return e.ExecuteToolWithContext(ctx, nil, name, input)
 }
 
+// PrecheckToolWithContext runs validation and risk precheck without executing the tool.
+func (e *ToolExecutor) PrecheckToolWithContext(ctx context.Context, execCtx *ToolExecuteContext, name string, input map[string]any) (ToolMetadata, *RiskPrecheckResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if execCtx == nil {
+		execCtx = &ToolExecuteContext{}
+	}
+	tool, err := e.ResolveTool(name)
+	if err != nil {
+		return ToolMetadata{}, nil, err
+	}
+	metadata := tool.Metadata()
+	if err := tool.Validate(input); err != nil {
+		return metadata, nil, fmt.Errorf("%w: %v", ErrToolValidationFailed, err)
+	}
+	precheckResult, err := e.precheck(ctx, BuildRiskPrecheckInput(metadata, name, execCtx, input))
+	if err != nil {
+		return metadata, nil, err
+	}
+	return metadata, precheckResult, nil
+}
+
 // ExecuteToolWithContext executes a tool with a ToolExecuteContext.
 func (e *ToolExecutor) ExecuteToolWithContext(ctx context.Context, execCtx *ToolExecuteContext, name string, input map[string]any) (*ToolExecutionResult, error) {
 	if ctx == nil {
@@ -113,7 +136,8 @@ func (e *ToolExecutor) ExecuteToolWithContext(ctx context.Context, execCtx *Tool
 		record = e.recorder.Finish(ctx, record, ToolCallStatusFailed, nil, 0, mapToolErrorCode(e.errorMapper, err))
 		return &ToolExecutionResult{Metadata: metadata, ToolCall: record}, err
 	}
-	if precheckResult != nil && (precheckResult.Deny || precheckResult.ApprovalRequired) {
+	approvalGranted := approvalBypassAllowed(execCtx, name, precheckInput)
+	if precheckResult != nil && (precheckResult.Deny || (precheckResult.ApprovalRequired && !approvalGranted)) {
 		blockedErr := e.precheckBlockedError(*precheckResult)
 		result := e.buildPrecheckBlockedResult(ctx, metadata, record, *precheckResult, blockedErr)
 		return result, blockedErr
@@ -270,8 +294,14 @@ func (e *ToolExecutor) buildPrecheckBlockedResult(ctx context.Context, metadata 
 		"checkpoint_required": precheck.CheckpointRequired,
 		"deny":                precheck.Deny,
 	}
+	if precheck.Reason != "" {
+		output["reason"] = precheck.Reason
+	}
 	if precheck.DenyReason != "" {
 		output["deny_reason"] = precheck.DenyReason
+	}
+	if len(precheck.ImpactScope) > 0 {
+		output["impact_scope"] = precheck.ImpactScope
 	}
 
 	record = e.recorder.Finish(ctx, record, ToolCallStatusFailed, output, time.Nanosecond, mapToolErrorCode(e.errorMapper, err))
@@ -286,6 +316,30 @@ func (e *ToolExecutor) buildPrecheckBlockedResult(ctx context.Context, metadata 
 		Duration: time.Nanosecond,
 		ToolCall: record,
 	}
+}
+
+func approvalBypassAllowed(execCtx *ToolExecuteContext, toolName string, precheckInput RiskPrecheckInput) bool {
+	if execCtx == nil || !execCtx.ApprovalGranted {
+		return false
+	}
+	if strings.TrimSpace(execCtx.ApprovedOperation) != "" && execCtx.ApprovedOperation != toolName {
+		return false
+	}
+	if strings.TrimSpace(execCtx.ApprovedTargetObject) == "" {
+		return true
+	}
+	target := strings.TrimSpace(precheckInput.Workspace.TargetPath)
+	if target == "" {
+		target = strings.TrimSpace(precheckInput.Workspace.WorkspacePath)
+	}
+	if target == "" {
+		return false
+	}
+	return normalizeApprovalTarget(execCtx.ApprovedTargetObject) == normalizeApprovalTarget(target)
+}
+
+func normalizeApprovalTarget(target string) string {
+	return strings.Trim(strings.ReplaceAll(strings.TrimSpace(target), "\\", "/"), "/")
 }
 
 func normalizeDuration(duration time.Duration) time.Duration {
