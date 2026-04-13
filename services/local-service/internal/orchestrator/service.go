@@ -300,6 +300,17 @@ func (s *Service) ConfirmTask(params map[string]any) (map[string]any, error) {
 	if len(intentValue) == 0 {
 		intentValue = cloneMap(task.Intent)
 	}
+	if strings.TrimSpace(stringValue(intentValue, "name", "")) == "" {
+		bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "请先明确告诉我你希望执行的处理方式。", task.UpdatedAt.Format(dateTimeLayout))
+		if updatedTask, ok := s.runEngine.SetPresentation(task.TaskID, bubble, nil, nil); ok {
+			return map[string]any{
+				"task":            taskMap(updatedTask),
+				"bubble_message":  bubble,
+				"delivery_result": nil,
+			}, nil
+		}
+		return nil, ErrTaskNotFound
+	}
 
 	bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "已按新的要求开始处理", task.UpdatedAt.Format(dateTimeLayout))
 	if requiresAuthorization(intentValue) {
@@ -949,7 +960,10 @@ func bubbleTypeForSuggestion(requiresConfirm bool) string {
 // bubbleTextForInput 处理当前模块的相关逻辑。
 func bubbleTextForInput(suggestion intent.Suggestion) string {
 	if suggestion.RequiresConfirm {
-		return "你是想总结这段内容吗？"
+		if !suggestion.IntentConfirmed {
+			return "我还不确定你想如何处理这段内容，请确认目标。"
+		}
+		return confirmIntentText(suggestion.Intent)
 	}
 	return suggestion.ResultBubbleText
 }
@@ -957,9 +971,29 @@ func bubbleTextForInput(suggestion intent.Suggestion) string {
 // bubbleTextForStart 处理当前模块的相关逻辑。
 func bubbleTextForStart(suggestion intent.Suggestion) string {
 	if suggestion.RequiresConfirm {
-		return "你是想让我按当前对象继续处理吗？"
+		if !suggestion.IntentConfirmed {
+			return "我还不确定你想如何处理当前对象，请先确认。"
+		}
+		return confirmIntentText(suggestion.Intent)
 	}
 	return suggestion.ResultBubbleText
+}
+
+func confirmIntentText(taskIntent map[string]any) string {
+	switch stringValue(taskIntent, "name", "") {
+	case "translate":
+		return "你是想翻译这段内容吗？"
+	case "rewrite":
+		return "你是想改写这段内容吗？"
+	case "explain":
+		return "你是想解释这段内容吗？"
+	case "summarize":
+		return "你是想总结这段内容吗？"
+	case "write_file":
+		return "你是想把结果整理成文档吗？"
+	default:
+		return "请确认你希望我如何处理当前内容。"
+	}
 }
 
 // initialTimeline 处理当前模块的相关逻辑。
