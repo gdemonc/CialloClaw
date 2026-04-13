@@ -417,18 +417,45 @@ function withDesktopAliasRuntime<T>(callback: () => T) {
   }
 }
 
+type ShellBallInteractionHookRuntime = {
+  render: () => ReturnType<typeof useShellBallInteraction>;
+  flushEffects: () => void;
+  flushMicrotasks: () => Promise<void>;
+  setStoreVisualState: (state: ShellBallVisualState) => void;
+};
+
 function withShellBallInteractionHookRuntime<T>(
-  callback: (runtime: {
-    render: () => ReturnType<typeof useShellBallInteraction>;
-    flushEffects: () => void;
-    setStoreVisualState: (state: ShellBallVisualState) => void;
-  }) => T,
+  callback: (runtime: ShellBallInteractionHookRuntime) => T,
+): T;
+function withShellBallInteractionHookRuntime<T>(
+  mocks: Record<string, unknown>,
+  callback: (runtime: ShellBallInteractionHookRuntime) => T,
+): T;
+function withShellBallInteractionHookRuntime<T>(
+  mocksOrCallback: Record<string, unknown> | ((runtime: ShellBallInteractionHookRuntime) => T),
+  callback?: (runtime: ShellBallInteractionHookRuntime) => T,
 ) {
+  const resolvedMocks = typeof mocksOrCallback === "function" ? {} : mocksOrCallback;
+  const resolvedCallback = typeof mocksOrCallback === "function" ? mocksOrCallback : callback;
   const NodeModule = require("node:module") as any;
   const originalLoad = NodeModule._load;
-  const modulePath = resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/useShellBallInteraction.js");
-
-  delete require.cache[modulePath];
+  const modulePath = resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts");
+  const source = readFileSync(modulePath, "utf8");
+  const transpiledModule = { exports: {} as Record<string, unknown> };
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+    },
+    fileName: modulePath,
+  });
+  const moduleFactory = new Function("require", "module", "exports", transpiled.outputText) as (
+    require: NodeRequire,
+    module: { exports: Record<string, unknown> },
+    exports: Record<string, unknown>,
+  ) => void;
 
   const hookState: unknown[] = [];
   const hookRefs: Array<{ current: unknown }> = [];
@@ -517,10 +544,15 @@ function withShellBallInteractionHookRuntime<T>(
       };
     }
 
+    if (request in resolvedMocks) {
+      return resolvedMocks[request];
+    }
+
     return originalLoad(request, parent, isMain);
   };
 
-  const loaded = require(modulePath) as {
+  moduleFactory(require, transpiledModule, transpiledModule.exports);
+  const loaded = transpiledModule.exports as {
     useShellBallInteraction: typeof useShellBallInteraction;
   };
 
@@ -540,16 +572,31 @@ function withShellBallInteractionHookRuntime<T>(
         effect();
       }
     },
+    async flushMicrotasks() {
+      await Promise.resolve();
+      await Promise.resolve();
+    },
     setStoreVisualState(state: ShellBallVisualState) {
       store.visualState = state;
     },
   };
 
-  try {
-    return callback(runtime);
-  } finally {
+  const finalize = () => {
     NodeModule._load = originalLoad;
-    delete require.cache[modulePath];
+  };
+
+  try {
+    const result = resolvedCallback(runtime);
+
+    if (typeof result === "object" && result !== null && "then" in result) {
+      return (result as unknown as Promise<T>).finally(finalize) as T;
+    }
+
+    finalize();
+    return result;
+  } catch (error) {
+    finalize();
+    throw error;
   }
 }
 
@@ -1551,88 +1598,97 @@ test("shell-ball hook keeps dual-form state identity stable across unchanged ren
   });
 });
 
-test("shell-ball hook wires registered-truth adapters into production interaction bindings", () => {
-  withShellBallInteractionHookRuntime((runtime) => {
-    let interaction = runtime.render();
-
-    interaction.applyTaskStartResultTruth({
-      task: {
-        task_id: "task-start-hook",
-        source_type: "voice",
-        status: "confirming_intent",
+test("shell-ball submit success projects formal input-submit results into the dual-form view model", async () => {
+  await withShellBallInteractionHookRuntime(
+    {
+      "./shellBall.rpc": {
+        submitShellBallInputRpc: async () => ({
+          task: {
+            task_id: "task-submit-success",
+            source_type: "hover_input",
+            status: "confirming_intent",
+          },
+          delivery_result: null,
+        }),
       },
-      bubble_message: null,
-      delivery_result: null,
-    });
+    },
+    async (runtime) => {
+      let interaction = runtime.render();
+      interaction.setInputValue("Draft question");
+      interaction = runtime.render();
 
-    interaction = runtime.render();
-    assert.deepEqual(interaction.dualFormState, {
-      systemState: "intent_confirming",
-      engagementKind: "voice",
-    });
+      interaction.handleSubmitText();
+      await runtime.flushMicrotasks();
+      interaction = runtime.render();
 
-    interaction.applyTaskUpdatedTruth({
-      task_id: "task-start-hook",
-      status: "processing",
-    });
+      assert.deepEqual(interaction.dualFormState, {
+        systemState: "intent_confirming",
+        engagementKind: "text_selection",
+      });
+    },
+  );
+});
 
-    interaction = runtime.render();
-    assert.deepEqual(interaction.dualFormState, {
-      systemState: "processing",
-      engagementKind: "voice",
-    });
-
-    interaction.applyApprovalPendingTruth({
-      task_id: "task-start-hook",
-      approval_request: {
-        approval_id: "approval-hook",
-        task_id: "task-start-hook",
-        operation_name: "write_file",
-        risk_level: "yellow",
-        target_object: "workspace/file.txt",
-        reason: "needs confirmation",
-        status: "pending",
-      },
-    });
-
-    interaction = runtime.render();
-    assert.deepEqual(interaction.dualFormState, {
-      systemState: "waiting_confirm",
-      engagementKind: "voice",
-      waitingConfirmReason: "authorization",
-    });
-
-    interaction.applyDeliveryReadyTruth({
-      task_id: "task-start-hook",
-      delivery_result: {
-        type: "bubble",
-        title: "ready",
-        payload: {
-          path: null,
-          url: null,
-          task_id: "task-start-hook",
+test("shell-ball submit failures preserve abnormal UX for both formal rpc and generic runtime errors", async () => {
+  await withShellBallInteractionHookRuntime(
+    {
+      "./shellBall.rpc": {
+        submitShellBallInputRpc: async () => {
+          throw { code: invalidParamsErrorCode, rpcMessage: "invalid params", detail: "task payload invalid" };
         },
-        preview_text: "done",
       },
-    });
+    },
+    async (runtime) => {
+      let interaction = runtime.render();
+      interaction.setInputValue("Formal failure");
+      interaction = runtime.render();
 
-    interaction = runtime.render();
-    assert.deepEqual(interaction.dualFormState, {
-      systemState: "completed",
-      engagementKind: "result",
-    });
+      interaction.handleSubmitText();
+      await runtime.flushMicrotasks();
+      interaction = runtime.render();
 
-    interaction.applyRpcFailureTruth({
-      code: invalidParamsErrorCode,
-      rpcMessage: "invalid params",
-      detail: "task payload invalid",
-    });
+      assert.deepEqual(interaction.dualFormState, {
+        systemState: "abnormal",
+        engagementKind: "none",
+      });
+    },
+  );
 
-    interaction = runtime.render();
-    assert.deepEqual(interaction.dualFormState, {
-      systemState: "abnormal",
-      engagementKind: "none",
-    });
+  await withShellBallInteractionHookRuntime(
+    {
+      "./shellBall.rpc": {
+        submitShellBallInputRpc: async () => {
+          throw new Error("transport offline");
+        },
+      },
+    },
+    async (runtime) => {
+      let interaction = runtime.render();
+      interaction.setInputValue("Generic failure");
+      interaction = runtime.render();
+
+      interaction.handleSubmitText();
+      await runtime.flushMicrotasks();
+      interaction = runtime.render();
+
+      assert.deepEqual(interaction.dualFormState, {
+        systemState: "abnormal",
+        engagementKind: "none",
+      });
+    },
+  );
+});
+
+test("shell-ball hook keeps registered-truth binding helpers internal until a live notification owner exists", () => {
+  withShellBallInteractionHookRuntime((runtime) => {
+    const interaction = runtime.render() as Record<string, unknown>;
+
+    assert.equal("applyTaskStartResultTruth" in interaction, false);
+    assert.equal("applyTaskConfirmResultTruth" in interaction, false);
+    assert.equal("applyTaskUpdatedTruth" in interaction, false);
+    assert.equal("applyApprovalPendingTruth" in interaction, false);
+    assert.equal("applyDeliveryReadyTruth" in interaction, false);
+    assert.equal("applyRpcFailureTruth" in interaction, false);
   });
 });
 
@@ -5048,12 +5104,17 @@ test("shell-ball cancel callback path is wired from mascot through app interacti
   assert.match(interactionSource, /dispatch\(cancelEvent\);/);
 });
 
-test("shell-ball interaction hook keeps explicit registered-truth bindings separate from agent.input.submit success handling", () => {
+test("shell-ball interaction hook projects input-submit success locally without exposing notification-only truth setters", () => {
   const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");
 
-  assert.match(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskStartResult/);
-  assert.match(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskConfirmResult/);
-  assert.doesNotMatch(interactionSource, /const result = await submitShellBallInput/);
+  assert.match(interactionSource, /createShellBallRegisteredTruthSnapshotFromInputSubmitResult/);
+  assert.match(interactionSource, /const result = await submitShellBallInput/);
+  assert.doesNotMatch(interactionSource, /applyTaskStartResultTruth/);
+  assert.doesNotMatch(interactionSource, /applyTaskConfirmResultTruth/);
+  assert.doesNotMatch(interactionSource, /applyTaskUpdatedTruth/);
+  assert.doesNotMatch(interactionSource, /applyApprovalPendingTruth/);
+  assert.doesNotMatch(interactionSource, /applyDeliveryReadyTruth/);
+  assert.doesNotMatch(interactionSource, /applyRpcFailureTruth/);
 });
 
 test("shell-ball surface passes mascot double-click and drag wiring through the mascot only", () => {

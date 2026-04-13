@@ -22,15 +22,12 @@ import {
   type ShellBallSpeechRecognition,
 } from "./shellBall.speech";
 import {
-  applyShellBallApprovalPendingTruth,
-  applyShellBallDeliveryReadyTruth,
-  applyShellBallTaskUpdatedTruth,
+  createShellBallRegisteredTruthSnapshotFromInputSubmitResult,
   createShellBallRegisteredTruthSnapshotFromRpcFailure,
-  createShellBallRegisteredTruthSnapshotFromTaskConfirmResult,
-  createShellBallRegisteredTruthSnapshotFromTaskStartResult,
   deriveShellBallDualFormViewModel,
   type ShellBallRegisteredTruthSnapshot,
 } from "./shellBall.registeredTruths";
+import { submitShellBallInputRpc } from "./shellBall.rpc";
 import { useShellBallStore } from "../../stores/shellBallStore";
 
 type TimeoutHandle = ReturnType<typeof globalThis.setTimeout>;
@@ -78,6 +75,8 @@ type ShellBallFormalRpcFailure = {
   rpcMessage: string;
   detail: string | null;
 };
+
+type ShellBallInputSubmitResult = Parameters<typeof createShellBallRegisteredTruthSnapshotFromInputSubmitResult>[0];
 
 function isShellBallFormalRpcFailure(error: unknown): error is ShellBallFormalRpcFailure {
   if (typeof error !== "object" || error === null) {
@@ -134,18 +133,14 @@ async function submitShellBallInput(input: {
   text: string;
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
-}): Promise<unknown | null> {
+}): Promise<ShellBallInputSubmitResult | null> {
   const params = createShellBallInputSubmitParams(input);
 
   if (params === null) {
     return null;
   }
 
-  const importRpcMethods = new Function("return import('../../rpc/methods')") as () => Promise<{
-    submitInput: (request: AgentInputSubmitParams) => Promise<unknown>;
-  }>;
-  const rpcMethods = await importRpcMethods();
-  return rpcMethods.submitInput(params);
+  return submitShellBallInputRpc(params) as Promise<ShellBallInputSubmitResult>;
 }
 
 export function mapShellBallInteractionConsumedEventToFlag(event: ShellBallInteractionConsumedEvent) {
@@ -323,6 +318,7 @@ export function useShellBallInteraction() {
   const [voiceHoldProgress, setVoiceHoldProgress] = useState(0);
   const [interactionConsumed, setInteractionConsumed] = useState(false);
   const [registeredTruths, setRegisteredTruths] = useState<ShellBallRegisteredTruthSnapshot | undefined>(undefined);
+  const [hasLocalFailure, setHasLocalFailure] = useState(false);
   const [localInteractionContext, setLocalInteractionContext] = useState<ShellBallLocalInteractionContext>({
     hasRecommendation: false,
     activeEngagementKind: null,
@@ -407,32 +403,12 @@ export function useShellBallInteraction() {
     setRegisteredTruths(undefined);
   }
 
+  function clearLocalFailure() {
+    setHasLocalFailure(false);
+  }
+
   function commitRegisteredTruths(nextTruths: ShellBallRegisteredTruthSnapshot) {
     setRegisteredTruths(nextTruths);
-  }
-
-  function applyTaskStartResultTruth(result: Parameters<typeof createShellBallRegisteredTruthSnapshotFromTaskStartResult>[0]) {
-    commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskStartResult(result));
-  }
-
-  function applyTaskConfirmResultTruth(result: Parameters<typeof createShellBallRegisteredTruthSnapshotFromTaskConfirmResult>[0]) {
-    commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskConfirmResult(result));
-  }
-
-  function applyTaskUpdatedTruth(notification: Parameters<typeof applyShellBallTaskUpdatedTruth>[1]) {
-    setRegisteredTruths((current) => applyShellBallTaskUpdatedTruth(current, notification));
-  }
-
-  function applyApprovalPendingTruth(notification: Parameters<typeof applyShellBallApprovalPendingTruth>[1]) {
-    setRegisteredTruths((current) => applyShellBallApprovalPendingTruth(current, notification));
-  }
-
-  function applyDeliveryReadyTruth(notification: Parameters<typeof applyShellBallDeliveryReadyTruth>[1]) {
-    setRegisteredTruths((current) => applyShellBallDeliveryReadyTruth(current, notification));
-  }
-
-  function applyRpcFailureTruth(failure: Parameters<typeof createShellBallRegisteredTruthSnapshotFromRpcFailure>[0]) {
-    commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromRpcFailure(failure));
   }
 
   function getHoverRetained() {
@@ -483,13 +459,18 @@ export function useShellBallInteraction() {
 
     try {
       clearRegisteredTruths();
-      await submitShellBallInput({
+      clearLocalFailure();
+      const result = await submitShellBallInput({
         text: resolution.finalizedSpeechPayload,
         trigger: "voice_commit",
         inputMode: "voice",
       });
+      if (result !== null) {
+        commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromInputSubmitResult(result));
+      }
       setFinalizedSpeechPayload(resolution.finalizedSpeechPayload);
     } catch (error) {
+      setHasLocalFailure(true);
       if (isShellBallFormalRpcFailure(error) && error.code !== null) {
         commitRegisteredTruths(
           createShellBallRegisteredTruthSnapshotFromRpcFailure({
@@ -670,22 +651,27 @@ export function useShellBallInteraction() {
       hasRecommendation: localInteractionContext.hasRecommendation,
     };
     clearRegisteredTruths();
+    clearLocalFailure();
     void (async () => {
       try {
-        await submitShellBallInput({
+        const result = await submitShellBallInput({
           text: currentDraft,
           trigger: "hover_text_input",
           inputMode: "text",
         });
+        if (result !== null) {
+          commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromInputSubmitResult(result));
+        }
         dispatch("submit_text");
         setInputValue(reset.nextInputValue);
         inputFocusedRef.current = reset.nextFocused;
         setInputFocused(reset.nextFocused);
       } catch (error) {
+        setHasLocalFailure(true);
         if (isShellBallFormalRpcFailure(error) && error.code !== null) {
-        commitRegisteredTruths(
-          createShellBallRegisteredTruthSnapshotFromRpcFailure({
-            code: error.code,
+          commitRegisteredTruths(
+            createShellBallRegisteredTruthSnapshotFromRpcFailure({
+              code: error.code,
               rpcMessage: error.rpcMessage,
               detail: error.detail,
             }),
@@ -698,6 +684,7 @@ export function useShellBallInteraction() {
 
   function handleConfirmIntentAction() {
     clearRegisteredTruths();
+    clearLocalFailure();
     pendingInteractionHintRef.current = {
       activeEngagementKind: localInteractionContext.hasRecommendation ? "recommendation" : localInteractionContext.activeEngagementKind,
     };
@@ -706,12 +693,14 @@ export function useShellBallInteraction() {
 
   function handleAttachFile() {
     clearRegisteredTruths();
+    clearLocalFailure();
     pendingInteractionHintRef.current = { activeEngagementKind: "file_drag" };
     dispatch("attach_file");
   }
 
   function handleAuthorizationAllowAction() {
     clearRegisteredTruths();
+    clearLocalFailure();
     pendingInteractionHintRef.current = { activeEngagementKind: "file_drag" };
     controllerRef.current?.forceState("processing", { regionActive: regionActiveRef.current });
     syncVisualState();
@@ -719,6 +708,7 @@ export function useShellBallInteraction() {
 
   function handleAbnormalRetryAction() {
     clearRegisteredTruths();
+    clearLocalFailure();
     pendingInteractionHintRef.current = {
       activeEngagementKind: effectiveInteractionContext.activeEngagementKind,
       hasRecommendation: effectiveInteractionContext.hasRecommendation,
@@ -916,9 +906,10 @@ export function useShellBallInteraction() {
       deriveShellBallDualFormViewModel({
         visualState,
         context: effectiveInteractionContext,
+        hasLocalFailure,
         registeredTruths,
       }),
-    [effectiveInteractionContext.activeEngagementKind, effectiveInteractionContext.hasRecommendation, registeredTruths, visualState],
+    [effectiveInteractionContext.activeEngagementKind, effectiveInteractionContext.hasRecommendation, hasLocalFailure, registeredTruths, visualState],
   );
 
   useEffect(() => {
@@ -957,12 +948,6 @@ export function useShellBallInteraction() {
   return {
     visualState,
     dualFormState,
-    applyTaskStartResultTruth,
-    applyTaskConfirmResultTruth,
-    applyTaskUpdatedTruth,
-    applyApprovalPendingTruth,
-    applyDeliveryReadyTruth,
-    applyRpcFailureTruth,
     inputValue,
     setInputValue,
     finalizedSpeechPayload,

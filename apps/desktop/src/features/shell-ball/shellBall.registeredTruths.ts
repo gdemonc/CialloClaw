@@ -34,6 +34,8 @@ type ShellBallTaskResult = {
   delivery_result?: ShellBallDeliveryResult | null;
 };
 
+type ShellBallInputSubmitResult = ShellBallTaskResult;
+
 type ShellBallTaskStartResult = ShellBallTaskResult & {
   bubble_message: unknown;
 };
@@ -218,6 +220,7 @@ export function deriveShellBallDualFormViewModel(input: {
   context?: ShellBallLocalInteractionContext;
   hasRecommendation?: boolean;
   registeredTruths?: ShellBallRegisteredTruthSnapshot;
+  hasLocalFailure?: boolean;
 }): ShellBallDualFormState {
   if (input.visualState === "voice_listening" || input.visualState === "voice_locked") {
     return deriveShellBallDualFormState({
@@ -225,6 +228,16 @@ export function deriveShellBallDualFormViewModel(input: {
       context: input.context,
       hasRecommendation: input.hasRecommendation,
     });
+  }
+
+  if (input.hasLocalFailure) {
+    return {
+      systemState: "abnormal",
+      engagementKind: resolveShellBallRegisteredTruthEngagement({
+        truths: input.registeredTruths,
+        context: input.context,
+      }),
+    };
   }
 
   const truthDerivedState = deriveShellBallDualFormStateFromRegisteredTruths({
@@ -254,6 +267,12 @@ function createShellBallRegisteredTruthSnapshotFromTaskResult(
     },
     deliveryResult: "delivery_result" in result ? result.delivery_result : null,
   };
+}
+
+export function createShellBallRegisteredTruthSnapshotFromInputSubmitResult(
+  result: ShellBallInputSubmitResult,
+): ShellBallRegisteredTruthSnapshot {
+  return createShellBallRegisteredTruthSnapshotFromTaskResult(result);
 }
 
 export function createShellBallRegisteredTruthSnapshotFromTaskStartResult(
