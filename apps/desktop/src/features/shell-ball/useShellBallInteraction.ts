@@ -22,16 +22,13 @@ import {
   type ShellBallSpeechRecognition,
 } from "./shellBall.speech";
 import {
-  createShellBallFailureTruth,
-  createShellBallRegisteredTruthSnapshotFromTaskResult,
+  createShellBallRegisteredTruthSnapshotFromRpcFailure,
   deriveShellBallDualFormViewModel,
   type ShellBallRegisteredTruthSnapshot,
 } from "./shellBall.registeredTruths";
 import { useShellBallStore } from "../../stores/shellBallStore";
 
 type TimeoutHandle = ReturnType<typeof globalThis.setTimeout>;
-
-type ShellBallInputSubmitResult = Parameters<typeof createShellBallRegisteredTruthSnapshotFromTaskResult>[0];
 
 type ShellBallInteractionController = ReturnType<typeof createShellBallInteractionController>;
 
@@ -70,6 +67,23 @@ type ShellBallInteractionConsumedEvent =
   | "force_state_reset";
 
 type ShellBallVoiceRecognitionStopReason = "none" | "finish" | "cancel";
+
+type ShellBallFormalRpcFailure = {
+  code: number | null;
+  rpcMessage: string;
+  detail: string | null;
+};
+
+function isShellBallFormalRpcFailure(error: unknown): error is ShellBallFormalRpcFailure {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const candidate = error as Record<string, unknown>;
+  return (typeof candidate.code === "number" || candidate.code === null)
+    && typeof candidate.rpcMessage === "string"
+    && (typeof candidate.detail === "string" || candidate.detail === null);
+}
 
 function createShellBallRequestMeta(): RequestMeta {
   const now = new Date().toISOString();
@@ -115,7 +129,7 @@ async function submitShellBallInput(input: {
   text: string;
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
-}): Promise<ShellBallInputSubmitResult | null> {
+}): Promise<unknown | null> {
   const params = createShellBallInputSubmitParams(input);
 
   if (params === null) {
@@ -126,7 +140,7 @@ async function submitShellBallInput(input: {
     submitInput: (request: AgentInputSubmitParams) => Promise<unknown>;
   }>;
   const rpcMethods = await importRpcMethods();
-  return rpcMethods.submitInput(params) as Promise<ShellBallInputSubmitResult>;
+  return rpcMethods.submitInput(params);
 }
 
 export function mapShellBallInteractionConsumedEventToFlag(event: ShellBallInteractionConsumedEvent) {
@@ -440,17 +454,22 @@ export function useShellBallInteraction() {
 
     try {
       clearRegisteredTruths();
-      const result = await submitShellBallInput({
+      await submitShellBallInput({
         text: resolution.finalizedSpeechPayload,
         trigger: "voice_commit",
         inputMode: "voice",
       });
-      if (result !== null) {
-        commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskResult(result));
-      }
       setFinalizedSpeechPayload(resolution.finalizedSpeechPayload);
     } catch (error) {
-      commitRegisteredTruths(createShellBallFailureTruth({ message: error instanceof Error ? error.message : String(error) }));
+      if (isShellBallFormalRpcFailure(error) && error.code !== null) {
+        commitRegisteredTruths(
+          createShellBallRegisteredTruthSnapshotFromRpcFailure({
+            code: error.code,
+            rpcMessage: error.rpcMessage,
+            detail: error.detail,
+          }),
+        );
+      }
       console.warn("shell-ball voice submit failed", error);
     }
   }
@@ -624,20 +643,25 @@ export function useShellBallInteraction() {
     clearRegisteredTruths();
     void (async () => {
       try {
-        const result = await submitShellBallInput({
+        await submitShellBallInput({
           text: currentDraft,
           trigger: "hover_text_input",
           inputMode: "text",
         });
-        if (result !== null) {
-          commitRegisteredTruths(createShellBallRegisteredTruthSnapshotFromTaskResult(result));
-        }
         dispatch("submit_text");
         setInputValue(reset.nextInputValue);
         inputFocusedRef.current = reset.nextFocused;
         setInputFocused(reset.nextFocused);
       } catch (error) {
-        commitRegisteredTruths(createShellBallFailureTruth({ message: error instanceof Error ? error.message : String(error) }));
+        if (isShellBallFormalRpcFailure(error) && error.code !== null) {
+          commitRegisteredTruths(
+            createShellBallRegisteredTruthSnapshotFromRpcFailure({
+              code: error.code,
+              rpcMessage: error.rpcMessage,
+              detail: error.detail,
+            }),
+          );
+        }
         console.warn("shell-ball text submit failed", error);
       }
     })();

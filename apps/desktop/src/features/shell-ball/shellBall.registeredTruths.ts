@@ -13,8 +13,9 @@ type ShellBallLocalInteractionContext = {
 };
 
 type ShellBallBackendFailure = {
-  code?: string;
-  message?: string;
+  code: number;
+  rpcMessage: string;
+  detail?: string | null;
 };
 
 type ShellBallDeliveryResult = {
@@ -31,6 +32,14 @@ type ShellBallDeliveryResult = {
 type ShellBallTaskResult = {
   task: Pick<Task, "task_id" | "source_type" | "status">;
   delivery_result?: ShellBallDeliveryResult | null;
+};
+
+type ShellBallTaskStartResult = ShellBallTaskResult & {
+  bubble_message: unknown;
+};
+
+type ShellBallTaskConfirmResult = ShellBallTaskResult & {
+  bubble_message: unknown;
 };
 
 type ShellBallTaskUpdatedTruth = {
@@ -90,14 +99,6 @@ function getShellBallEngagementKindFromLocalContext(context: ShellBallLocalInter
   return null;
 }
 
-function getShellBallEngagementKindFromTruthContext(input: ShellBallRegisteredTruthSnapshot): ShellBallLocalInteractionEngagement | null {
-  if (input.approvalRequest !== undefined && input.approvalRequest !== null) {
-    return "file_drag";
-  }
-
-  return null;
-}
-
 function resolveShellBallRegisteredTruthEngagement(input: {
   context?: ShellBallLocalInteractionContext;
   truths?: ShellBallRegisteredTruthSnapshot;
@@ -113,12 +114,6 @@ function resolveShellBallRegisteredTruthEngagement(input: {
 
   if (taskEngagement !== null) {
     return taskEngagement;
-  }
-
-  const truthContextEngagement = truths === undefined ? null : getShellBallEngagementKindFromTruthContext(truths);
-
-  if (truthContextEngagement !== null) {
-    return truthContextEngagement;
   }
 
   return "none";
@@ -217,10 +212,7 @@ export function deriveShellBallDualFormViewModel(input: {
     context: input.context,
   });
 
-  if (
-    truthDerivedState !== null
-    && (truthDerivedState.engagementKind !== "none" || truthDerivedState.systemState === "abnormal")
-  ) {
+  if (truthDerivedState !== null) {
     return truthDerivedState;
   }
 
@@ -231,7 +223,7 @@ export function deriveShellBallDualFormViewModel(input: {
   });
 }
 
-export function createShellBallRegisteredTruthSnapshotFromTaskResult(
+function createShellBallRegisteredTruthSnapshotFromTaskResult(
   result: ShellBallTaskResult,
 ): ShellBallRegisteredTruthSnapshot {
   return {
@@ -242,6 +234,18 @@ export function createShellBallRegisteredTruthSnapshotFromTaskResult(
     },
     deliveryResult: "delivery_result" in result ? result.delivery_result : null,
   };
+}
+
+export function createShellBallRegisteredTruthSnapshotFromTaskStartResult(
+  result: ShellBallTaskStartResult,
+): ShellBallRegisteredTruthSnapshot {
+  return createShellBallRegisteredTruthSnapshotFromTaskResult(result);
+}
+
+export function createShellBallRegisteredTruthSnapshotFromTaskConfirmResult(
+  result: ShellBallTaskConfirmResult,
+): ShellBallRegisteredTruthSnapshot {
+  return createShellBallRegisteredTruthSnapshotFromTaskResult(result);
 }
 
 export function applyShellBallTaskUpdatedTruth(
@@ -295,7 +299,7 @@ export function applyShellBallDeliveryReadyTruth(
   };
 }
 
-export function createShellBallFailureTruth(error: ShellBallBackendFailure): ShellBallRegisteredTruthSnapshot {
+export function createShellBallRegisteredTruthSnapshotFromRpcFailure(error: ShellBallBackendFailure): ShellBallRegisteredTruthSnapshot {
   return {
     failure: error,
   };

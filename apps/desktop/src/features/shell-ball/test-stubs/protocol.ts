@@ -1,5 +1,8 @@
 export type ApprovalDecision = "allow_once" | "deny_once";
 export type RiskLevel = "green" | "yellow" | "red";
+export const ERROR_CODES = {
+  INVALID_PARAMS: 1002001,
+} as const;
 export type SecurityStatus =
   | "normal"
   | "pending_confirmation"

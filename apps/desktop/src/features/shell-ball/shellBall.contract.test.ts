@@ -69,6 +69,12 @@ import {
   shellBallWindowSyncEvents,
 } from "./shellBall.windowSync";
 import {
+  applyShellBallApprovalPendingTruth,
+  applyShellBallDeliveryReadyTruth,
+  applyShellBallTaskUpdatedTruth,
+  createShellBallRegisteredTruthSnapshotFromRpcFailure,
+  createShellBallRegisteredTruthSnapshotFromTaskConfirmResult,
+  createShellBallRegisteredTruthSnapshotFromTaskStartResult,
   deriveShellBallDualFormViewModel,
   type ShellBallRegisteredTruthSnapshot,
 } from "./shellBall.registeredTruths";
@@ -104,6 +110,7 @@ import {
 import { useShellBallStore } from "../../stores/shellBallStore";
 
 const desktopRoot = process.cwd();
+const invalidParamsErrorCode = 1002001;
 
 function withDashboardRouteRuntime<T>(callback: (components: { DashboardRoot: unknown }) => T) {
   const NodeModule = require("node:module") as any;
@@ -1161,6 +1168,32 @@ test("shell-ball derives dual-form view state from registered backend truths wit
 
   assert.deepEqual(
     deriveShellBallDualFormViewModel({
+      visualState: "hover_input",
+      context: {
+        hasRecommendation: false,
+        activeEngagementKind: null,
+      },
+      registeredTruths: {
+        approvalRequest: {
+          approval_id: "approval-auth-fallback",
+          task_id: "task-auth-fallback",
+          operation_name: "write_file",
+          risk_level: "yellow",
+          target_object: "workspace/file.txt",
+          reason: "needs confirmation",
+          status: "pending",
+        },
+      },
+    }),
+    {
+      systemState: "waiting_confirm",
+      engagementKind: "none",
+      waitingConfirmReason: "authorization",
+    },
+  );
+
+  assert.deepEqual(
+    deriveShellBallDualFormViewModel({
       visualState: "processing",
       context: {
         hasRecommendation: false,
@@ -1204,14 +1237,186 @@ test("shell-ball derives dual-form view state from registered backend truths wit
           status: "failed",
         },
         failure: {
-          code: "RPC_INTERNAL_ERROR",
-          message: "backend failed",
+          code: invalidParamsErrorCode,
+          rpcMessage: "invalid params",
         },
       },
     }),
     {
       systemState: "abnormal",
       engagementKind: "file_drag",
+    },
+  );
+});
+
+test("shell-ball registered truth adapters stay explicit to formal task, notification, and rpc failure semantics", () => {
+  assert.deepEqual(
+    createShellBallRegisteredTruthSnapshotFromTaskStartResult({
+      task: {
+        task_id: "task-start",
+        source_type: "voice",
+        status: "confirming_intent",
+      },
+      bubble_message: null,
+      delivery_result: null,
+    }),
+    {
+      task: {
+        task_id: "task-start",
+        source_type: "voice",
+        status: "confirming_intent",
+      },
+      deliveryResult: null,
+    },
+  );
+
+  assert.deepEqual(
+    createShellBallRegisteredTruthSnapshotFromTaskConfirmResult({
+      task: {
+        task_id: "task-confirm-explicit",
+        source_type: "dragged_file",
+        status: "processing",
+      },
+      bubble_message: null,
+      delivery_result: null,
+    }),
+    {
+      task: {
+        task_id: "task-confirm-explicit",
+        source_type: "dragged_file",
+        status: "processing",
+      },
+      deliveryResult: null,
+    },
+  );
+
+  assert.deepEqual(
+    applyShellBallTaskUpdatedTruth(
+      {
+        task: {
+          task_id: "task-update",
+          source_type: "voice",
+          status: "confirming_intent",
+        },
+      },
+      {
+        task_id: "task-update",
+        status: "processing",
+      },
+    ),
+    {
+      task: {
+        task_id: "task-update",
+        source_type: "voice",
+        status: "processing",
+      },
+    },
+  );
+
+  assert.deepEqual(
+    applyShellBallApprovalPendingTruth(
+      {
+        task: {
+          task_id: "task-approval",
+          source_type: "voice",
+          status: "processing",
+        },
+      },
+      {
+        task_id: "task-approval",
+        approval_request: {
+          approval_id: "approval-explicit",
+          task_id: "task-approval",
+          operation_name: "write_file",
+          risk_level: "yellow",
+          target_object: "workspace/file.txt",
+          reason: "needs confirmation",
+          status: "pending",
+        },
+      },
+    ),
+    {
+      task: {
+        task_id: "task-approval",
+        source_type: "voice",
+        status: "waiting_auth",
+      },
+      approvalRequest: {
+        approval_id: "approval-explicit",
+        task_id: "task-approval",
+        operation_name: "write_file",
+        risk_level: "yellow",
+        target_object: "workspace/file.txt",
+        reason: "needs confirmation",
+        status: "pending",
+      },
+    },
+  );
+
+  assert.deepEqual(
+    applyShellBallDeliveryReadyTruth(
+      {
+        task: {
+          task_id: "task-delivery-explicit",
+          source_type: "voice",
+          status: "processing",
+        },
+        approvalRequest: {
+          approval_id: "approval-delivery",
+          task_id: "task-delivery-explicit",
+          operation_name: "write_file",
+          risk_level: "yellow",
+          target_object: "workspace/file.txt",
+          reason: "needs confirmation",
+          status: "pending",
+        },
+      },
+      {
+        task_id: "task-delivery-explicit",
+        delivery_result: {
+          type: "bubble",
+          title: "ready",
+          payload: {
+            path: null,
+            url: null,
+            task_id: "task-delivery-explicit",
+          },
+          preview_text: "done",
+        },
+      },
+    ),
+    {
+      task: {
+        task_id: "task-delivery-explicit",
+        source_type: "voice",
+        status: "completed",
+      },
+      approvalRequest: null,
+      deliveryResult: {
+        type: "bubble",
+        title: "ready",
+        payload: {
+          path: null,
+          url: null,
+          task_id: "task-delivery-explicit",
+        },
+        preview_text: "done",
+      },
+    },
+  );
+
+  assert.deepEqual(
+    createShellBallRegisteredTruthSnapshotFromRpcFailure({
+      code: invalidParamsErrorCode,
+      rpcMessage: "invalid params",
+      detail: "task payload invalid",
+    }),
+    {
+      failure: {
+        code: invalidParamsErrorCode,
+        rpcMessage: "invalid params",
+        detail: "task payload invalid",
+      },
     },
   );
 });
@@ -4660,6 +4865,13 @@ test("shell-ball cancel callback path is wired from mascot through app interacti
   assert.match(interactionSource, /const cancelEvent = getShellBallPressCancelEvent\(/);
   assert.match(interactionSource, /if \(cancelEvent !== null\) \{/);
   assert.match(interactionSource, /dispatch\(cancelEvent\);/);
+});
+
+test("shell-ball interaction hook does not center registered-truth mapping on agent.input.submit success payloads", () => {
+  const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");
+
+  assert.doesNotMatch(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskStartResult/);
+  assert.doesNotMatch(interactionSource, /createShellBallRegisteredTruthSnapshotFromTaskConfirmResult/);
 });
 
 test("shell-ball surface passes mascot double-click and drag wiring through the mascot only", () => {

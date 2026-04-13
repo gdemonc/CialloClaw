@@ -52,6 +52,7 @@ export type ShellBallDualFormState = {
 };
 
 const shellBallAuthorizationEngagementKinds: ReadonlySet<ShellBallEngagementKind> = new Set([
+  "none",
   "recommendation",
   "text_selection",
   "text_drag",
@@ -66,7 +67,7 @@ const shellBallStateEngagementMatrix: Record<ShellBallSystemState, ReadonlySet<S
   capturing: new Set(["text_drag", "file_drag", "voice"]),
   intent_confirming: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "voice"]),
   processing: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice"]),
-  waiting_confirm: new Set(["recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
+  waiting_confirm: new Set(["none", "recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
   completed: new Set(["result"]),
   abnormal: new Set(["none", "recommendation", "text_selection", "text_drag", "file_drag", "file_parsing", "voice", "result"]),
 };
