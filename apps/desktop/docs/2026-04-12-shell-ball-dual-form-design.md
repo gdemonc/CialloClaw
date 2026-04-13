@@ -327,11 +327,17 @@
 
 前端双层形态应预留以下映射位：
 
+- 当前 merged baseline 下，shell-ball 的即时提交入口已经走 `agent.input.submit`。因此前端可以先把 `AgentInputSubmitResult` 归一化为与正式 `task / delivery_result` 一致的本地 registered-truth snapshot，再继续等待后续 `task.updated / approval.pending / delivery.ready` 推进真实状态。
 - `agent.task.start` / `agent.task.confirm` 返回的 `task.status=confirming_intent`：映射到 `intent_confirming`
 - `task.updated` 返回的 `task.status=processing`：映射到 `processing`
 - `approval.pending` 返回的 `approval_request`，或 `task.updated` 返回的 `task.status=waiting_auth`：映射到 `waiting_confirm(reason=authorization)`
 - `delivery.ready` 或方法返回中的 `delivery_result`：映射到 `completed + result`
 - 正式错误返回、统一错误码、已登记失败路径：映射到 `abnormal`
+
+这意味着：
+
+- 对 shell-ball 当前已接通的提交主链路，`agent.input.submit` 的成功返回可以作为“registered truth 的即时前置归一化入口”，但不是新的协议真源。
+- 真正长期生效的状态推进仍应以后续正式对象和通知为准。
 
 ### 16.4 承接对象的派生优先级
 
@@ -368,6 +374,8 @@
 - 正式错误码与审计链路
 
 后端对象进入前端后，必须先经过“正式对象 -> 前端本地派生层”的转换，再落到 `shell-ball` 双层形态；双层形态本身不能成为新的协议真源。
+
+对于尚未形成正式对象但已经发生的前端传输/运行时失败，允许存在一个前端本地的 `abnormal` 回退提示层，用于避免用户看到无响应。但该层不能覆盖或替代正式错误码语义，一旦正式错误对象到达，仍以正式语义映射结果为准。
 
 ## 17. 对实现的约束
 

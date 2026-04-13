@@ -235,6 +235,7 @@ Expected: P0 形态 UI tests 通过，现有 helper window 结构保持成立。
 - `delivery_result` 风格的结果摘要可映射到 `completed + result`
 - 错误码类失败可映射到 `abnormal`
 - 承接对象优先从本地交互上下文派生，其次才回落到 `task.source_type`、授权对象或交付对象
+- merged baseline 下，`agent.input.submit` 的 `AgentInputSubmitResult` 可被归一化进同一套 registered-truth snapshot，再等待正式通知继续推进
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -254,6 +255,8 @@ Expected: 当前实现尚无明确后端连接预留位，测试失败。
 - 不直接依赖数据库或 worker
 - 只为未来 JSON-RPC / 订阅事件接入预留前端绑定点
 - 明确使用现有真源：`agent.task.start`、`agent.task.confirm`、`task.updated`、`approval.pending`、`delivery.ready`、`agent.security.respond`
+- 对当前已接通的 shell-ball 提交主链路，允许把 `agent.input.submit` 的成功结果归一化进同一套本地 registered-truth snapshot，但它不是新的协议真源
+- 允许存在低优先级的前端本地异常回退层，用于 transport/runtime 失败时的即时反馈；一旦正式错误对象到达，仍以正式语义为准
 - 绝不把双层形态反向当作新的后端真源
 
 - [ ] **Step 4: Run test to verify it passes**
