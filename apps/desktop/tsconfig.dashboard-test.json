@@ -6,8 +6,6 @@
     "noEmit": false,
     "outDir": "./.cache/dashboard-tests",
     "rootDir": "./src",
-    "strict": false,
-    "noImplicitAny": false,
     "paths": {
       "@/*": ["./src/*"],
       "@/rpc/methods": ["./src/features/shell-ball/test-stubs/rpcMethods.ts"]
@@ -15,6 +13,7 @@
   },
   "include": [
     "src/features/dashboard/dashboard.contract.test.ts",
+    "src/features/dashboard/shared/dashboardContractValidators.ts",
     "src/features/dashboard/shared/dashboardSafetyNavigation.ts",
     "src/features/dashboard/tasks/taskPage.query.ts",
     "src/features/dashboard/tasks/taskPage.service.ts",

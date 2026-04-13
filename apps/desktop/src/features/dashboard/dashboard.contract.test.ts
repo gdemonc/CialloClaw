@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import ts from "typescript";
 import type {
   AgentTaskControlParams,
   AgentTaskControlResult,
@@ -39,8 +40,10 @@ function withDesktopAliasRuntime<T>(callback: (requireFn: NodeRequire) => T): T 
     _load: (request: string, parent: unknown, isMain: boolean) => unknown;
     _resolveFilename: (request: string, parent: unknown, isMain: boolean, options?: unknown) => string;
   };
+  const originalTsLoader = require.extensions[".ts"];
   const originalLoad = NodeModule._load;
   const originalResolveFilename = NodeModule._resolveFilename;
+  const protocolRoot = resolve(desktopRoot, "..", "..", "packages", "protocol");
 
   NodeModule._resolveFilename = function resolveDesktopAlias(request: string, parent: unknown, isMain: boolean, options?: unknown) {
     if (request.startsWith("@/")) {
@@ -55,18 +58,29 @@ function withDesktopAliasRuntime<T>(callback: (requireFn: NodeRequire) => T): T 
       }
     }
 
+    if (request === "@cialloclaw/protocol") {
+      return resolve(protocolRoot, "index.ts");
+    }
+
     return originalResolveFilename.call(this, request, parent, isMain, options);
   };
 
-  NodeModule._load = function loadDesktopRuntime(request: string, parent: unknown, isMain: boolean) {
-    if (request === "@cialloclaw/protocol") {
-      return {
-        RISK_LEVELS: ["green", "yellow", "red"],
-        SECURITY_STATUSES: ["normal", "pending_confirmation", "intercepted", "execution_error", "recoverable", "recovered"],
-        TASK_STEP_STATUSES: ["pending", "running", "completed", "failed", "skipped", "cancelled"],
-      };
-    }
+  require.extensions[".ts"] = (module, filename) => {
+    const source = require("node:fs").readFileSync(filename, "utf8") as string;
+    const transpiled = ts.transpileModule(source, {
+      compilerOptions: {
+        esModuleInterop: true,
+        module: ts.ModuleKind.CommonJS,
+        moduleResolution: ts.ModuleResolutionKind.NodeJs,
+        target: ts.ScriptTarget.ES2022,
+      },
+      fileName: filename,
+    });
 
+    (module as unknown as { _compile(code: string, fileName: string): void })._compile(transpiled.outputText, filename);
+  };
+
+  NodeModule._load = function loadDesktopRuntime(request: string, parent: unknown, isMain: boolean) {
     if (request === "@/rpc/methods") {
       return {
         controlTask() {
@@ -87,6 +101,11 @@ function withDesktopAliasRuntime<T>(callback: (requireFn: NodeRequire) => T): T 
   try {
     return callback(require);
   } finally {
+    if (originalTsLoader === undefined) {
+      Reflect.deleteProperty(require.extensions, ".ts");
+    } else {
+      require.extensions[".ts"] = originalTsLoader;
+    }
     NodeModule._load = originalLoad;
     NodeModule._resolveFilename = originalResolveFilename;
   }
@@ -285,6 +304,44 @@ test("task detail normalization rejects string restore points in rpc mode and ke
     });
 
     assert.equal(fallback.detail.approval_request, null);
+  });
+});
+
+test("task detail normalization fails fast on invalid artifacts, mirror references, and timeline steps", () => {
+  withDesktopAliasRuntime((requireFn) => {
+    const service = requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js")) as {
+      normalizeTaskDetailResult: (detail: AgentTaskDetailGetResult) => AgentTaskDetailGetResult;
+    };
+
+    assert.throws(
+      () =>
+        service.normalizeTaskDetailResult(
+          createDetail({
+            artifacts: [{ artifact_id: "artifact_1" } as never],
+          }),
+        ),
+      /artifacts/i,
+    );
+
+    assert.throws(
+      () =>
+        service.normalizeTaskDetailResult(
+          createDetail({
+            mirror_references: [{ memory_id: "memory_1" } as never],
+          }),
+        ),
+      /mirror/i,
+    );
+
+    assert.throws(
+      () =>
+        service.normalizeTaskDetailResult(
+          createDetail({
+            timeline: [{ step_id: "step_1" } as never],
+          }),
+        ),
+      /timeline/i,
+    );
   });
 });
 

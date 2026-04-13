@@ -1,4 +1,5 @@
 import type { AgentTaskDetailGetResult, ApprovalRequest, RecoveryPoint } from "@cialloclaw/protocol";
+import { isApprovalRequest, isRecoveryPoint } from "./dashboardContractValidators";
 
 const dashboardSafetySnapshotFeedback = "实时安全数据已变化，当前展示的是路由携带的快照。";
 
@@ -24,40 +25,6 @@ export type DashboardSafetyFocusTarget =
       feedback: string | null;
     }
   | null;
-
-function isApprovalRequest(value: unknown): value is ApprovalRequest {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<ApprovalRequest>;
-  return (
-    typeof candidate.approval_id === "string" &&
-    typeof candidate.task_id === "string" &&
-    typeof candidate.operation_name === "string" &&
-    typeof candidate.risk_level === "string" &&
-    typeof candidate.target_object === "string" &&
-    typeof candidate.reason === "string" &&
-    typeof candidate.status === "string" &&
-    typeof candidate.created_at === "string"
-  );
-}
-
-function isRecoveryPoint(value: unknown): value is RecoveryPoint {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<RecoveryPoint>;
-  return (
-    typeof candidate.recovery_point_id === "string" &&
-    typeof candidate.task_id === "string" &&
-    typeof candidate.summary === "string" &&
-    typeof candidate.created_at === "string" &&
-    Array.isArray(candidate.objects) &&
-    candidate.objects.every((item) => typeof item === "string")
-  );
-}
 
 export function buildDashboardSafetyNavigationState(detail: AgentTaskDetailGetResult): DashboardSafetyNavigationState | null {
   const approvalRequest = detail.approval_request ?? null;

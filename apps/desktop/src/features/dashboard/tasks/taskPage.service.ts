@@ -1,6 +1,7 @@
-import type { AgentTaskDetailGetResult, AgentTaskControlParams, ApprovalRequest, RecoveryPoint, RequestMeta, Task, TaskControlAction, TaskListGroup, TaskStep } from "@cialloclaw/protocol";
+import type { AgentTaskDetailGetResult, AgentTaskControlParams, RequestMeta, Task, TaskControlAction, TaskListGroup } from "@cialloclaw/protocol";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@cialloclaw/protocol";
 import { controlTask, getTaskDetail, listTasks } from "@/rpc/methods";
+import { isApprovalRequest, isArtifact, isMirrorReference, isRecoveryPoint, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
 import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskExperience, TaskListItem } from "./taskPage.types";
 
@@ -93,24 +94,6 @@ const riskLevels = new Set<string>(RISK_LEVELS);
 const securityStatuses = new Set<string>(SECURITY_STATUSES);
 const taskStepStatuses = new Set<string>(TASK_STEP_STATUSES);
 
-function isTaskStep(step: unknown): step is TaskStep {
-  if (!step || typeof step !== "object") {
-    return false;
-  }
-
-  const candidate = step as Partial<TaskStep>;
-  return (
-    typeof candidate.step_id === "string" &&
-    typeof candidate.task_id === "string" &&
-    typeof candidate.name === "string" &&
-    typeof candidate.order_index === "number" &&
-    typeof candidate.input_summary === "string" &&
-    typeof candidate.output_summary === "string" &&
-    typeof candidate.status === "string" &&
-    taskStepStatuses.has(candidate.status)
-  );
-}
-
 function hasValidSecuritySummary(detail: AgentTaskDetailGetResult): boolean {
   const summary = detail.security_summary as Partial<AgentTaskDetailGetResult["security_summary"]> | null | undefined;
   return Boolean(
@@ -124,40 +107,6 @@ function hasValidSecuritySummary(detail: AgentTaskDetailGetResult): boolean {
   );
 }
 
-function isApprovalRequest(value: unknown): value is ApprovalRequest {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<ApprovalRequest>;
-  return (
-    typeof candidate.approval_id === "string" &&
-    typeof candidate.task_id === "string" &&
-    typeof candidate.operation_name === "string" &&
-    typeof candidate.risk_level === "string" &&
-    typeof candidate.target_object === "string" &&
-    typeof candidate.reason === "string" &&
-    typeof candidate.status === "string" &&
-    typeof candidate.created_at === "string"
-  );
-}
-
-function isRecoveryPoint(value: unknown): value is RecoveryPoint {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<RecoveryPoint>;
-  return (
-    typeof candidate.recovery_point_id === "string" &&
-    typeof candidate.task_id === "string" &&
-    typeof candidate.summary === "string" &&
-    typeof candidate.created_at === "string" &&
-    Array.isArray(candidate.objects) &&
-    candidate.objects.every((item) => typeof item === "string")
-  );
-}
-
 export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): AgentTaskDetailGetResult {
   if (!detail || !detail.task || !detail.task.task_id) {
     throw new Error("task detail payload is missing task information");
@@ -167,25 +116,22 @@ export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): Age
     throw new Error("task detail payload is missing security summary");
   }
 
-  if (detail.approval_request !== null && detail.approval_request !== undefined && !isApprovalRequest(detail.approval_request)) {
-    throw new Error("task detail payload has invalid approval request");
-  }
-
-  const latestRestorePoint = detail.security_summary.latest_restore_point ?? null;
-  if (latestRestorePoint !== null && !isRecoveryPoint(latestRestorePoint)) {
-    throw new Error("task detail payload has invalid restore point");
-  }
+  const approvalRequest = normalizeNullable(detail.approval_request, isApprovalRequest, "task detail payload approval_request");
+  const latestRestorePoint = normalizeNullable(detail.security_summary.latest_restore_point, isRecoveryPoint, "task detail payload restore point");
+  const artifacts = normalizeArray(detail.artifacts, isArtifact, "task detail payload artifacts");
+  const mirrorReferences = normalizeArray(detail.mirror_references, isMirrorReference, "task detail payload mirror_references");
+  const timeline = normalizeArray(detail.timeline, (value): value is (typeof detail.timeline)[number] => isTaskStep(value, taskStepStatuses), "task detail payload timeline");
 
   return {
-    approval_request: detail.approval_request ?? null,
-    artifacts: Array.isArray(detail.artifacts) ? detail.artifacts : [],
-    mirror_references: Array.isArray(detail.mirror_references) ? detail.mirror_references : [],
+    approval_request: approvalRequest,
+    artifacts,
+    mirror_references: mirrorReferences,
     security_summary: {
       ...detail.security_summary,
       latest_restore_point: latestRestorePoint,
     },
     task: detail.task,
-    timeline: Array.isArray(detail.timeline) ? detail.timeline.filter(isTaskStep) : [],
+    timeline,
   };
 }
 
