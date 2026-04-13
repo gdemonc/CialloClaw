@@ -92,7 +92,7 @@
 - `services/local-service`：Go 1.26 本地 Harness Service
 - `workers/`：独立 worker / sidecar
 - `packages/protocol`：协议、类型、schema 真源
-- `packages/shared`：跨端共享常量与纯函数
+- `packages/ui` / `packages/config`：共享 UI 与工程配置
 - `docs/`：架构、协议、数据、模块、规范等文档
 
 ### 4.2 前端结构
@@ -299,8 +299,6 @@ JSON-RPC 方法集合是前后端唯一正式调用入口。
 - `1005xxx`：存储与数据库
 - `1006xxx`：worker / sidecar / plugin
 - `1007xxx`：系统与平台
-- `1008xxx`：模型与前馈配置
-- `1009xxx`：评估与人工升级
 
 ### 8.2 错误结构
 

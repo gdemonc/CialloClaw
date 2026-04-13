@@ -234,7 +234,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - `upcoming`：近期要做。
 - `later`：后续安排。
-- `recurring`：重复事项。
+- `recurring_rule`：重复事项规则。
 - `closed`：已结束。
 
 ### 5.4 风险等级 `risk_level`
@@ -353,8 +353,6 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `1005xxx`：存储与数据库
 - `1006xxx`：worker / sidecar / plugin
 - `1007xxx`：系统与平台
-- `1008xxx`：模型与前馈配置
-- `1009xxx`：评估与人工升级
 
 ### 6.2 如何理解错误段
 
@@ -365,8 +363,6 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `1005xxx`：数据库、Artifact、恢复点、Stronghold、RAG 等落盘能力异常。
 - `1006xxx`：worker / sidecar / plugin 进程不可用或输出非法。
 - `1007xxx`：平台和执行环境问题。
-- `1008xxx`：模型、Skill、Blueprint、Prompt 模板、LSP 前馈能力异常。
-- `1009xxx`：结果审查、Doom Loop、Eval、Human-in-the-loop 升级异常。
 
 ### 6.3 推荐错误码表
 
@@ -416,9 +412,6 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `1006002` `PLAYWRIGHT_SIDECAR_FAILED`
 - `1006003` `OCR_WORKER_FAILED`
 - `1006004` `MEDIA_WORKER_FAILED`
-- `1006005` `PLUGIN_NOT_AVAILABLE`
-- `1006006` `PLUGIN_PERMISSION_DENIED`
-- `1006007` `PLUGIN_OUTPUT_INVALID`
 
 #### 系统 / 平台
 
@@ -428,30 +421,12 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `1007004` `SANDBOX_PROFILE_INVALID`
 - `1007005` `PATH_POLICY_VIOLATION`
 
-#### 模型与前馈配置
-
-- `1008001` `MODEL_PROVIDER_NOT_FOUND`
-- `1008002` `MODEL_NOT_ALLOWED`
-- `1008003` `SKILL_NOT_FOUND`
-- `1008004` `BLUEPRINT_NOT_FOUND`
-- `1008005` `PROMPT_TEMPLATE_NOT_FOUND`
-- `1008006` `LSP_DIAGNOSTIC_UNAVAILABLE`
-
-#### 评估与升级
-
-- `1009001` `REVIEW_FAILED`
-- `1009002` `DOOM_LOOP_DETECTED`
-- `1009003` `EVAL_SNAPSHOT_WRITE_FAILED`
-- `1009004` `HUMAN_REVIEW_REQUIRED`
-
 ### 6.4 错误处理规则
 
 - 前端只认错误码和错误类型，不猜字符串。
 - Go 返回错误时必须带 `id` 或 `trace_id`。
 - worker / sidecar / plugin 错误必须包装成统一错误码。
-- 多模型切换失败必须落到 `1008xxx`。
 - 插件安装 / 启停失败必须落到 `1006xxx`。
-- 审查失败 / 熔断 / 人工升级必须落到 `1009xxx`。
 
 ## 7. 方法集合与原子功能映射
 
@@ -1174,7 +1149,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
       },
       "timeline": [
         {
-          "task_step_id": "task_step_1",
+          "step_id": "step_1",
           "task_id": "task_201",
           "name": "recognize_input_object",
           "status": "completed",
@@ -1183,7 +1158,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
           "output_summary": "确认是文档总结任务"
         },
         {
-          "task_step_id": "task_step_2",
+          "step_id": "step_2",
           "task_id": "task_201",
           "name": "generate_summary",
           "status": "running",
@@ -1555,7 +1530,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | 字段                            | 中文说明   |
 | ------------------------------- | ---------- |
 | `data.items`                    | 事项列表   |
-| `data.items[].todo_item_id`     | 事项 ID    |
+| `data.items[].item_id`          | 事项 ID    |
 | `data.items[].title`            | 事项标题   |
 | `data.items[].bucket`           | 所属分组   |
 | `data.items[].status`           | 当前状态   |
@@ -1572,7 +1547,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
     "data": {
       "items": [
         {
-          "todo_item_id": "todo_001",
+          "item_id": "todo_001",
           "title": "整理 Q3 复盘要点",
           "bucket": "upcoming",
           "status": "due_today",
@@ -1610,7 +1585,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 | 字段        | 中文说明         |
 | ----------- | ---------------- |
-| `todo_item_id` | 事项 ID       |
+| `item_id`   | 事项 ID          |
 | `confirmed` | 是否确认转为任务 |
 
 ### agent.notepad.convert_to_task 入参示例
@@ -1625,7 +1600,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
       "trace_id": "trace_notepad_convert_001",
       "client_time": "2026-04-07T10:56:00+08:00"
     },
-    "todo_item_id": "todo_001",
+    "item_id": "todo_001",
     "confirmed": true
   }
 }

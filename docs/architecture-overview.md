@@ -790,7 +790,7 @@ flowchart LR
 | --- | --- | --- |
 | `sessions` | 记录输入归属的协作会话 | `session_id`、`title`、`status` |
 | `tasks` | 记录正式任务主对象 | `task_id`、`session_id`、`status`、`request_source`、`request_trigger`、`primary_run_id` |
-| `task_steps` | 记录面向前端展示的阶段步骤 | `task_step_id`、`task_id`、`name`、`status`、`order_index` |
+| `task_steps` | 记录面向前端展示的阶段步骤 | `step_id`、`task_id`、`name`、`status`、`order_index` |
 | `runs` | 记录执行兼容主对象 | `run_id`、`task_id`、`status` |
 | `events` | 记录主链路事件与状态回流依据 | `event_id`、`task_id`、`type`、`payload_json` |
 
@@ -868,7 +868,7 @@ flowchart LR
 | `agent.task_inspector.config.update` | 修改巡检设置时 | 巡检来源、频率、触发开关 | 生效后的配置 |
 | `agent.task_inspector.run` | 用户手动点击立即巡检时 | `reason`、`target_sources` | `inspection_id`、`summary`、`suggestions` |
 | `agent.notepad.list` | 查看事项桶时 | `group`、分页参数 | `items`、`page` |
-| `agent.notepad.convert_to_task` | 把事项交给 Agent 处理时 | `todo_item_id`、`confirmed` | 新建 `task` |
+| `agent.notepad.convert_to_task` | 把事项交给 Agent 处理时 | `item_id`、`confirmed` | 新建 `task` |
 
 这里有两条接口链路：一条是“巡检配置 / 巡检执行”，另一条是“事项列表 / 事项转任务”。二者都服务于同一个长期待办到正式任务的升级过程。
 
@@ -911,7 +911,7 @@ flowchart LR
 | `task_sources` | `agent.task_inspector.config.update` | 持久化的巡检来源目录列表 |
 | `inspection_interval` | `agent.task_inspector.config.update` | 巡检频率，通常由 `unit + value` 组成 |
 | `group` | `agent.notepad.list` | 事项桶分组，取值必须来自统一 `todo_bucket` |
-| `todo_item_id` | `agent.notepad.convert_to_task` | 目标事项 ID |
+| `item_id` | `agent.notepad.convert_to_task` | 目标事项 ID |
 | `confirmed` | `agent.notepad.convert_to_task` | 是否确认把事项升级为正式任务 |
 
 返回字段：
@@ -932,10 +932,10 @@ flowchart LR
 
 | 表 | 作用 | 关键字段 |
 | --- | --- | --- |
-| `todo_items` | 存储尚未转成正式任务的事项 | `todo_item_id`、`bucket`、`status`、`source_path`、`linked_task_id` |
-| `recurring_rules` | 存储周期规则和提醒策略 | `recurring_rule_id`、`todo_item_id`、`rule_type`、`reminder_strategy` |
+| `todo_items` | 存储尚未转成正式任务的事项 | `item_id`、`bucket`、`status`、`source_path`、`linked_task_id` |
+| `recurring_rules` | 存储周期规则和提醒策略 | `rule_id`、`item_id`、`rule_type`、`reminder_strategy` |
 | `tasks` | 存储升级后的正式任务 | `task_id`、`source_type`、`status` |
-| `task_steps` | 存储升级后面向前端的阶段信息 | `task_step_id`、`task_id`、`name`、`status` |
+| `task_steps` | 存储升级后面向前端的阶段信息 | `step_id`、`task_id`、`name`、`status` |
 
 #### 时序图
 
