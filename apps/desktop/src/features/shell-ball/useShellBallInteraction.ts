@@ -1,6 +1,7 @@
-import type { AgentInputSubmitParams, RequestMeta } from "@cialloclaw/protocol";
+import type { AgentInputSubmitParams } from "@cialloclaw/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
+import { submitTextInput, createTextInputSubmitParams } from "../../services/agentInputService";
 import {
   createShellBallInteractionController,
   getShellBallInputBarMode,
@@ -33,44 +34,17 @@ type ShellBallInteractionConsumedEvent =
 
 type ShellBallVoiceRecognitionStopReason = "none" | "finish" | "cancel";
 
-function createShellBallRequestMeta(): RequestMeta {
-  const now = new Date().toISOString();
-  const traceId = typeof globalThis.crypto?.randomUUID === "function"
-    ? globalThis.crypto.randomUUID()
-    : `trace_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  return {
-    trace_id: traceId,
-    client_time: now,
-  };
-}
-
 export function createShellBallInputSubmitParams(input: {
   text: string;
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
 }): AgentInputSubmitParams | null {
-  const normalizedText = input.text.trim();
-
-  if (normalizedText === "") {
-    return null;
-  }
-
-  const requestMeta = createShellBallRequestMeta();
-
-  return {
-    request_meta: requestMeta,
+  return createTextInputSubmitParams({
+    text: input.text,
     source: "floating_ball",
     trigger: input.trigger,
-    input: {
-      type: "text",
-      text: normalizedText,
-      input_mode: input.inputMode,
-    },
-    context: {
-      files: [],
-    },
-  };
+    inputMode: input.inputMode,
+  });
 }
 
 async function submitShellBallInput(input: {
@@ -78,17 +52,12 @@ async function submitShellBallInput(input: {
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
 }) {
-  const params = createShellBallInputSubmitParams(input);
-
-  if (params === null) {
-    return null;
-  }
-
-  const importRpcMethods = new Function("return import('../../rpc/methods')") as () => Promise<{
-    submitInput: (request: AgentInputSubmitParams) => Promise<unknown>;
-  }>;
-  const rpcMethods = await importRpcMethods();
-  return rpcMethods.submitInput(params);
+  return submitTextInput({
+    text: input.text,
+    source: "floating_ball",
+    trigger: input.trigger,
+    inputMode: input.inputMode,
+  });
 }
 
 export function mapShellBallInteractionConsumedEventToFlag(event: ShellBallInteractionConsumedEvent) {
@@ -149,6 +118,10 @@ export function getShellBallPostSubmitInputReset(inputValue: string) {
 
 export function getShellBallPressCancelEvent(state: ShellBallVisualState): Extract<ShellBallInteractionEvent, "voice_cancel"> | null {
   return state === "voice_listening" ? "voice_cancel" : null;
+}
+
+export function resolveShellBallVoiceReleaseEvent(preview: ShellBallVoicePreview): Extract<ShellBallInteractionEvent, "voice_cancel" | "voice_finish"> {
+  return preview === "cancel" ? "voice_cancel" : "voice_finish";
 }
 
 export function syncShellBallInteractionController(input: {
