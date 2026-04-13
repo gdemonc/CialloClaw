@@ -1475,30 +1475,12 @@ test("shell-ball registered truth adapters stay explicit to formal task, notific
         source_type: "dragged_file",
         status: "processing",
       },
-      approval_request: {
-        approval_id: "approval-security-respond",
-        task_id: "task-security-respond",
-        operation_name: "write_file",
-        risk_level: "yellow",
-        target_object: "workspace/file.txt",
-        reason: "needs confirmation",
-        status: "approved",
-      },
     }),
     {
       task: {
         task_id: "task-security-respond",
         source_type: "dragged_file",
         status: "processing",
-      },
-      approvalRequest: {
-        approval_id: "approval-security-respond",
-        task_id: "task-security-respond",
-        operation_name: "write_file",
-        risk_level: "yellow",
-        target_object: "workspace/file.txt",
-        reason: "needs confirmation",
-        status: "approved",
       },
     },
   );

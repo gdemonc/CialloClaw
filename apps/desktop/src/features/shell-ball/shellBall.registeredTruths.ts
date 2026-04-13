@@ -297,7 +297,6 @@ export function createShellBallRegisteredTruthSnapshotFromSecurityRespondResult(
 ): ShellBallRegisteredTruthSnapshot {
   return {
     task: result.task === undefined ? undefined : result.task,
-    approvalRequest: result.approval_request ?? null,
   };
 }
 
