@@ -70,3 +70,19 @@ func TestServiceSuggestShortTextKeepsIntentUnconfirmed(t *testing.T) {
 		t.Fatalf("expected confirmation-oriented task title, got %s", suggestion.TaskTitle)
 	}
 }
+
+func TestServiceSuggestRecognizesExplicitSummarizeCommand(t *testing.T) {
+	service := NewService()
+
+	suggestion := service.Suggest(contextsvc.TaskContextSnapshot{
+		InputType: "text",
+		Text:      "总结一下这段内容",
+	}, nil, false)
+
+	if suggestion.Intent["name"] != "summarize" {
+		t.Fatalf("expected explicit summarize request to keep summarize intent, got %+v", suggestion.Intent)
+	}
+	if !suggestion.IntentConfirmed {
+		t.Fatalf("expected explicit summarize request to keep intent confirmed, got %+v", suggestion)
+	}
+}

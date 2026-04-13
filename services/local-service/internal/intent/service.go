@@ -286,6 +286,8 @@ func detectIntentFromText(text string) string {
 	switch {
 	case value == "":
 		return ""
+	case strings.Contains(value, "总结") || strings.Contains(value, "概括") || strings.HasPrefix(value, "summarize") || strings.HasPrefix(value, "summary"):
+		return "summarize"
 	case strings.Contains(value, "翻译") || strings.HasPrefix(value, "translate") || strings.HasPrefix(value, "翻成"):
 		return "translate"
 	case strings.Contains(value, "改写") || strings.HasPrefix(value, "rewrite") || strings.Contains(value, "润色"):
