@@ -1,7 +1,7 @@
 import type { AgentTaskDetailGetResult, AgentTaskControlParams, RequestMeta, Task, TaskControlAction, TaskListGroup } from "@cialloclaw/protocol";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@cialloclaw/protocol";
 import { controlTask, getTaskDetail, listTasks } from "@/rpc/methods";
-import { isApprovalRequest, isArtifact, isMirrorReference, isRecoveryPoint, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
+import { isApprovalRequest, isArtifact, isBinaryPendingAuthorizations, isMirrorReference, isRecoveryPoint, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
 import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskExperience, TaskListItem } from "./taskPage.types";
 
@@ -98,7 +98,7 @@ function hasValidSecuritySummary(detail: AgentTaskDetailGetResult): boolean {
   const summary = detail.security_summary as Partial<AgentTaskDetailGetResult["security_summary"]> | null | undefined;
   return Boolean(
     summary &&
-      typeof summary.pending_authorizations === "number" &&
+      isBinaryPendingAuthorizations(summary.pending_authorizations) &&
       typeof summary.risk_level === "string" &&
       typeof summary.security_status === "string" &&
       riskLevels.has(summary.risk_level) &&

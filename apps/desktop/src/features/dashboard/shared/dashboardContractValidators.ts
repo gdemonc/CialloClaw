@@ -2,6 +2,10 @@ import type { ApprovalRequest, Artifact, MirrorReference, RecoveryPoint, TaskSte
 
 type Guard<T> = (value: unknown) => value is T;
 
+export function isBinaryPendingAuthorizations(value: unknown): value is 0 | 1 {
+  return value === 0 || value === 1;
+}
+
 export function isApprovalRequest(value: unknown): value is ApprovalRequest {
   if (!value || typeof value !== "object") {
     return false;

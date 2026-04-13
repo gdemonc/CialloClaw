@@ -345,6 +345,29 @@ test("task detail normalization fails fast on invalid artifacts, mirror referenc
   });
 });
 
+test("task detail normalization rejects pending authorization counts outside the contract", () => {
+  withDesktopAliasRuntime((requireFn) => {
+    const service = requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js")) as {
+      normalizeTaskDetailResult: (detail: AgentTaskDetailGetResult) => AgentTaskDetailGetResult;
+    };
+
+    assert.throws(
+      () =>
+        service.normalizeTaskDetailResult(
+          createDetail({
+            security_summary: {
+              latest_restore_point: createRecoveryPoint(),
+              pending_authorizations: 2 as 0 | 1,
+              risk_level: "yellow",
+              security_status: "pending_confirmation",
+            },
+          }),
+        ),
+      /security summary|pending authorization/i,
+    );
+  });
+});
+
 function createFallbackExperience() {
   return {
     acceptance: [],
