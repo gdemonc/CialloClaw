@@ -44,6 +44,11 @@ type ShellBallTaskConfirmResult = ShellBallTaskResult & {
   bubble_message: unknown;
 };
 
+type ShellBallSecurityRespondResult = {
+  task?: Pick<Task, "task_id" | "source_type" | "status"> | null;
+  approval_request?: ApprovalRequest | null;
+};
+
 type ShellBallTaskUpdatedTruth = {
   task_id: string;
   status: Task["status"];
@@ -285,6 +290,15 @@ export function createShellBallRegisteredTruthSnapshotFromTaskConfirmResult(
   result: ShellBallTaskConfirmResult,
 ): ShellBallRegisteredTruthSnapshot {
   return createShellBallRegisteredTruthSnapshotFromTaskResult(result);
+}
+
+export function createShellBallRegisteredTruthSnapshotFromSecurityRespondResult(
+  result: ShellBallSecurityRespondResult,
+): ShellBallRegisteredTruthSnapshot {
+  return {
+    task: result.task === undefined ? undefined : result.task,
+    approvalRequest: result.approval_request ?? null,
+  };
 }
 
 export function applyShellBallTaskUpdatedTruth(
