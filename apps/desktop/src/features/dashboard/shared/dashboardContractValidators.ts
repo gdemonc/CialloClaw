@@ -1,6 +1,8 @@
 import type { ApprovalRequest, Artifact, MirrorReference, RecoveryPoint, TaskStep } from "@cialloclaw/protocol";
 
 type Guard<T> = (value: unknown) => value is T;
+const approvalStatuses = new Set<string>(["pending", "approved", "denied"]);
+const riskLevels = new Set<string>(["green", "yellow", "red"]);
 
 export function isBinaryPendingAuthorizations(value: unknown): value is 0 | 1 {
   return value === 0 || value === 1;
@@ -17,9 +19,11 @@ export function isApprovalRequest(value: unknown): value is ApprovalRequest {
     typeof candidate.task_id === "string" &&
     typeof candidate.operation_name === "string" &&
     typeof candidate.risk_level === "string" &&
+    riskLevels.has(candidate.risk_level) &&
     typeof candidate.target_object === "string" &&
     typeof candidate.reason === "string" &&
     typeof candidate.status === "string" &&
+    approvalStatuses.has(candidate.status) &&
     typeof candidate.created_at === "string"
   );
 }

@@ -62,6 +62,10 @@ export function readDashboardSafetyNavigationState(value: unknown): DashboardSaf
     return null;
   }
 
+  if (approvalRequest === null && latestRestorePoint === null) {
+    return null;
+  }
+
   return {
     approval_request: approvalRequest,
     latest_restore_point: latestRestorePoint,

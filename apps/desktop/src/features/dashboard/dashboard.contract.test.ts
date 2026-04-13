@@ -183,10 +183,34 @@ test("readDashboardSafetyNavigationState accepts valid routed state and rejects 
   const state = buildDashboardSafetyNavigationState(createDetail({ approval_request: null }));
 
   assert.deepEqual(readDashboardSafetyNavigationState(state), state);
+  assert.equal(
+    readDashboardSafetyNavigationState({
+      approval_request: null,
+      latest_restore_point: null,
+      task_id: "task_dashboard_001",
+    }),
+    null,
+  );
   assert.equal(readDashboardSafetyNavigationState({ task_id: 42 }), null);
   assert.equal(
     readDashboardSafetyNavigationState({
       approval_request: "approval_dashboard_001",
+      latest_restore_point: null,
+      task_id: "task_dashboard_001",
+    }),
+    null,
+  );
+  assert.equal(
+    readDashboardSafetyNavigationState({
+      approval_request: createApprovalRequest({ risk_level: "orange" as never }),
+      latest_restore_point: null,
+      task_id: "task_dashboard_001",
+    }),
+    null,
+  );
+  assert.equal(
+    readDashboardSafetyNavigationState({
+      approval_request: createApprovalRequest({ status: "waiting" as never }),
       latest_restore_point: null,
       task_id: "task_dashboard_001",
     }),
