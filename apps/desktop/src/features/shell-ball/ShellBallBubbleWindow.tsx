@@ -35,7 +35,12 @@ export function ShellBallBubbleWindow({ visualState, dualFormState }: ShellBallB
     : null;
 
   return (
-    <div ref={rootRef} className="shell-ball-window shell-ball-window--bubble" aria-label="Shell-ball bubble window">
+    <div
+      ref={rootRef}
+      className="shell-ball-window shell-ball-window--bubble"
+      aria-label="Shell-ball bubble window"
+      data-visibility-phase={snapshot.bubbleRegion.visibilityPhase}
+    >
       {summary === null ? null : (
         <section className="shell-ball-bubble-window__summary" aria-live="polite">
           <p className="shell-ball-bubble-window__summary-title">{summary.bubbleTitle}</p>

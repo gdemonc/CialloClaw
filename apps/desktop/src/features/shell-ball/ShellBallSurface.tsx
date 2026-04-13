@@ -11,12 +11,15 @@ type ShellBallSurfaceProps = {
   visualState: ShellBallVisualState;
   dualFormState: ShellBallDualFormState;
   voicePreview: ShellBallVoicePreview;
+  voiceHoldProgress?: number;
+  inputFocused?: boolean;
   motionConfig: ShellBallMotionConfig;
   onDragStart: () => void;
   onPrimaryClick: () => void;
   onDoubleClick: () => void;
   onRegionEnter: () => void;
   onRegionLeave: () => void;
+  onInputProxyClick?: () => void;
   onPressStart: (event: PointerEvent<HTMLButtonElement>) => void;
   onPressMove: (event: PointerEvent<HTMLButtonElement>) => void;
   onPressEnd: (event: PointerEvent<HTMLButtonElement>) => boolean;
@@ -30,17 +33,22 @@ export function ShellBallSurface({
   visualState,
   dualFormState,
   voicePreview,
+  voiceHoldProgress = 0,
+  inputFocused = false,
   motionConfig,
   onDragStart,
   onPrimaryClick,
   onDoubleClick,
   onRegionEnter,
   onRegionLeave,
+  onInputProxyClick = () => {},
   onPressStart,
   onPressMove,
   onPressEnd,
   onPressCancel,
 }: ShellBallSurfaceProps) {
+  const showInputProxy = dualFormState.systemState === "awakenable" && !inputFocused;
+
   return (
     <div
       ref={containerRef}
@@ -67,6 +75,7 @@ export function ShellBallSurface({
                   visualState={visualState}
                   dualFormState={dualFormState}
                   voicePreview={voicePreview}
+                  voiceHoldProgress={voiceHoldProgress}
                   motionConfig={motionConfig}
                   onPrimaryClick={onPrimaryClick}
                   onDoubleClick={onDoubleClick}
@@ -77,6 +86,14 @@ export function ShellBallSurface({
                   onPressCancel={onPressCancel}
                 />
               </div>
+              <button
+                aria-hidden={!showInputProxy}
+                className="shell-ball-surface__input-line-proxy"
+                data-visible={showInputProxy}
+                onClick={onInputProxyClick}
+                tabIndex={showInputProxy ? 0 : -1}
+                type="button"
+              />
             </div>
           </div>
         </div>

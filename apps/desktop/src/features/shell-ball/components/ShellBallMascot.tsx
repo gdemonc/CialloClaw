@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent } from "react";
-import { AudioLines, ShieldAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, AudioLines, Lock, ShieldAlert, X } from "lucide-react";
 import { cn } from "../../../utils/cn";
 import type { ShellBallVoicePreview } from "../shellBall.interaction";
 import type { ShellBallDualFormState, ShellBallMotionConfig, ShellBallVisualState } from "../shellBall.types";
@@ -10,6 +10,8 @@ type ShellBallMascotProps = {
   visualState: ShellBallVisualState;
   dualFormState?: ShellBallDualFormState;
   voicePreview?: ShellBallVoicePreview;
+  showVoiceHints?: boolean;
+  voiceHoldProgress?: number;
   motionConfig: ShellBallMotionConfig;
   onPrimaryClick?: () => void;
   onDoubleClick?: () => void;
@@ -97,6 +99,8 @@ export function ShellBallMascot({
   visualState,
   dualFormState,
   voicePreview = null,
+  showVoiceHints = true,
+  voiceHoldProgress = 0,
   motionConfig,
   onPrimaryClick = () => {},
   onDoubleClick = () => {},
@@ -139,6 +143,10 @@ export function ShellBallMascot({
   const crestStyle: CSSProperties = {
     transform: `translateY(${-motionConfig.crestLiftPx}px)`,
   };
+  const holdRingCircumference = 2 * Math.PI * 84;
+  const holdRingDashOffset = holdRingCircumference * (1 - voiceHoldProgress);
+  const showVoiceHoldRing = voiceHoldProgress > 0 && visualState !== "voice_listening" && visualState !== "voice_locked";
+  const shouldRenderVoiceHints = showVoiceHints && (visualState === "voice_listening" || visualState === "voice_locked");
 
   function resetPointerSequence() {
     activeSequenceRef.current = false;
@@ -159,6 +167,9 @@ export function ShellBallMascot({
       return;
     }
 
+    // Prevent pointer drag from leaving a focus ring on the hotspot button.
+    event.preventDefault();
+    event.currentTarget.blur();
     suppressGestureRef.current = false;
     activeSequenceRef.current = true;
     draggingSequenceRef.current = false;
@@ -291,10 +302,29 @@ export function ShellBallMascot({
       data-engagement-kind={resolvedDualFormState.engagementKind}
       data-waiting-confirm-reason={resolvedDualFormState.waitingConfirmReason}
       data-tone={motionConfig.accentTone}
+      data-voice-hints={shouldRenderVoiceHints ? "true" : "false"}
       data-voice-preview={voicePreview ?? undefined}
     >
       <div className="shell-ball-mascot__orbital shell-ball-mascot__orbital--back" />
       <div className="shell-ball-mascot__shadow" />
+
+      {showVoiceHoldRing ? (
+        <svg aria-hidden="true" className="shell-ball-mascot__hold-ring" viewBox="0 0 190 190">
+          <circle cx="95" cy="95" fill="none" r="84" stroke="rgba(255,255,255,0.28)" strokeWidth="4" />
+          <circle
+            cx="95"
+            cy="95"
+            fill="none"
+            r="84"
+            stroke="rgba(106,145,200,0.78)"
+            strokeDasharray={holdRingCircumference}
+            strokeDashoffset={holdRingDashOffset}
+            strokeLinecap="round"
+            strokeWidth="5"
+            transform="rotate(-90 95 95)"
+          />
+        </svg>
+      ) : null}
 
       {motionConfig.ringMode === "hidden" ? null : (
         <div className="shell-ball-mascot__rings" data-ring={motionConfig.ringMode}>
@@ -305,6 +335,26 @@ export function ShellBallMascot({
           </span>
         </div>
       )}
+
+      {shouldRenderVoiceHints ? (
+        <>
+          <div className={cn("shell-ball-mascot__voice-hint shell-ball-mascot__voice-hint--lock", voicePreview === "lock" && "is-active", visualState === "voice_locked" && "is-locked")}
+          >
+            <ArrowUp className="shell-ball-mascot__voice-arrow" />
+            <Lock className="shell-ball-mascot__voice-icon" />
+            <span>锁定</span>
+          </div>
+
+          <div className={cn("shell-ball-mascot__voice-hint shell-ball-mascot__voice-hint--cancel", voicePreview === "cancel" && "is-active")}
+          >
+            <ArrowDown className="shell-ball-mascot__voice-arrow" />
+            <X className="shell-ball-mascot__voice-icon" />
+            <span>取消</span>
+          </div>
+        </>
+      ) : null}
+
+
 
       <div className="shell-ball-mascot__float" style={floatStyle}>
         <div className="shell-ball-mascot__attitude" style={attitudeStyle}>
