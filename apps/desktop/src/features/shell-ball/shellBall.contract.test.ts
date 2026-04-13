@@ -587,7 +587,7 @@ function withShellBallInteractionHookRuntime<T>(
   };
 
   try {
-    const result = resolvedCallback(runtime);
+    const result = resolvedCallback!(runtime);
 
     if (typeof result === "object" && result !== null && "then" in result) {
       return (result as unknown as Promise<T>).finally(finalize) as T;
@@ -1204,6 +1204,7 @@ test("shell-ball derives dual-form view state from registered backend truths wit
           target_object: "workspace/file.txt",
           reason: "needs confirmation",
           status: "pending",
+          created_at: "2026-04-12T10:00:00.000Z",
         },
       },
     }),
@@ -1230,6 +1231,7 @@ test("shell-ball derives dual-form view state from registered backend truths wit
           target_object: "workspace/file.txt",
           reason: "needs confirmation",
           status: "pending",
+          created_at: "2026-04-12T10:00:00.000Z",
         },
       },
     }),
@@ -1380,6 +1382,7 @@ test("shell-ball registered truth adapters stay explicit to formal task, notific
           target_object: "workspace/file.txt",
           reason: "needs confirmation",
           status: "pending",
+          created_at: "2026-04-12T10:00:00.000Z",
         },
       },
     ),
@@ -1397,6 +1400,7 @@ test("shell-ball registered truth adapters stay explicit to formal task, notific
         target_object: "workspace/file.txt",
         reason: "needs confirmation",
         status: "pending",
+        created_at: "2026-04-12T10:00:00.000Z",
       },
     },
   );
@@ -1417,6 +1421,7 @@ test("shell-ball registered truth adapters stay explicit to formal task, notific
           target_object: "workspace/file.txt",
           reason: "needs confirmation",
           status: "pending",
+          created_at: "2026-04-12T10:00:00.000Z",
         },
       },
       {
@@ -1795,6 +1800,7 @@ test("shell-ball derives engagement precedence through local context, task sourc
           target_object: "workspace/file.txt",
           reason: "needs confirmation",
           status: "pending",
+          created_at: "2026-04-12T10:00:00.000Z",
         },
       },
     }),
