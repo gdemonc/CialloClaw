@@ -478,7 +478,13 @@ func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 // TaskControl 处理 agent.task.control，把用户控制动作转换成状态机操作。
 func (s *Service) TaskControl(params map[string]any) (map[string]any, error) {
 	taskID := stringValue(params, "task_id", "")
-	action := stringValue(params, "action", "pause")
+	if strings.TrimSpace(taskID) == "" {
+		return nil, errors.New("task_id is required")
+	}
+	action := stringValue(params, "action", "")
+	if strings.TrimSpace(action) == "" {
+		return nil, errors.New("action is required")
+	}
 	if !isSupportedTaskControlAction(action) {
 		return nil, fmt.Errorf("unsupported task control action: %s", action)
 	}

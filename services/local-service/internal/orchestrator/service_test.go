@@ -1863,6 +1863,48 @@ func TestServiceTaskControlRejectsInvalidStatusTransition(t *testing.T) {
 	}
 }
 
+func TestServiceTaskControlRequiresTaskID(t *testing.T) {
+	service := newTestService()
+
+	_, err := service.TaskControl(map[string]any{
+		"action": "pause",
+	})
+	if err == nil || err.Error() != "task_id is required" {
+		t.Fatalf("expected task_id required error, got %v", err)
+	}
+}
+
+func TestServiceTaskControlRequiresAction(t *testing.T) {
+	service := newTestService()
+
+	startResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_demo",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "task control needs action",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+	_, err = service.TaskControl(map[string]any{
+		"task_id": taskID,
+	})
+	if err == nil || err.Error() != "action is required" {
+		t.Fatalf("expected action required error, got %v", err)
+	}
+}
+
 func TestServiceTaskControlRejectsFinishedTaskOperations(t *testing.T) {
 	service := newTestService()
 
