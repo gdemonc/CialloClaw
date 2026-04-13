@@ -1,0 +1,315 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import test from "node:test";
+import type {
+  AgentTaskControlParams,
+  AgentTaskControlResult,
+  AgentTaskDetailGetParams,
+  AgentTaskDetailGetResult,
+  AgentTaskListParams,
+  AgentTaskListResult,
+  ApprovalRequest,
+  RecoveryPoint,
+  Task,
+} from "@cialloclaw/protocol";
+
+declare module "@/rpc/methods" {
+  export function controlTask(params: AgentTaskControlParams): Promise<AgentTaskControlResult>;
+  export function getTaskDetail(params: AgentTaskDetailGetParams): Promise<AgentTaskDetailGetResult>;
+  export function listTasks(params: AgentTaskListParams): Promise<AgentTaskListResult>;
+}
+
+import {
+  buildDashboardSafetyNavigationState,
+  readDashboardSafetyNavigationState,
+  resolveDashboardSafetyFocusTarget,
+} from "./shared/dashboardSafetyNavigation";
+import {
+  buildDashboardTaskBucketQueryKey,
+  buildDashboardTaskDetailQueryKey,
+  dashboardTaskBucketQueryPrefix,
+  dashboardTaskDetailQueryPrefix,
+} from "./tasks/taskPage.query";
+
+const desktopRoot = process.cwd();
+
+function withDesktopAliasRuntime<T>(callback: (requireFn: NodeRequire) => T): T {
+  const NodeModule = require("node:module") as {
+    _load: (request: string, parent: unknown, isMain: boolean) => unknown;
+    _resolveFilename: (request: string, parent: unknown, isMain: boolean, options?: unknown) => string;
+  };
+  const originalLoad = NodeModule._load;
+  const originalResolveFilename = NodeModule._resolveFilename;
+
+  NodeModule._resolveFilename = function resolveDesktopAlias(request: string, parent: unknown, isMain: boolean, options?: unknown) {
+    if (request.startsWith("@/")) {
+      const modulePath = request.slice(2);
+      const emittedBasePath = resolve(desktopRoot, ".cache/dashboard-tests", modulePath);
+      const emittedCandidates = [`${emittedBasePath}.js`, resolve(emittedBasePath, "index.js")];
+
+      for (const candidate of emittedCandidates) {
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    return originalResolveFilename.call(this, request, parent, isMain, options);
+  };
+
+  NodeModule._load = function loadDesktopRuntime(request: string, parent: unknown, isMain: boolean) {
+    if (request === "@cialloclaw/protocol") {
+      return {
+        RISK_LEVELS: ["green", "yellow", "red"],
+        SECURITY_STATUSES: ["normal", "pending_confirmation", "intercepted", "execution_error", "recoverable", "recovered"],
+        TASK_STEP_STATUSES: ["pending", "running", "completed", "failed", "skipped", "cancelled"],
+      };
+    }
+
+    if (request === "@/rpc/methods") {
+      return {
+        controlTask() {
+          throw new Error("controlTask should not run in dashboard contract tests");
+        },
+        getTaskDetail() {
+          throw new Error("getTaskDetail should not run in dashboard contract tests");
+        },
+        listTasks() {
+          throw new Error("listTasks should not run in dashboard contract tests");
+        },
+      };
+    }
+
+    return originalLoad(request, parent, isMain);
+  };
+
+  try {
+    return callback(require);
+  } finally {
+    NodeModule._load = originalLoad;
+    NodeModule._resolveFilename = originalResolveFilename;
+  }
+}
+
+function createTask(overrides: Partial<Task> = {}): Task {
+  return {
+    task_id: "task_dashboard_001",
+    title: "Review dashboard safety state",
+    status: "waiting_auth",
+    source_type: "hover_input",
+    updated_at: "2026-04-13T09:05:00.000Z",
+    started_at: "2026-04-13T09:00:30.000Z",
+    finished_at: null,
+    intent: null,
+    current_step: "Awaiting approval",
+    risk_level: "yellow",
+    ...overrides,
+  };
+}
+
+function createApprovalRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
+  return {
+    approval_id: "approval_dashboard_001",
+    task_id: "task_dashboard_001",
+    operation_name: "write_file",
+    risk_level: "yellow",
+    target_object: "workspace/task.md",
+    reason: "Need confirmation before updating the file.",
+    status: "pending",
+    created_at: "2026-04-13T09:01:00.000Z",
+    ...overrides,
+  };
+}
+
+function createRecoveryPoint(overrides: Partial<RecoveryPoint> = {}): RecoveryPoint {
+  return {
+    recovery_point_id: "rp_dashboard_001",
+    task_id: "task_dashboard_001",
+    summary: "Snapshot before file edits",
+    created_at: "2026-04-13T09:02:00.000Z",
+    objects: ["workspace/task.md"],
+    ...overrides,
+  };
+}
+
+function createDetail(overrides: Partial<AgentTaskDetailGetResult> = {}): AgentTaskDetailGetResult {
+  return {
+    approval_request: createApprovalRequest(),
+    artifacts: [],
+    mirror_references: [],
+    security_summary: {
+      latest_restore_point: createRecoveryPoint(),
+      pending_authorizations: 1,
+      risk_level: "yellow",
+      security_status: "pending_confirmation",
+    },
+    task: createTask(),
+    timeline: [],
+    ...overrides,
+  };
+}
+
+test("buildDashboardSafetyNavigationState keeps approval and restore snapshots", () => {
+  const state = buildDashboardSafetyNavigationState(createDetail());
+
+  assert.deepEqual(state, {
+    approval_request: createApprovalRequest(),
+    latest_restore_point: createRecoveryPoint(),
+    task_id: "task_dashboard_001",
+  });
+});
+
+test("readDashboardSafetyNavigationState accepts valid routed state and rejects malformed values", () => {
+  const state = buildDashboardSafetyNavigationState(createDetail({ approval_request: null }));
+
+  assert.deepEqual(readDashboardSafetyNavigationState(state), state);
+  assert.equal(readDashboardSafetyNavigationState({ task_id: 42 }), null);
+  assert.equal(
+    readDashboardSafetyNavigationState({
+      approval_request: "approval_dashboard_001",
+      latest_restore_point: null,
+      task_id: "task_dashboard_001",
+    }),
+    null,
+  );
+});
+
+test("resolveDashboardSafetyFocusTarget prefers matching live approval data over restore point", () => {
+  const state = buildDashboardSafetyNavigationState(createDetail());
+  const liveApproval = createApprovalRequest({ reason: "Live approval state" });
+  const liveRestorePoint = createRecoveryPoint({ summary: "Live restore point" });
+
+  const target = resolveDashboardSafetyFocusTarget({
+    livePending: liveApproval,
+    liveRestorePoint,
+    state,
+  });
+
+  assert.deepEqual(target, {
+    anchor_id: "approval:approval_dashboard_001",
+    approval_request: liveApproval,
+    feedback: null,
+    kind: "approval",
+    source: "live",
+  });
+});
+
+test("resolveDashboardSafetyFocusTarget keeps approval snapshot renderable when live approval changed away", () => {
+  const state = buildDashboardSafetyNavigationState(createDetail());
+
+  const target = resolveDashboardSafetyFocusTarget({
+    livePending: createApprovalRequest({ approval_id: "approval_dashboard_999" }),
+    liveRestorePoint: createRecoveryPoint(),
+    state,
+  });
+
+  assert.deepEqual(target, {
+    anchor_id: "approval:approval_dashboard_001",
+    approval_request: createApprovalRequest(),
+    feedback: "实时安全数据已变化，当前展示的是路由携带的快照。",
+    kind: "approval",
+    source: "snapshot",
+  });
+});
+
+test("resolveDashboardSafetyFocusTarget keeps restore snapshot renderable when live restore point changed away", () => {
+  const state = buildDashboardSafetyNavigationState(createDetail({ approval_request: null }));
+
+  const target = resolveDashboardSafetyFocusTarget({
+    livePending: null,
+    liveRestorePoint: createRecoveryPoint({ recovery_point_id: "rp_dashboard_999" }),
+    state,
+  });
+
+  assert.deepEqual(target, {
+    anchor_id: "restore_point:rp_dashboard_001",
+    feedback: "实时安全数据已变化，当前展示的是路由携带的快照。",
+    kind: "restore_point",
+    recovery_point: createRecoveryPoint(),
+    source: "snapshot",
+  });
+});
+
+test("resolveDashboardSafetyFocusTarget uses live restore point when it matches and no approval is routed", () => {
+  const state = buildDashboardSafetyNavigationState(createDetail({ approval_request: null }));
+  const liveRestorePoint = createRecoveryPoint({ summary: "Live restore point" });
+
+  const target = resolveDashboardSafetyFocusTarget({
+    livePending: null,
+    liveRestorePoint,
+    state,
+  });
+
+  assert.deepEqual(target, {
+    anchor_id: "restore_point:rp_dashboard_001",
+    feedback: null,
+    kind: "restore_point",
+    recovery_point: liveRestorePoint,
+    source: "live",
+  });
+});
+
+test("task page query helpers expose stable prefixes and keys", () => {
+  assert.deepEqual(dashboardTaskBucketQueryPrefix, ["dashboard", "tasks", "bucket"]);
+  assert.deepEqual(dashboardTaskDetailQueryPrefix, ["dashboard", "tasks", "detail"]);
+  assert.deepEqual(buildDashboardTaskBucketQueryKey({ group: "unfinished", limit: 12, source: "rpc" }), ["dashboard", "tasks", "bucket", "rpc", "unfinished", 12]);
+  assert.deepEqual(buildDashboardTaskDetailQueryKey({ source: "mock", taskId: "task_dashboard_001" }), ["dashboard", "tasks", "detail", "mock", "task_dashboard_001"]);
+});
+
+test("task detail normalization rejects string restore points in rpc mode and keeps null approval fallback", () => {
+  withDesktopAliasRuntime((requireFn) => {
+    const service = requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js")) as {
+      buildFallbackTaskDetailData: (item: { experience: ReturnType<typeof createFallbackExperience>; task: Task }) => { detail: AgentTaskDetailGetResult };
+      normalizeTaskDetailResult: (detail: AgentTaskDetailGetResult) => AgentTaskDetailGetResult;
+    };
+
+    assert.throws(
+      () =>
+        service.normalizeTaskDetailResult(
+          createDetail({
+            security_summary: {
+              latest_restore_point: "rp_dashboard_001" as never,
+              pending_authorizations: 1,
+              risk_level: "yellow",
+              security_status: "pending_confirmation",
+            },
+          }),
+        ),
+      /restore point/i,
+    );
+
+    const fallback = service.buildFallbackTaskDetailData({
+      experience: createFallbackExperience(),
+      task: createTask(),
+    });
+
+    assert.equal(fallback.detail.approval_request, null);
+  });
+});
+
+function createFallbackExperience() {
+  return {
+    acceptance: [],
+    assistantState: {
+      hint: "fallback",
+      label: "fallback",
+    },
+    background: "fallback",
+    constraints: [],
+    dueAt: null,
+    goal: "fallback",
+    nextAction: "fallback",
+    noteDraft: "fallback",
+    noteEntries: [],
+    outputs: [],
+    phase: "fallback",
+    priority: "steady" as const,
+    progressHint: "fallback",
+    quickContext: [],
+    recentConversation: [],
+    relatedFiles: [],
+    stepTargets: {},
+    suggestedNext: "fallback",
+  };
+}

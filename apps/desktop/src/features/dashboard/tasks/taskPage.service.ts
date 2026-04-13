@@ -1,4 +1,4 @@
-import type { AgentTaskDetailGetResult, AgentTaskControlParams, RequestMeta, Task, TaskControlAction, TaskListGroup, TaskStep } from "@cialloclaw/protocol";
+import type { AgentTaskDetailGetResult, AgentTaskControlParams, ApprovalRequest, RecoveryPoint, RequestMeta, Task, TaskControlAction, TaskListGroup, TaskStep } from "@cialloclaw/protocol";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@cialloclaw/protocol";
 import { controlTask, getTaskDetail, listTasks } from "@/rpc/methods";
 import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
@@ -124,7 +124,41 @@ function hasValidSecuritySummary(detail: AgentTaskDetailGetResult): boolean {
   );
 }
 
-function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): AgentTaskDetailGetResult {
+function isApprovalRequest(value: unknown): value is ApprovalRequest {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<ApprovalRequest>;
+  return (
+    typeof candidate.approval_id === "string" &&
+    typeof candidate.task_id === "string" &&
+    typeof candidate.operation_name === "string" &&
+    typeof candidate.risk_level === "string" &&
+    typeof candidate.target_object === "string" &&
+    typeof candidate.reason === "string" &&
+    typeof candidate.status === "string" &&
+    typeof candidate.created_at === "string"
+  );
+}
+
+function isRecoveryPoint(value: unknown): value is RecoveryPoint {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<RecoveryPoint>;
+  return (
+    typeof candidate.recovery_point_id === "string" &&
+    typeof candidate.task_id === "string" &&
+    typeof candidate.summary === "string" &&
+    typeof candidate.created_at === "string" &&
+    Array.isArray(candidate.objects) &&
+    candidate.objects.every((item) => typeof item === "string")
+  );
+}
+
+export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): AgentTaskDetailGetResult {
   if (!detail || !detail.task || !detail.task.task_id) {
     throw new Error("task detail payload is missing task information");
   }
@@ -133,11 +167,23 @@ function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): AgentTaskD
     throw new Error("task detail payload is missing security summary");
   }
 
+  if (detail.approval_request !== null && detail.approval_request !== undefined && !isApprovalRequest(detail.approval_request)) {
+    throw new Error("task detail payload has invalid approval request");
+  }
+
+  const latestRestorePoint = detail.security_summary.latest_restore_point ?? null;
+  if (latestRestorePoint !== null && !isRecoveryPoint(latestRestorePoint)) {
+    throw new Error("task detail payload has invalid restore point");
+  }
+
   return {
     approval_request: detail.approval_request ?? null,
     artifacts: Array.isArray(detail.artifacts) ? detail.artifacts : [],
     mirror_references: Array.isArray(detail.mirror_references) ? detail.mirror_references : [],
-    security_summary: detail.security_summary,
+    security_summary: {
+      ...detail.security_summary,
+      latest_restore_point: latestRestorePoint,
+    },
     task: detail.task,
     timeline: Array.isArray(detail.timeline) ? detail.timeline.filter(isTaskStep) : [],
   };
