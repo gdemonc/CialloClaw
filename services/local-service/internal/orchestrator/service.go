@@ -189,22 +189,18 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 	bubble := s.delivery.BuildBubbleMessage(task.TaskID, bubbleTypeForSuggestion(suggestion.RequiresConfirm), bubbleTextForInput(suggestion), task.StartedAt.Format(dateTimeLayout))
 	deliveryResult := map[string]any(nil)
 	if !suggestion.RequiresConfirm {
-		if requiresAuthorization(suggestion.Intent) {
-			pendingExecution := s.buildPendingExecution(task, suggestion.Intent)
-			approvalRequest := buildApprovalRequest(task.TaskID, suggestion.Intent, "red")
-			bubble = s.delivery.BuildBubbleMessage(task.TaskID, "status", "检测到待授权操作，请先确认。", task.StartedAt.Format(dateTimeLayout))
-			if _, ok := s.runEngine.MarkWaitingApprovalWithPlan(task.TaskID, approvalRequest, pendingExecution, bubble); ok {
-				task, _ = s.runEngine.GetTask(task.TaskID)
-			}
-			return map[string]any{
-				"task":           taskMap(task),
-				"bubble_message": bubble,
-			}, nil
+		governedTask, governedResponse, handled, governanceErr := s.handleTaskGovernanceDecision(task, suggestion.Intent)
+		if governanceErr != nil {
+			return nil, governanceErr
 		}
-		var err error
-		task, bubble, deliveryResult, _, err = s.executeTask(task, snapshot, suggestion.Intent)
-		if err != nil {
-			return nil, err
+		if handled {
+			return governedResponse, nil
+		}
+		task = governedTask
+		var execErr error
+		task, bubble, deliveryResult, _, execErr = s.executeTask(task, snapshot, suggestion.Intent)
+		if execErr != nil {
+			return nil, execErr
 		}
 	} else {
 		if _, ok := s.runEngine.SetPresentation(task.TaskID, bubble, nil, nil); ok {
@@ -262,22 +258,20 @@ func (s *Service) StartTask(params map[string]any) (map[string]any, error) {
 		return response, nil
 	}
 
-	if requiresAuthorization(suggestion.Intent) {
-		pendingExecution := s.buildPendingExecution(task, suggestion.Intent)
-		approvalRequest := buildApprovalRequest(task.TaskID, suggestion.Intent, "red")
-		bubble = s.delivery.BuildBubbleMessage(task.TaskID, "status", "检测到待授权操作，请先确认。", task.StartedAt.Format(dateTimeLayout))
-		if _, ok := s.runEngine.MarkWaitingApprovalWithPlan(task.TaskID, approvalRequest, pendingExecution, bubble); ok {
-			task, _ = s.runEngine.GetTask(task.TaskID)
-			response["task"] = taskMap(task)
-			response["bubble_message"] = bubble
-		}
-		return response, nil
+	governedTask, governedResponse, handled, governanceErr := s.handleTaskGovernanceDecision(task, suggestion.Intent)
+	if governanceErr != nil {
+		return nil, governanceErr
 	}
+	if handled {
+		return governedResponse, nil
+	}
+	task = governedTask
 
-	var err error
-	task, bubble, deliveryResult, _, err := s.executeTask(task, snapshot, suggestion.Intent)
-	if err != nil {
-		return nil, err
+	deliveryResult := map[string]any(nil)
+	var execErr error
+	task, bubble, deliveryResult, _, execErr = s.executeTask(task, snapshot, suggestion.Intent)
+	if execErr != nil {
+		return nil, execErr
 	}
 	response["task"] = taskMap(task)
 	response["bubble_message"] = bubble
@@ -335,28 +329,21 @@ func (s *Service) ConfirmTask(params map[string]any) (map[string]any, error) {
 	updatedTitle := s.intent.Suggest(snapshotFromTask(task), intentValue, false).TaskTitle
 
 	bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "已按新的要求开始处理", task.UpdatedAt.Format(dateTimeLayout))
-	if requiresAuthorization(intentValue) {
-		updatedTask, ok := s.runEngine.UpdateIntent(task.TaskID, updatedTitle, intentValue)
-		if !ok {
-			return nil, ErrTaskNotFound
-		}
-		s.attachMemoryReadPlans(updatedTask.TaskID, updatedTask.RunID, snapshotFromTask(updatedTask), intentValue)
-
-		pendingExecution := s.buildPendingExecution(updatedTask, intentValue)
-		approvalRequest := buildApprovalRequest(task.TaskID, intentValue, "red")
-		bubble = s.delivery.BuildBubbleMessage(task.TaskID, "status", "检测到待授权操作，请先确认。", updatedTask.UpdatedAt.Format(dateTimeLayout))
-		updatedTask, ok = s.runEngine.MarkWaitingApprovalWithPlan(task.TaskID, approvalRequest, pendingExecution, bubble)
-		if !ok {
-			return nil, ErrTaskNotFound
-		}
-		return map[string]any{
-			"task":            taskMap(updatedTask),
-			"bubble_message":  bubble,
-			"delivery_result": nil,
-		}, nil
+	updatedTask, ok := s.runEngine.UpdateIntent(task.TaskID, updatedTitle, intentValue)
+	if !ok {
+		return nil, ErrTaskNotFound
 	}
+	s.attachMemoryReadPlans(updatedTask.TaskID, updatedTask.RunID, snapshotFromTask(updatedTask), intentValue)
+	governedTask, governedResponse, handled, governanceErr := s.handleTaskGovernanceDecision(updatedTask, intentValue)
+	if governanceErr != nil {
+		return nil, governanceErr
+	}
+	if handled {
+		return governedResponse, nil
+	}
+	updatedTask = governedTask
 
-	updatedTask, ok := s.runEngine.ConfirmTask(task.TaskID, updatedTitle, intentValue, bubble)
+	updatedTask, ok = s.runEngine.ConfirmTask(task.TaskID, updatedTitle, intentValue, bubble)
 	if !ok {
 		return nil, ErrTaskNotFound
 	}
@@ -916,15 +903,25 @@ func (s *Service) SecurityRespond(params map[string]any) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
-	updatedTask, _ = s.runEngine.ResolveAuthorization(task.TaskID, authorizationRecord, impactScope)
+	if updatedTask.Status == "completed" {
+		updatedTask, _ = s.runEngine.ResolveAuthorization(task.TaskID, authorizationRecord, impactScope)
+	}
+	if updatedTask.Status == "failed" {
+		deliveryResult = nil
+	}
 
-	return map[string]any{
+	response := map[string]any{
 		"authorization_record": authorizationRecord,
 		"task":                 taskMap(updatedTask),
 		"bubble_message":       resultBubble,
-		"delivery_result":      deliveryResult,
 		"impact_scope":         impactScope,
-	}, nil
+	}
+	if len(deliveryResult) > 0 {
+		response["delivery_result"] = deliveryResult
+	} else {
+		response["delivery_result"] = nil
+	}
+	return response, nil
 }
 
 // SettingsGet 设置tingsGet。
@@ -1772,28 +1769,12 @@ func (s *Service) attachPostDeliveryHandoffs(taskID, runID string, snapshot cont
 	_, _ = s.runEngine.SetDeliveryPlans(taskID, storageWritePlan, artifactPlans)
 }
 
-// requiresAuthorization 处理当前模块的相关逻辑。
-
-// requiresAuthorization 判断当前意图是否必须进入等待授权链路。
-func requiresAuthorization(taskIntent map[string]any) bool {
-	if stringValue(taskIntent, "name", "") == "write_file" {
-		return true
-	}
-
-	arguments := mapValue(taskIntent, "arguments")
-	if requireAuthorization, ok := arguments["require_authorization"].(bool); ok {
-		return requireAuthorization
-	}
-
-	return false
-}
-
 // buildApprovalRequest 处理当前模块的相关逻辑。
 
 // buildApprovalRequest 构造统一的 approval_request 结构。
-func buildApprovalRequest(taskID string, taskIntent map[string]any, riskLevel string) map[string]any {
+func buildApprovalRequest(taskID string, taskIntent map[string]any, assessment execution.GovernanceAssessment) map[string]any {
 	arguments := mapValue(taskIntent, "arguments")
-	targetObject := stringValue(arguments, "target_path", "workspace_document")
+	targetObject := firstNonEmptyString(assessment.TargetObject, stringValue(arguments, "target_path", "workspace_document"))
 	if targetObject == "" {
 		targetObject = "workspace_document"
 	}
@@ -1801,10 +1782,10 @@ func buildApprovalRequest(taskID string, taskIntent map[string]any, riskLevel st
 	return map[string]any{
 		"approval_id":    fmt.Sprintf("appr_%s", taskID),
 		"task_id":        taskID,
-		"operation_name": firstNonEmptyString(stringValue(taskIntent, "name", ""), "write_file"),
-		"risk_level":     firstNonEmptyString(riskLevel, "red"),
+		"operation_name": firstNonEmptyString(assessment.OperationName, firstNonEmptyString(stringValue(taskIntent, "name", ""), "write_file")),
+		"risk_level":     firstNonEmptyString(assessment.RiskLevel, "red"),
 		"target_object":  targetObject,
-		"reason":         "policy_requires_authorization",
+		"reason":         firstNonEmptyString(assessment.Reason, "policy_requires_authorization"),
 		"status":         "pending",
 		"created_at":     time.Now().Format(dateTimeLayout),
 	}
@@ -1814,6 +1795,9 @@ func buildApprovalRequest(taskID string, taskIntent map[string]any, riskLevel st
 
 // buildImpactScope 构造最小影响范围摘要，用于授权结果回传和安全面板展示。
 func (s *Service) buildImpactScope(task runengine.TaskRecord, pendingExecution map[string]any) map[string]any {
+	if impactScope, ok := pendingExecution["impact_scope"].(map[string]any); ok && len(impactScope) > 0 {
+		return cloneMap(impactScope)
+	}
 	files := deriveImpactScopeFiles(task, pendingExecution, s.delivery)
 	workspacePath := workspacePathFromSettings(s.runEngine.Settings())
 	outOfWorkspace := false
@@ -1925,6 +1909,158 @@ func deliveryPreferenceFromStart(params map[string]any) (string, string) {
 func (s *Service) buildPendingExecution(task runengine.TaskRecord, taskIntent map[string]any) map[string]any {
 	plan := s.delivery.BuildApprovalExecutionPlan(task.TaskID, taskIntent)
 	return s.applyResolvedDeliveryToPlan(task, plan, taskIntent)
+}
+
+func (s *Service) applyGovernanceAssessment(plan map[string]any, assessment execution.GovernanceAssessment) map[string]any {
+	updatedPlan := cloneMap(plan)
+	if updatedPlan == nil {
+		updatedPlan = map[string]any{}
+	}
+	if len(assessment.ImpactScope) > 0 {
+		updatedPlan["impact_scope"] = cloneMap(assessment.ImpactScope)
+	}
+	if assessment.OperationName != "" {
+		updatedPlan["operation_name"] = assessment.OperationName
+	}
+	if assessment.TargetObject != "" {
+		updatedPlan["target_object"] = assessment.TargetObject
+	}
+	if assessment.RiskLevel != "" {
+		updatedPlan["risk_level"] = assessment.RiskLevel
+	}
+	if assessment.Reason != "" {
+		updatedPlan["risk_reason"] = assessment.Reason
+	}
+	updatedPlan["checkpoint_required"] = assessment.CheckpointRequired
+	return updatedPlan
+}
+
+func (s *Service) assessTaskGovernance(task runengine.TaskRecord, taskIntent map[string]any) (execution.GovernanceAssessment, bool, error) {
+	if s.executor == nil {
+		return execution.GovernanceAssessment{}, false, nil
+	}
+	resultTitle, _, _ := resultSpecFromIntent(taskIntent)
+	return s.executor.AssessGovernance(context.Background(), execution.Request{
+		TaskID:       task.TaskID,
+		RunID:        task.RunID,
+		Title:        task.Title,
+		Intent:       taskIntent,
+		Snapshot:     snapshotFromTask(task),
+		DeliveryType: resolveTaskDeliveryType(task, taskIntent),
+		ResultTitle:  resultTitle,
+	})
+}
+
+func (s *Service) handleTaskGovernanceDecision(task runengine.TaskRecord, taskIntent map[string]any) (runengine.TaskRecord, map[string]any, bool, error) {
+	assessment, ok, err := s.assessTaskGovernance(task, taskIntent)
+	if err != nil {
+		return task, nil, false, err
+	}
+	if !ok {
+		assessment, ok = s.fallbackGovernanceAssessment(task, taskIntent)
+		if !ok {
+			return task, nil, false, nil
+		}
+	}
+	if assessment.Deny {
+		response, blockedTask, blockErr := s.blockTaskByAssessment(task, assessment)
+		return blockedTask, response, true, blockErr
+	}
+	if !assessment.ApprovalRequired {
+		return task, nil, false, nil
+	}
+	pendingExecution := s.applyGovernanceAssessment(s.buildPendingExecution(task, taskIntent), assessment)
+	approvalRequest := buildApprovalRequest(task.TaskID, taskIntent, assessment)
+	bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "检测到待授权操作，请先确认。", task.UpdatedAt.Format(dateTimeLayout))
+	updatedTask, changed := s.runEngine.MarkWaitingApprovalWithPlan(task.TaskID, approvalRequest, pendingExecution, bubble)
+	if !changed {
+		return task, nil, false, ErrTaskNotFound
+	}
+	return updatedTask, map[string]any{
+		"task":            taskMap(updatedTask),
+		"bubble_message":  bubble,
+		"delivery_result": nil,
+	}, true, nil
+}
+
+func (s *Service) fallbackGovernanceAssessment(task runengine.TaskRecord, taskIntent map[string]any) (execution.GovernanceAssessment, bool) {
+	if stringValue(taskIntent, "name", "") != "write_file" && !boolValue(mapValue(taskIntent, "arguments"), "require_authorization", false) {
+		return execution.GovernanceAssessment{}, false
+	}
+	plan := s.buildPendingExecution(task, taskIntent)
+	impactScope := s.buildImpactScope(task, plan)
+	return execution.GovernanceAssessment{
+		OperationName:    firstNonEmptyString(stringValue(taskIntent, "name", ""), "write_file"),
+		TargetObject:     impactScopeTarget(impactScope, targetPathFromIntent(taskIntent)),
+		RiskLevel:        "red",
+		ApprovalRequired: true,
+		Reason:           "policy_requires_authorization",
+		ImpactScope:      impactScope,
+	}, true
+}
+
+func (s *Service) blockTaskByAssessment(task runengine.TaskRecord, assessment execution.GovernanceAssessment) (map[string]any, runengine.TaskRecord, error) {
+	bubbleText := governanceInterceptionBubble(assessment)
+	bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", bubbleText, task.UpdatedAt.Format(dateTimeLayout))
+	updatedTask, ok := s.runEngine.BlockTaskByPolicy(task.TaskID, assessment.RiskLevel, bubbleText, assessment.ImpactScope, bubble)
+	if !ok {
+		return nil, task, ErrTaskNotFound
+	}
+	auditRecord := s.writeGovernanceAuditRecord(updatedTask.TaskID, updatedTask.RunID, "risk", "intercept_operation", bubbleText, impactScopeTarget(assessment.ImpactScope, assessment.TargetObject), "denied")
+	updatedTask = s.appendAuditData(updatedTask, compactAuditRecords(auditRecord), nil)
+	return map[string]any{
+		"task":            taskMap(updatedTask),
+		"bubble_message":  bubble,
+		"delivery_result": nil,
+		"impact_scope":    cloneMap(assessment.ImpactScope),
+	}, updatedTask, nil
+}
+
+func (s *Service) writeGovernanceAuditRecord(taskID, runID, auditType, action, summary, target, result string) map[string]any {
+	if s.audit == nil {
+		return nil
+	}
+	if record, err := s.audit.Write(context.Background(), audit.RecordInput{
+		TaskID:  taskID,
+		Type:    auditType,
+		Action:  action,
+		Summary: summary,
+		Target:  target,
+		Result:  result,
+	}); err == nil {
+		return record.Map()
+	}
+	if record, err := s.audit.BuildRecord(audit.RecordInput{
+		TaskID:  taskID,
+		Type:    auditType,
+		Action:  action,
+		Summary: summary,
+		Target:  target,
+		Result:  result,
+	}); err == nil {
+		return record.Map()
+	}
+	return nil
+}
+
+func governanceInterceptionBubble(assessment execution.GovernanceAssessment) string {
+	switch assessment.Reason {
+	case risk.ReasonOutOfWorkspace:
+		return "目标超出工作区边界，已阻止本次操作。"
+	case risk.ReasonCommandNotAllowed:
+		return "命令存在高危风险，已被策略拦截。"
+	case risk.ReasonCapabilityDenied:
+		return "当前平台能力不可用，已阻止本次操作。"
+	default:
+		return "高风险操作已被策略拦截，未进入执行。"
+	}
+}
+
+func impactScopeTarget(impactScope map[string]any, fallback string) string {
+	if files := stringSliceValue(impactScope["files"]); len(files) > 0 {
+		return files[0]
+	}
+	return firstNonEmptyString(strings.TrimSpace(fallback), "main_flow")
 }
 
 // applyResolvedDeliveryToPlan 把任务级交付偏好解析结果回填到恢复执行计划中。
@@ -2195,34 +2331,26 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 	}
 
 	executionResult, err := s.executor.Execute(context.Background(), execution.Request{
-		TaskID:       processingTask.TaskID,
-		RunID:        processingTask.RunID,
-		Title:        processingTask.Title,
-		Intent:       taskIntent,
-		Snapshot:     snapshot,
-		DeliveryType: deliveryType,
-		ResultTitle:  resultTitle,
+		TaskID:          processingTask.TaskID,
+		RunID:           processingTask.RunID,
+		Title:           processingTask.Title,
+		Intent:          taskIntent,
+		Snapshot:        snapshot,
+		DeliveryType:    deliveryType,
+		ResultTitle:     resultTitle,
+		ApprovalGranted: processingTask.Authorization != nil,
 	})
+	processingTask = s.recordExecutionToolCalls(processingTask, executionResult.ToolCalls)
+	auditDeliveryResult := executionResult.DeliveryResult
 	if err != nil {
-		return runengine.TaskRecord{}, nil, nil, nil, fmt.Errorf("execute task %s: %w", processingTask.TaskID, err)
+		auditDeliveryResult = nil
 	}
-
-	for _, toolCall := range executionResult.ToolCalls {
-		if toolCall.ToolName == "" {
-			continue
-		}
-		if recordedTask, ok := s.runEngine.RecordToolCall(
-			processingTask.TaskID,
-			toolCall.ToolName,
-			toolCall.Input,
-			toolCall.Output,
-			toolCall.DurationMS,
-		); ok {
-			processingTask = recordedTask
-		}
-	}
-	executionAuditRecords, executionTokenUsage := s.buildExecutionAudit(processingTask, executionResult.ToolCalls, executionResult.DeliveryResult)
+	executionAuditRecords, executionTokenUsage := s.buildExecutionAudit(processingTask, executionResult.ToolCalls, auditDeliveryResult)
 	processingTask = s.appendAuditData(processingTask, executionAuditRecords, executionTokenUsage)
+	if err != nil {
+		failedTask, failureBubble := s.failExecutionTask(processingTask, taskIntent, executionResult, err)
+		return failedTask, failureBubble, nil, nil, nil
+	}
 
 	resultBubble := s.delivery.BuildBubbleMessage(
 		processingTask.TaskID,
@@ -2230,12 +2358,82 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		firstNonEmptyString(executionResult.BubbleText, resultBubbleText),
 		processingTask.UpdatedAt.Format(dateTimeLayout),
 	)
-	updatedTask, ok := s.runEngine.CompleteTask(processingTask.TaskID, executionResult.DeliveryResult, resultBubble, executionResult.Artifacts)
+	updatedTask, ok := s.runEngine.CompleteTask(processingTask.TaskID, executionResult.DeliveryResult, resultBubble, executionResult.Artifacts, executionResult.RecoveryPoint)
 	if !ok {
 		return runengine.TaskRecord{}, nil, nil, nil, ErrTaskNotFound
 	}
 	s.attachPostDeliveryHandoffs(updatedTask.TaskID, updatedTask.RunID, snapshot, taskIntent, executionResult.DeliveryResult, executionResult.Artifacts)
 	return updatedTask, resultBubble, executionResult.DeliveryResult, executionResult.Artifacts, nil
+}
+
+func (s *Service) recordExecutionToolCalls(task runengine.TaskRecord, toolCalls []tools.ToolCallRecord) runengine.TaskRecord {
+	for _, toolCall := range toolCalls {
+		if toolCall.ToolName == "" {
+			continue
+		}
+		if recordedTask, ok := s.runEngine.RecordToolCallLifecycle(
+			task.TaskID,
+			toolCall.ToolName,
+			string(toolCall.Status),
+			toolCall.Input,
+			toolCall.Output,
+			toolCall.DurationMS,
+			toolCallErrorCode(toolCall),
+		); ok {
+			task = recordedTask
+		}
+	}
+	return task
+}
+
+func toolCallErrorCode(toolCall tools.ToolCallRecord) any {
+	if toolCall.ErrorCode == nil {
+		return nil
+	}
+	return *toolCall.ErrorCode
+}
+
+func (s *Service) failExecutionTask(task runengine.TaskRecord, taskIntent map[string]any, executionResult execution.Result, err error) (runengine.TaskRecord, map[string]any) {
+	impactScope := s.buildImpactScope(task, task.PendingExecution)
+	bubbleText := executionFailureBubble(err)
+	securityStatus := "execution_error"
+	stepName := "execution_failed"
+	auditType := "execution"
+	auditAction := "execute_task"
+	auditTarget := impactScopeTarget(impactScope, targetPathFromIntent(taskIntent))
+	auditResult := "failed"
+	if errors.Is(err, execution.ErrRecoveryPointPrepareFailed) {
+		securityStatus = "execution_error"
+		stepName = "recovery_prepare_failed"
+		auditType = "recovery"
+		auditAction = "create_recovery_point"
+		auditTarget = impactScopeTarget(impactScope, stringValue(executionResult.RecoveryPoint, "summary", "workspace"))
+	}
+	bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", bubbleText, task.UpdatedAt.Format(dateTimeLayout))
+	updatedTask, ok := s.runEngine.FailTaskExecution(task.TaskID, stepName, securityStatus, bubbleText, impactScope, bubble, executionResult.RecoveryPoint)
+	if !ok {
+		return task, bubble
+	}
+	auditRecord := s.writeGovernanceAuditRecord(updatedTask.TaskID, updatedTask.RunID, auditType, auditAction, bubbleText, auditTarget, auditResult)
+	updatedTask = s.appendAuditData(updatedTask, compactAuditRecords(auditRecord), nil)
+	return updatedTask, bubble
+}
+
+func executionFailureBubble(err error) string {
+	switch {
+	case errors.Is(err, execution.ErrRecoveryPointPrepareFailed):
+		return "执行失败：执行前恢复点创建失败，请稍后重试。"
+	case errors.Is(err, tools.ErrWorkspaceBoundaryDenied):
+		return "执行失败：目标超出工作区边界，已阻止本次操作。"
+	case errors.Is(err, tools.ErrCommandNotAllowed):
+		return "执行失败：命令存在高危风险，已被策略拦截。"
+	case errors.Is(err, tools.ErrCapabilityDenied):
+		return "执行失败：当前平台能力不可用，请检查环境后重试。"
+	case errors.Is(err, tools.ErrToolExecutionFailed):
+		return "执行失败：工具运行失败，请检查环境后重试。"
+	default:
+		return "执行失败：请稍后重试。"
+	}
 }
 
 func (s *Service) buildExecutionAudit(task runengine.TaskRecord, toolCalls []tools.ToolCallRecord, deliveryResult map[string]any) ([]map[string]any, map[string]any) {
