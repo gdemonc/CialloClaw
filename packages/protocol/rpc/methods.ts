@@ -6,7 +6,9 @@ import type {
   Artifact,
   AuditRecord,
   BubbleMessage,
+  DeliveryPayload,
   DeliveryResult,
+  DeliveryType,
   ImpactScope,
   InputMode,
   InputType,
@@ -41,6 +43,8 @@ export const RPC_METHODS_STABLE = {
   AGENT_RECOMMENDATION_FEEDBACK_SUBMIT: "agent.recommendation.feedback.submit",
   AGENT_TASK_LIST: "agent.task.list",
   AGENT_TASK_DETAIL_GET: "agent.task.detail.get",
+  AGENT_TASK_ARTIFACT_LIST: "agent.task.artifact.list",
+  AGENT_TASK_ARTIFACT_OPEN: "agent.task.artifact.open",
   AGENT_TASK_CONTROL: "agent.task.control",
   AGENT_TASK_INSPECTOR_CONFIG_GET: "agent.task_inspector.config.get",
   AGENT_TASK_INSPECTOR_CONFIG_UPDATE: "agent.task_inspector.config.update",
@@ -55,6 +59,7 @@ export const RPC_METHODS_STABLE = {
   AGENT_SECURITY_RESTORE_APPLY: "agent.security.restore.apply",
   AGENT_SECURITY_PENDING_LIST: "agent.security.pending.list",
   AGENT_SECURITY_RESPOND: "agent.security.respond",
+  AGENT_DELIVERY_OPEN: "agent.delivery.open",
   AGENT_SETTINGS_GET: "agent.settings.get",
   AGENT_SETTINGS_UPDATE: "agent.settings.update",
 } as const;
@@ -63,9 +68,6 @@ export const RPC_METHODS_STABLE = {
 export const RPC_METHODS_PLANNED = {
   AGENT_SECURITY_AUDIT_LIST: "agent.security.audit.list",
   AGENT_MIRROR_MEMORY_MANAGE: "agent.mirror.memory.manage",
-  AGENT_TASK_ARTIFACT_LIST: "agent.task.artifact.list",
-  AGENT_TASK_ARTIFACT_OPEN: "agent.task.artifact.open",
-  AGENT_DELIVERY_OPEN: "agent.delivery.open",
 } as const;
 
 // RPC_METHODS 定义共享常量。

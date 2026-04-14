@@ -31,7 +31,18 @@ func (s *inMemoryArtifactStore) SaveArtifacts(_ context.Context, records []Artif
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, record := range records {
-		s.records = append(s.records, record)
+		replaced := false
+		for index, existing := range s.records {
+			if existing.ArtifactID != record.ArtifactID {
+				continue
+			}
+			s.records[index] = record
+			replaced = true
+			break
+		}
+		if !replaced {
+			s.records = append(s.records, record)
+		}
 	}
 	return nil
 }

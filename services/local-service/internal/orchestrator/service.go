@@ -33,6 +33,7 @@ import (
 // ErrTaskNotFound 表示调用方给出的 task_id 在当前运行态中不存在。
 var (
 	ErrTaskNotFound          = errors.New("task not found")
+	ErrArtifactNotFound      = errors.New("artifact not found")
 	ErrTaskStatusInvalid     = errors.New("task status invalid")
 	ErrTaskAlreadyFinished   = errors.New("task already finished")
 	ErrStorageQueryFailed    = errors.New("storage query failed")
@@ -456,7 +457,7 @@ func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 	return map[string]any{
 		"task":              taskMap(task),
 		"timeline":          timelineMap(task.Timeline),
-		"artifacts":         cloneMapSlice(task.Artifacts),
+		"artifacts":         s.artifactsForTask(task.TaskID, task.Artifacts),
 		"mirror_references": cloneMapSlice(task.MirrorReferences),
 		"security_summary":  securitySummary,
 	}, nil
@@ -470,17 +471,12 @@ func (s *Service) TaskArtifactList(params map[string]any) (map[string]any, error
 	if strings.TrimSpace(taskID) == "" {
 		return nil, errors.New("task_id is required")
 	}
-	items := s.artifactsForTask(taskID, nil)
-	total := len(items)
-	if offset >= total {
-		return map[string]any{"items": []map[string]any{}, "page": pageMap(limit, offset, total)}, nil
-	}
-	end := offset + limit
-	if limit <= 0 || end > total {
-		end = total
+	items, total, err := s.listArtifactsPage(taskID, limit, offset)
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{
-		"items": cloneMapSlice(items[offset:end]),
+		"items": cloneMapSlice(items),
 		"page":  pageMap(limit, offset, total),
 	}, nil
 }
@@ -495,15 +491,13 @@ func (s *Service) TaskArtifactOpen(params map[string]any) (map[string]any, error
 	if strings.TrimSpace(artifactID) == "" {
 		return nil, errors.New("artifact_id is required")
 	}
-	for _, artifact := range s.artifactsForTask(taskID, nil) {
-		if stringValue(artifact, "artifact_id", "") != artifactID {
-			continue
-		}
-		openResult := buildDeliveryOpenResult(cloneMap(artifact), nil, taskID)
-		openResult["artifact"] = cloneMap(artifact)
-		return openResult, nil
+	artifact, err := s.findArtifactForTask(taskID, artifactID)
+	if err != nil {
+		return nil, err
 	}
-	return nil, ErrTaskNotFound
+	openResult := buildDeliveryOpenResult(cloneMap(artifact), nil, taskID)
+	openResult["artifact"] = cloneMap(artifact)
+	return openResult, nil
 }
 
 // DeliveryOpen handles agent.delivery.open and resolves the final open action.
@@ -514,14 +508,13 @@ func (s *Service) DeliveryOpen(params map[string]any) (map[string]any, error) {
 	}
 	artifactID := stringValue(params, "artifact_id", "")
 	if strings.TrimSpace(artifactID) != "" {
-		for _, artifact := range s.artifactsForTask(taskID, nil) {
-			if stringValue(artifact, "artifact_id", "") == artifactID {
-				result := buildDeliveryOpenResult(cloneMap(artifact), nil, taskID)
-				result["artifact"] = cloneMap(artifact)
-				return result, nil
-			}
+		artifact, err := s.findArtifactForTask(taskID, artifactID)
+		if err != nil {
+			return nil, err
 		}
-		return nil, ErrTaskNotFound
+		result := buildDeliveryOpenResult(cloneMap(artifact), nil, taskID)
+		result["artifact"] = cloneMap(artifact)
+		return result, nil
 	}
 	task, ok := s.runEngine.GetTask(taskID)
 	if !ok {
@@ -2584,8 +2577,10 @@ func (s *Service) attachPostDeliveryHandoffs(taskID, runID string, snapshot cont
 	s.syncTaskWriteMirrorReferences(taskID, references, err)
 
 	storageWritePlan := s.delivery.BuildStorageWritePlan(taskID, deliveryResult)
+	artifacts = attachDeliveryResultToArtifacts(deliveryResult, artifacts)
 	artifactPlans := s.delivery.BuildArtifactPersistPlans(taskID, artifacts)
 	_, _ = s.runEngine.SetDeliveryPlans(taskID, storageWritePlan, artifactPlans)
+	s.persistArtifacts(taskID, artifactPlans)
 }
 
 // buildApprovalRequest 处理当前模块的相关逻辑。
@@ -2911,20 +2906,20 @@ func (s *Service) persistArtifacts(taskID string, artifactPlans []map[string]any
 	}
 	_ = s.storage.ArtifactStore().SaveArtifacts(context.Background(), records)
 	if task, ok := s.runEngine.GetTask(taskID); ok {
-		merged := mergeArtifactsWithStored(task.Artifacts, s.loadArtifactsFromStorage(taskID))
+		merged := mergeArtifactsWithStored(task.Artifacts, s.loadArtifactsFromStorage(taskID, 0, 0))
 		_, _ = s.runEngine.SetPresentation(taskID, task.BubbleMessage, task.DeliveryResult, merged)
 	}
 }
 
 func (s *Service) artifactsForTask(taskID string, runtimeArtifacts []map[string]any) []map[string]any {
-	return mergeArtifactsWithStored(runtimeArtifacts, s.loadArtifactsFromStorage(taskID))
+	return mergeArtifactsWithStored(runtimeArtifacts, s.loadArtifactsFromStorage(taskID, 0, 0))
 }
 
-func (s *Service) loadArtifactsFromStorage(taskID string) []map[string]any {
+func (s *Service) loadArtifactsFromStorage(taskID string, limit, offset int) []map[string]any {
 	if s.storage == nil || s.storage.ArtifactStore() == nil || strings.TrimSpace(taskID) == "" {
 		return nil
 	}
-	records, _, err := s.storage.ArtifactStore().ListArtifacts(context.Background(), taskID, 100, 0)
+	records, _, err := s.storage.ArtifactStore().ListArtifacts(context.Background(), taskID, limit, offset)
 	if err != nil {
 		return nil
 	}
@@ -2933,6 +2928,70 @@ func (s *Service) loadArtifactsFromStorage(taskID string) []map[string]any {
 		items = append(items, artifactMapFromStorage(record))
 	}
 	return items
+}
+
+func (s *Service) listArtifactsPage(taskID string, limit, offset int) ([]map[string]any, int, error) {
+	if s.storage != nil && s.storage.ArtifactStore() != nil {
+		records, total, err := s.storage.ArtifactStore().ListArtifacts(context.Background(), taskID, limit, offset)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%w: %v", ErrStorageQueryFailed, err)
+		}
+		if total > 0 {
+			items := make([]map[string]any, 0, len(records))
+			for _, record := range records {
+				items = append(items, artifactMapFromStorage(record))
+			}
+			return items, total, nil
+		}
+	}
+	items := s.artifactsForTask(taskID, nil)
+	total := len(items)
+	if offset >= total {
+		return []map[string]any{}, total, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return cloneMapSlice(items[offset:end]), total, nil
+}
+
+func (s *Service) findArtifactForTask(taskID, artifactID string) (map[string]any, error) {
+	if strings.TrimSpace(taskID) == "" {
+		return nil, ErrTaskNotFound
+	}
+	exists := false
+	if task, ok := s.runEngine.GetTask(taskID); ok {
+		exists = true
+		for _, artifact := range task.Artifacts {
+			if stringValue(artifact, "artifact_id", "") == artifactID {
+				return cloneMap(artifact), nil
+			}
+		}
+	}
+	if !exists {
+		if _, ok := s.taskDetailFromStorage(taskID); ok {
+			exists = true
+		}
+	}
+	if s.storage != nil && s.storage.ArtifactStore() != nil {
+		records, _, err := s.storage.ArtifactStore().ListArtifacts(context.Background(), taskID, 0, 0)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrStorageQueryFailed, err)
+		}
+		if len(records) > 0 {
+			exists = true
+		}
+		for _, record := range records {
+			if record.ArtifactID == artifactID {
+				return artifactMapFromStorage(record), nil
+			}
+		}
+	}
+	if !exists {
+		return nil, ErrTaskNotFound
+	}
+	return nil, ErrArtifactNotFound
 }
 
 func mergeArtifactsWithStored(runtimeArtifacts, storedArtifacts []map[string]any) []map[string]any {

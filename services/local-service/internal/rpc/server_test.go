@@ -434,6 +434,16 @@ func TestDispatchReturnsTaskArtifactOpen(t *testing.T) {
 	}
 }
 
+func TestDispatchMapsArtifactNotFoundErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, orchestrator.ErrArtifactNotFound)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1005002 || rpcErr.Message != "ARTIFACT_NOT_FOUND" {
+		t.Fatalf("expected ARTIFACT_NOT_FOUND mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
 func TestDispatchReturnsDeliveryOpenForArtifact(t *testing.T) {
 	server := newTestServer()
 	storageService := storage.NewService(platform.NewLocalStorageAdapter(filepath.Join(t.TempDir(), "delivery-open-artifact.db")))

@@ -272,6 +272,14 @@ func wrapOrchestratorResult(data any, err error) (any, *rpcError) {
 			TraceID: "trace_task_not_found",
 		}
 	}
+	if errors.Is(err, orchestrator.ErrArtifactNotFound) {
+		return nil, &rpcError{
+			Code:    1005002,
+			Message: "ARTIFACT_NOT_FOUND",
+			Detail:  err.Error(),
+			TraceID: "trace_artifact_not_found",
+		}
+	}
 	if errors.Is(err, orchestrator.ErrTaskStatusInvalid) {
 		return nil, &rpcError{
 			Code:    1001004,
