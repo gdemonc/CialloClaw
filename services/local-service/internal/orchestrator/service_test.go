@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools/builtin"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools/sidecarclient"
+	_ "modernc.org/sqlite"
 )
 
 // TestServiceStartTaskAndConfirmFlow 验证确认后的普通任务会继续执行并完成交付。
@@ -120,6 +122,20 @@ func timePointer(value time.Time) *time.Time {
 	return &value
 }
 
+func querySQLiteCount(t *testing.T, databasePath, query string, args ...any) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(query, args...).Scan(&count); err != nil {
+		t.Fatalf("query sqlite count failed: %v", err)
+	}
+	return count
+}
+
 func newTestServiceWithExecution(t *testing.T, modelOutput string) (*Service, string) {
 	return newTestServiceWithExecutionAndPlaywright(t, modelOutput, platform.LocalExecutionBackend{}, nil, sidecarclient.NewNoopPlaywrightSidecarClient())
 }
@@ -161,7 +177,7 @@ func newTestServiceWithExecutionAndPlaywright(t *testing.T, modelOutput string, 
 		intent.NewService(),
 		mustNewStoredEngine(t, storageService.TaskRunStore()),
 		deliveryService,
-		memory.NewService(),
+		memory.NewServiceFromStorage(storageService.MemoryStore(), storageService.Capabilities().MemoryRetrievalBackend),
 		risk.NewService(),
 		modelService,
 		toolRegistry,
@@ -2189,6 +2205,126 @@ func TestServiceMirrorOverviewUsesRuntimeMirrorReferences(t *testing.T) {
 	profile := result["profile"].(map[string]any)
 	if profile["preferred_output"] != "workspace_document" {
 		t.Fatalf("expected profile to infer workspace_document preference, got %v", profile["preferred_output"])
+	}
+}
+
+func TestServiceStartTaskWritesRealMemorySummary(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "交付结果里包含 project alpha 的关键结论。")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+
+	result, err := service.StartTask(map[string]any{
+		"session_id": "sess_memory_write",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请总结 project alpha 的进展",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+
+	taskID := result["task"].(map[string]any)["task_id"].(string)
+	record, ok := service.runEngine.GetTask(taskID)
+	if !ok {
+		t.Fatal("expected completed task to remain in runtime")
+	}
+	if len(record.MirrorReferences) == 0 {
+		t.Fatalf("expected real mirror reference after memory write, got %+v", record)
+	}
+	if !strings.HasPrefix(record.MirrorReferences[0]["memory_id"].(string), "memsum_") {
+		t.Fatalf("expected real memory summary id, got %+v", record.MirrorReferences)
+	}
+	if querySQLiteCount(t, service.storage.DatabasePath(), `SELECT COUNT(1) FROM memory_summaries WHERE task_id = ?`, taskID) != 1 {
+		t.Fatalf("expected one persisted memory summary for task %s", taskID)
+	}
+}
+
+func TestServiceStartTaskHitsRealMemoryAndRecordsRetrievalHit(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "输出延续了 project alpha markdown bullets 风格。")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+
+	err := service.memory.WriteSummary(context.Background(), memory.MemorySummary{
+		MemorySummaryID: "mem_seed_001",
+		TaskID:          "task_seed_001",
+		RunID:           "run_seed_001",
+		Summary:         "project alpha prefers markdown bullets and concise structure",
+		CreatedAt:       time.Date(2026, 4, 8, 10, 0, 0, 0, time.UTC).Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatalf("seed memory summary failed: %v", err)
+	}
+
+	result, err := service.StartTask(map[string]any{
+		"session_id": "sess_memory_hit",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请按 project alpha markdown bullets 总结这段内容",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+
+	taskID := result["task"].(map[string]any)["task_id"].(string)
+	record, ok := service.runEngine.GetTask(taskID)
+	if !ok {
+		t.Fatal("expected completed task to remain in runtime")
+	}
+	hitFound := false
+	writeFound := false
+	for _, reference := range record.MirrorReferences {
+		memoryID := reference["memory_id"]
+		if memoryID == "mem_seed_001" {
+			hitFound = true
+		}
+		if memoryIDString, ok := memoryID.(string); ok && strings.HasPrefix(memoryIDString, "memsum_") {
+			writeFound = true
+		}
+	}
+	if !hitFound || !writeFound {
+		t.Fatalf("expected both retrieval hit and writeback references, got %+v", record.MirrorReferences)
+	}
+	if querySQLiteCount(t, service.storage.DatabasePath(), `SELECT COUNT(1) FROM retrieval_hits WHERE task_id = ? AND memory_id = ?`, taskID, "mem_seed_001") != 1 {
+		t.Fatalf("expected persisted retrieval hit for task %s", taskID)
+	}
+	if querySQLiteCount(t, service.storage.DatabasePath(), `SELECT COUNT(1) FROM memory_summaries WHERE task_id = ?`, taskID) != 1 {
+		t.Fatalf("expected persisted memory summary for task %s", taskID)
+	}
+
+	mirrorResult, err := service.MirrorOverviewGet(map[string]any{})
+	if err != nil {
+		t.Fatalf("mirror overview failed: %v", err)
+	}
+	memoryReferences := mirrorResult["memory_references"].([]map[string]any)
+	seenSeed := false
+	for _, reference := range memoryReferences {
+		if reference["memory_id"] == "mem_seed_001" {
+			seenSeed = true
+			break
+		}
+	}
+	if !seenSeed {
+		t.Fatalf("expected mirror overview to expose real retrieval hit, got %+v", memoryReferences)
 	}
 }
 
