@@ -292,7 +292,6 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
           }
 
           void dragDropHandlersRef.current.handleDroppedFiles(event.payload.paths);
-          void emitShellBallInputRequestFocus(Date.now());
           return;
       }
     }).then((unlisten) => {
