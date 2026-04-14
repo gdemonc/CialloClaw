@@ -769,6 +769,16 @@ func (s *Service) SecuritySummaryGet() (map[string]any, error) {
 	_, pendingTotal := s.runEngine.PendingApprovalRequests(20, 0)
 	unfinishedTasks, _ := s.runEngine.ListTasks("unfinished", "updated_at", "desc", 0, 0)
 	finishedTasks, _ := s.runEngine.ListTasks("finished", "finished_at", "desc", 0, 0)
+	if len(unfinishedTasks) == 0 {
+		if persistedTasks, ok := s.listTasksFromStorage("unfinished", "updated_at", "desc", 0, 0); ok {
+			unfinishedTasks = persistedTasks
+		}
+	}
+	if len(finishedTasks) == 0 {
+		if persistedTasks, ok := s.listTasksFromStorage("finished", "finished_at", "desc", 0, 0); ok {
+			finishedTasks = persistedTasks
+		}
+	}
 	allTasks := append(append([]runengine.TaskRecord{}, unfinishedTasks...), finishedTasks...)
 	dataLogSettings := mapValue(s.runEngine.Settings(), "data_log")
 	latestRestorePoint := latestRestorePointFromTasks(allTasks)

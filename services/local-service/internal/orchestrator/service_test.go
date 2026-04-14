@@ -1814,6 +1814,62 @@ func TestServiceSecuritySummaryFallsBackToStoredRecoveryPoint(t *testing.T) {
 	}
 }
 
+func TestServiceSecuritySummaryFallsBackToStoredTaskRuns(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "stored security summary")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+
+	err := service.storage.TaskRunStore().SaveTaskRun(context.Background(), storage.TaskRunRecord{
+		TaskID:      "task_security_finished",
+		SessionID:   "sess_stored",
+		RunID:       "run_security_finished",
+		Title:       "stored security task",
+		SourceType:  "hover_input",
+		Status:      "completed",
+		CurrentStep: "deliver_result",
+		RiskLevel:   "yellow",
+		StartedAt:   time.Date(2026, 4, 14, 13, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 14, 13, 5, 0, 0, time.UTC),
+		FinishedAt:  timePointer(time.Date(2026, 4, 14, 13, 6, 0, 0, time.UTC)),
+		SecuritySummary: map[string]any{
+			"security_status": "recoverable",
+			"latest_restore_point": map[string]any{
+				"recovery_point_id": "rp_security_001",
+				"task_id":           "task_security_finished",
+				"summary":           "stored security recovery point",
+				"created_at":        "2026-04-14T13:06:00Z",
+				"objects":           []string{"workspace/security.md"},
+			},
+		},
+		TokenUsage: map[string]any{
+			"total_tokens":   88,
+			"estimated_cost": 0.42,
+		},
+	})
+	if err != nil {
+		t.Fatalf("save task run failed: %v", err)
+	}
+
+	result, err := service.SecuritySummaryGet()
+	if err != nil {
+		t.Fatalf("security summary failed: %v", err)
+	}
+
+	summary := result["summary"].(map[string]any)
+	if summary["security_status"] != "recoverable" {
+		t.Fatalf("expected storage-backed security status, got %+v", summary)
+	}
+	latestRestorePoint := summary["latest_restore_point"].(map[string]any)
+	if latestRestorePoint["recovery_point_id"] != "rp_security_001" {
+		t.Fatalf("expected storage-backed recovery point from task run, got %+v", latestRestorePoint)
+	}
+	tokenCostSummary := summary["token_cost_summary"].(map[string]any)
+	if tokenCostSummary["current_task_tokens"] != 88 {
+		t.Fatalf("expected storage-backed token usage, got %+v", tokenCostSummary)
+	}
+}
+
 func TestServiceDashboardModuleHighlightsIncludeAuditTrail(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "dashboard audit trail")
 
