@@ -1,824 +1,824 @@
-# Product Interaction Design Document
+# 产品交互设计汇总文档
 
-This document provides comprehensive interaction design specifications for the floating ball system, including interaction entry points, state management, and output mechanisms.
+# 悬浮球交互入口
 
----
+## 一、设计目标
 
-# Floating Ball Interaction Entry
+* 本产品的目标是降低用户与 Agent 协作时的表达门槛，减少对键盘输入和传统聊天框的依赖，优先通过通话、上下文感知和主动推荐承接用户需求。产品不以传统聊天框为主入口，而是强调 Agent 在任务现场的理解、判断和协助能力。用户与 Agent 的轻量对话优先通过悬浮球附近的气泡形式承接，而不是进入完整聊天界面。
 
-## 1. Design Goals
+* 产品希望解决的问题包括：
 
-* The product aims to lower the barrier for users to collaborate with Agent, reduce reliance on keyboard input and traditional chat boxes, and prioritize voice calls, context awareness, and proactive recommendations to handle user needs. The product does not use traditional chat boxes as the main entry point, but emphasizes Agent's ability to understand, judge, and assist at the task site. Lightweight conversations between users and Agent are primarily handled through bubbles near the floating ball, rather than entering a complete chat interface.
+  * 用户少打字
 
-* The product aims to solve the following problems:
+  * 用户少补上下文
 
-  * Reduce typing for users
-  
-  * Reduce context supplementation for users
-  
-  * Enable users to initiate collaboration at the current task site
-  
-  * Allow users to quickly understand what help Agent can currently provide without entering a heavy chat interface
+  * 用户在当前任务现场顺手发起协作
 
-## 2. Interaction Design Principles
+  * 用户不进入重聊天界面，也能快速理解 Agent 当前可提供的帮助
 
-### 2.1 Voice First, Text as Supplement
+## 二、交互设计原则
 
-* The product prioritizes voice calls for Agent collaboration to lower input barriers. Text input is retained but only as a supplementary capability, used when users cannot speak, recommendations are inaccurate, or precise command supplementation is needed.
+### 1. 通话优先，文字补充
 
-### 2.2 Context First, Chat Later
+* 产品优先通过通话与 Agent 协作，降低输入门槛。文字输入保留，但只作为补充能力，用于用户不便开麦、推荐不准确或需要精确补充一句指令的场景。
 
-* The product prioritizes understanding context at the current task site and helps users initiate collaboration through recommendations, hints, and lightweight handling, rather than using traditional chat boxes as the default main entry point.
+### 2. 上下文优先，聊天后置
 
-### 2.3 Lightweight Initiation, Structured Handling
+* 产品优先在当前任务现场理解上下文，并通过推荐、提示和轻量承接帮助用户发起协作，而不是把传统聊天框作为默认主入口。
 
-* Product interaction unfolds in layers. Users initiate needs at the lowest possible cost, and the system handles collaboration processes and results through a structured workbench.
+### 3. 轻量发起，结构化承接
 
-### 2.4 Low-Disturbance Triggering
+* 产品交互采用分层方式展开。用户以尽量低的成本发起需求，系统通过结构化工作台承接协作过程和结果。
 
-* Proactive recommendations and hints are based on the premise that users clearly approach the Agent entry point and have been active recently, rather than triggering globally based on stationary stays at arbitrary positions on the page.
+### 4. 低打扰触发
 
-## 3. Interaction Entry: Floating Ball
+* 主动推荐和提示建立在用户明确接近 Agent 入口、且近期处于活跃状态的前提上，不基于页面任意位置的静止停留进行全局触发。
 
-* The floating ball is the default persistent entry point, maintaining low presence and staying close to the user's current workflow. It is not a main interface that users need to specifically open, but a task site entry that is always reachable, low-friction, and low-disturbance. Overall interaction revolves around the floating ball.
+## 三、交互入口：悬浮球
 
-* The floating ball is both an operation entry and an anchor for users to perceive Agent availability. When users click, double-click, long-press, hover, or drag near the floating ball, they are essentially sending collaboration signals of different intensities to the system. Among them, left-click in standby state is a lightweight approach action used to express "I may need help."
+* 悬浮球是默认常驻入口，保持低存在感，贴近用户当前工作流。它不是一个需要用户专门打开的主界面，而是一个始终可触达、低摩擦、低打扰的任务现场入口。整体交互围绕悬浮球展开。
 
-## 4. Interaction Entries
+* 悬浮球既是操作入口，也是用户感知 Agent 可用性的锚点。用户单击、双击、长按、悬停、拖拽到悬浮球附近时，本质上都在向系统传递不同强度的协作信号。其中，待机状态下的左键单击属于一种轻量接近动作，用于表达"我可能需要帮助"。
 
-* Main interaction entries include:
+## 四、交互入口
 
-  * Left-click
-  
-  * Left double-click
-  
-  * Left long-press
-  
-  * Mouse hover
-  
-  * File drag
-  
-  * Text selection
+* 主要交互入口包括：
 
-* Notes:
+  * 左键单击
 
-  * Upward and downward swipes after left long-press are not independent interaction entries, but state control gestures during the call invocation process
-  
-  * Upward swipe is used to lock the call
-  
-  * Downward swipe is used to cancel the current call invocation
-  
-  * Floating ball click after text selection and text drag to the floating ball are subsequent trigger actions centered on the current text object
-  
-  * After file drag to the floating ball, it is a subsequent trigger action centered on the current file object
+  * 左键双击
 
-## 5. Functions Corresponding to Each Interaction Method
+  * 左键长按
 
-### 5.1 Left-click
+  * 鼠标悬停
 
-* Left-click serves different purposes in different states.
+  * 文件拖拽
 
-* When no event is triggered and the system is in default standby state, simple left-click is an action in standby mode. This action itself does not directly enter a heavy interaction flow, but serves as a lightweight signal that the user approaches the floating ball and expresses "I may need help."
+  * 文本选中
 
-* When the task object is already clear, left-click is mainly used to handle the floating ball interaction that has already entered an operable state, and no longer defaults to directly opening the dashboard.
+* 说明：
 
-* When the user has selected text or dragged the current task object to the floating ball, left-click can be used to continue initiating subsequent collaboration. After receiving the trigger, the system first enters the intent confirmation process, then executes the task according to the user's confirmed or corrected intent.
+  * 左键长按后的上滑和下滑不是独立交互入口，而是通话唤起过程中的状态控制手势
 
-### 5.2 Left Double-click
+  * 上滑用于锁定通话
 
-* Left double-click opens the dashboard.
+  * 下滑用于取消本次通话唤起
 
-### 5.3 Left Long-press
+  * 文本选中后的悬浮球点击与文本拖拽到悬浮球，属于围绕当前文本对象展开的后续触发动作
 
-* Left long-press is used to invoke voice call capability.
+  * 文件拖拽到悬浮球后，属于围绕当前文件对象展开的后续触发动作
 
-* This is the main expression method. Users do not need to enter a chat interface or organize complex prompts; they only need to hold the floating ball and naturally speak their needs to initiate collaboration.
+## 五、各交互方式对应功能
 
-* During left long-press, the following state controls are supported:
+### 1. 左键单击
 
-  * Upward swipe: Locks the current call state and enters continuous call mode
-  
-  * Downward swipe: Cancels the current call invocation and terminates the current input process
+* 左键单击在不同状态下承担不同作用。
 
-### 5.4 Mouse Hover
+* 在没有任何事件触发、系统处于默认待机状态时，左键单纯点击属于待机形态下的动作。该动作本身不直接进入重交互流程，而是作为用户接近悬浮球、表达"我可能需要帮助"的一种轻量信号。
 
-* After hovering over the floating ball for x seconds, a lightweight dialog box appears below the floating ball, allowing users to quickly supplement a text command. At the same time, the system can provide questions that users might want to ask based on the current context.
+* 在任务对象已明确的前提下，左键单击主要用于承接当前已进入可操作状态的悬浮球交互，不再默认直接打开仪表盘。
 
-* The hover layer handles two types of capabilities:
+* 当用户已选中文本，或已将当前任务对象拖拽至悬浮球后，左键单击可用于继续发起后续协作。系统在接收到触发后，会先进入意图确认流程，再根据用户确认或修正后的意图执行任务。
 
-  * User active input: Supplement a need through lightweight input, and support uploading local files via the "attach file" button
-  
-  * System proactive recommendation: Provide possible questions based on the current context
+### 2. 左键双击
 
-### 5.5 File Drag
+* 鼠标左键双击可打开仪表盘。
 
-* Users can directly drag files to the floating ball to initiate collaboration centered on that file.
+### 3. 左键长按
 
-* File drag is used to explicitly set the current file as the task object. After receiving the file, the system first performs necessary file parsing, then enters the intent confirmation process, and executes the task according to the user's confirmed or corrected intent.
+* 左键长按用于唤起通话能力。
 
-* Applicable scenarios include:
+* 这是主要表达方式。用户无需进入聊天界面，也无需组织复杂 prompt，只需要按住悬浮球并自然说出需求，即可发起协作。
 
-  * Analysis
-  
-  * Summary
-  
-  * Extraction
-  
-  * Rewrite
-  
-  * Explanation
+* 在左键长按过程中，支持以下状态控制：
 
-### 5.6 Text Selection
+  * 上滑：锁定当前通话状态，进入持续通话模式
 
-* When a user selects a segment of text on the current page, the system identifies that text as the current most explicit local task object.
+  * 下滑：取消本次通话唤起，终止当前输入过程
 
-* After text is selected, the floating ball enters an operable prompt state, reminding the user that they can immediately initiate collaboration centered on that segment. Users can enter the intent confirmation process by clicking the floating ball or dragging the selected text to the floating ball.
+### 4. 鼠标悬停
 
-* Specific visual style to be determined by subsequent visual design.
+* 鼠标悬停在悬浮球x秒后，悬浮球下方出现一个轻量对话框，方便用户快速补充一句文字指令。与此同时，系统可基于当前上下文提供用户可能想问的问题。
 
-* Applicable scenarios include:
+* 悬停层承担两类能力：
 
-  * Questions centered on local content
-  
-  * Explanation
-  
-  * Polish
-  
-  * Translation
-  
-  * Summary
-  
-  * Extension
+  * 用户主动输入：通过轻量输入补充一句需求，并支持通过"附加文件"按钮上传本地文件
 
-## 6. Interaction Layers
+  * 系统主动推荐：基于当前上下文提供可能想问的问题
 
-### Layer 1: Floating Ball
+### 5. 文件拖拽
 
-* Default persistent entry, low presence, always close to the task site.
+* 用户可将文件直接拖拽至悬浮球，以发起围绕该文件的协作。
 
-### Layer 2: Voice Expression
+* 文件拖拽用于将当前文件明确设定为任务对象。系统接收到文件后，会先进行必要的文件解析，再进入意图确认流程，并根据用户确认或修正后的意图执行任务。
 
-* Mainly through left long-press, as the main expression method. Users can lock calls through upward swipe after invocation and cancel the current input through downward swipe.
+* 适用场景包括：
 
-### Layer 3: Lightweight Handling and Intent Confirmation
+  * 分析
 
-* When users hover, click the floating ball after selecting text, or drag text/files to the floating ball, the system enters the lightweight handling layer.
+  * 总结
 
-* This layer handles two types of capabilities:
+  * 提炼
 
-  * Handling user brief supplementation through the lightweight dialog box below the floating ball
-  
-  * Analyzing, confirming, and correcting user intent through the bubble above the floating ball and the lightweight dialog box below before formal execution
+  * 改写
 
-### Layer 4: Dashboard Handling
+  * 解释
 
-* Left double-click opens the dashboard.
+### 6. 文本选中
 
-## 7. Detailed Interaction Instructions
+* 当用户在当前页面中选中一段文本时，系统将该文本识别为当前最明确的局部任务对象。
 
-### 7.1 Call Mode
+* 文本被选中后，悬浮球进入可操作提示态，提示用户可立即围绕该段内容发起协作。用户可通过点击悬浮球或将选中文本拖拽至悬浮球，进入意图确认流程。
 
-* In call mode, Agent monitors the user's screen usage dynamics in real-time and combines user language with screen behavior for understanding.
+* 具体视觉样式待后续视觉设计确定。
 
-* After the user invokes call capability through left long-press, different gestures can control the current state:
+* 适用场景包括：
 
-  * Keep holding: Short expression, ends this input after release
-  
-  * Upward swipe lock: Enters continuous call mode, suitable for continuous expression, background supplementation, or multi-round follow-up questions
-  
-  * Downward swipe cancel: Abandons this input and does not enter subsequent processing
+  * 围绕局部内容提问
 
-* Scenario descriptions:
+  * 解释
 
-  * **Mouse hover or highlight and dictate needs**: When the user hovers or highlights a segment and says something like "help me organize," Agent identifies the paragraph where the mouse is located from the full screenshot and responds based on that segment.
-  
-  * **Multiple scattered segments**: Users can speak and click simultaneously. Agent combines the user's speaking time with multiple screenshots to identify the paragraph where the mouse is and respond.
-  
-  * **Drag rich text**: When the user drags rich text and says "please help me analyze/summarize" to Agent, Agent parses the current rich text content and responds.
-  
-  * **Can be interrupted at any time**: When Agent is responding, users can interrupt at any time and supplement needs. Call mode is not one-way execution; users should be allowed to continue correcting, supplementing, or modifying task requirements during the response process.
+  * 润色
 
-### 7.2 Hover Mode
+  * 翻译
 
-* After the user hovers over the floating ball for x seconds, Agent obtains the current interface content through screenshots or other screen perception methods and displays a lightweight dialog box below the floating ball. At the same time, the system can propose several possible questions based on the current context.
+  * 总结
 
-* Hover mode includes two types of capabilities:
+  * 延展
 
-  * User active input: Quickly supplement a need through the lightweight dialog box below the floating ball, and support uploading local files via the "attach file" button
-  
-  * System proactive recommendation: Provide possible questions based on the current context
+## 六、交互分层
 
-* Proactive recommendation defaults to triggering only when the user hovers over the floating ball, not triggering globally based on stationary stays at arbitrary positions on the page.
+### 第 1 层：悬浮球
 
-### 7.3 Proactive Recommendation Strategy in Non-Call Mode
+* 默认常驻入口，低存在感，始终贴近任务现场。
 
-* In non-call mode, proactive recommendation is not only used to help users quickly initiate collaboration but also serves to moderately establish Agent presence.
+### 第 2 层：通话表达
 
-* Trigger principles:
+* 以左键长按为主，作为主要表达方式。用户可在唤起后通过上滑锁定通话，通过下滑取消本次输入。
 
-  * Trigger only when the user has been active recently
-  
-  * Trigger only when the mouse hovers over the floating ball
-  
-  * Do not trigger at fixed frequency unconditionally
-  
-  * Do not trigger when stationary for a long time, inactive, or when the desktop has no changes
+### 第 3 层：轻量承接与意图确认
 
-* Suggested trigger conditions:
+* 当用户悬停、选中文本后点击悬浮球，或将文本、文件拖拽至悬浮球时，系统进入轻量承接层。
 
-  * Currently in non-call mode
-  
-  * Mouse has hovered over the floating ball for several seconds
-  
-  * User has had interaction behavior in the last 1 to 2 minutes
-  
-  * Current desktop content or task context has perceivable information
-  
-  * Minimum cooldown time has passed since the last proactive recommendation
+* 这一层负责两类能力：
 
-* Suggested non-trigger conditions:
+  * 通过悬浮球下方轻量对话框承接用户的简短补充
 
-  * Mouse has stayed for a long time but the user has no continuous operation
-  
-  * Desktop content has not changed for a long time
-  
-  * User has left the device or is obviously inactive
-  
-  * Recommendation has just been triggered and is still in cooldown period
+  * 在正式执行前，通过悬浮球上方气泡和下方轻量对话框对用户意图进行分析、确认和修正
 
-### 7.4 Other Interactions in Non-Call Mode
+### 第 4 层：仪表盘承接
 
-* In non-call mode, users mainly initiate collaboration through the following methods:
+* 鼠标左键双击可打开仪表盘。
 
-  * Hover recommendation
-  
-  * Lightweight text input
-  
-  * File drag
-  
-  * Text selection
+## 七、详细交互说明
 
-* In this mode, the hover handling layer is more critical; it is responsible not only for handling user lightweight expression but also for moderately reducing the barrier to initiating tasks through appropriate recommendations.
+### 7.1 通话模式
 
-### 7.5 Intent Confirmation Process Based on Text or File
+* 通话模式下，Agent 实时监听用户使用屏幕的动态，并结合用户语言与屏幕行为进行理解。
 
-* When the user selects text or drags a file to the floating ball, the system identifies the corresponding content as the current task object and enters the intent confirmation process.
+* 用户通过左键长按唤起通话能力后，可通过不同手势控制当前状态：
 
-* For text scenarios, the floating ball enters an operable prompt state, reminding the user that they can continue to initiate collaboration centered on that segment. Specific visual style to be determined by subsequent visual design.
+  * 保持按住：短时表达，松开后结束本轮输入
 
-* For file scenarios, the system can first complete basic parsing, then enter intent judgment combining file content with current context.
+  * 上滑锁定：进入持续通话模式，适用于连续表达、补充背景或多轮追问
 
-* After receiving the trigger, the system does not directly return results but first performs intent analysis combining the task object with current context, judging what task type and output method the user is more likely to want to execute.
+  * 下滑取消：放弃本次输入，不进入后续处理流程
 
-* Feedback structure is as follows:
+* 场景说明：
 
-  * **Bubble above floating ball**: As a lightweight conversation handling area between user and Agent, used to display the system's judgment of user intent, confirmed replies, and subsequent lightweight results
-  
-  * **Dialog box below floating ball**: As a lightweight input and control area, used to display confirmation buttons and allow users to input corrected intent
+  * **鼠标悬停或标亮并口述需求**：当用户鼠标悬停或标亮某一段内容，并说出"帮我整理"之类的话时，Agent 从全屏截图中识别鼠标所在段落，并基于该段内容作出回应。
 
-* If the user clicks confirm, the system executes according to the current judgment; if the user inputs corrected intent, the system executes according to the new intent. Execution results continue to be presented in the bubble.
+  * **多段零散内容**：用户可以边说边点。Agent 结合用户说话时间与多次截图，识别鼠标所在段落，并作出回应。
 
-* When the output content in the bubble is too long and not suitable for complete display in the bubble, the system automatically saves the results to a workspace document and automatically opens that document for the user to view.
+  * **拖拽富文本**：当用户拖拽富文本，并对 Agent 说"请帮我分析 / 总结"时，Agent 解析当前富文本内容，并作出回应。
 
-## 8. Dashboard Handling
+  * **可被随时打断**：当 Agent 正在回应时，用户可以随时打断并补充需求。通话模式不是单向执行，应允许用户在回应过程中继续纠偏、补充或修改任务要求。
 
-* This product does not adopt the mode of "both input and output completed in the traditional chat box." Lightweight conversations, intent confirmation, and immediate results are primarily handled through bubbles near the floating ball and the lightweight operation area below; when users need to enter a more complete work interface, they can open the dashboard by left double-clicking.
+### 7.2 悬停模式
 
-## 9. Interaction Summary
+* 当用户鼠标悬停在悬浮球x秒后，Agent 通过截图等屏幕感知方式获取当前界面内容，并在悬浮球下方展示轻量对话框。同时，系统可基于当前上下文提出若干可能的问题。
 
-* Overall interaction logic is as follows:
+* 悬停模式包含两类能力：
 
-  * Floating ball is the default entry
-  
-  * When no event is triggered, left-click is a lightweight action in standby mode
-  
-  * Voice call is the main expression method
-  
-  * Left long-press is responsible for invoking voice call
-  
-  * Upward swipe is used to lock the call
-  
-  * Downward swipe is used to cancel the call
-  
-  * Mouse hover provides lightweight input and proactive recommendation
-  
-  * After text selection, the floating ball enters an operable prompt state
-  
-  * Users can initiate collaboration by clicking the floating ball, dragging text to the floating ball, or dragging files to the floating ball
-  
-  * Lightweight conversations between users and Agent are primarily handled through bubbles above the floating ball
-  
-  * The dialog box below the floating ball is mainly used for lightweight input, confirmation, and modification
-  
-  * The system first performs intent analysis, then completes confirmation or correction through the bubble and dialog box below
-  
-  * Left double-click opens the dashboard
+  * 用户主动输入：通过悬浮球下方轻量对话框快速补充一句需求，并支持通过"附加文件"按钮上传本地文件
 
----
+  * 系统主动推荐：基于当前上下文提供可能想问的问题
 
-# Floating Ball Other Interaction States
+* 主动推荐默认仅在用户悬停于悬浮球上时触发，不基于页面任意位置的静止停留进行全局触发。
 
-This document supplements the description of mechanisms that **do not belong to the product's explicit interaction entries** but affect the floating ball's presence, proactive reminders, intent handling, and overall experience rhythm.
+### 7.3 非通话模式下的主动推荐策略
 
-These contents are not listed alongside explicit entries such as left-click, double-click, long-press, mouse hover, file drag, and text selection, but exist as a set of **auxiliary judgment and presentation mechanisms** to make the system's behavior more natural, restrained, and continuous in different states.
+* 在非通话模式下，主动推荐不仅用于帮助用户快速发起协作，也承担适度建立 Agent 存在感的作用。
 
-## 1. State Judgment Supplement
+* 触发原则：
 
-To control reminder rhythm and presentation intensity, the system needs to first judge the current state before deciding whether to remind and how to remind.
+  * 仅在用户近期处于活跃状态时触发
 
-### 1.1 Static Mode
+  * 仅在鼠标悬停于悬浮球上时触发
 
-When the mouse stays on the desktop for a long time, the position has no obvious changes for a long time, desktop content remains stable, and the user has no new keyboard, mouse, or other interaction behavior, the system can consider that it has entered static mode.
+  * 不做固定频率、无条件触发
 
-Static mode is not equivalent to the user leaving the device, nor is it equivalent to the user having no needs. It is more suitable as a conservative judgment to prompt the system that the current proactive disturbance tendency should be reduced.
+  * 长时间静止、不活跃、桌面无变化时不触发
 
-In static mode, it is suggested to:
+* 建议触发条件：
 
-* Reduce reminder frequency
+  * 当前处于非通话模式
 
-* Reduce reminder intensity
+  * 鼠标悬停在悬浮球上达到若干秒
 
-* Extend the cooldown time for the next proactive reminder
+  * 用户在最近 1 到 2 分钟内存在交互行为
 
-* Avoid repeatedly triggering the same type of reminder
+  * 当前桌面内容或任务上下文具有可感知信息
 
-### 1.2 Active Stay State
+  * 距离上一次主动推荐已超过最小冷却时间
 
-If the user has continuous behavior recently, even if staying in a certain position for several seconds, it should not be directly judged as static mode, but should be understood that the user may be reading, thinking, or observing the current content.
+* 建议不触发条件：
 
-In this case, the floating ball can moderately refresh its presence once, but should not use high-intensity, continuous reminder methods.
+  * 鼠标长期停留但用户无持续操作
 
-### 1.3 Operable State
+  * 桌面内容长时间无变化
 
-When the system has identified an explicit task object, such as the user has selected text, dragged in a file, or formed an explicit context, the system can enter an operable state.
+  * 用户已离开设备或明显不活跃
 
-Operable state is not equivalent to the system executing a task, but indicates that conditions for continuing to handle collaboration currently exist. At this time, the floating ball can remind the user to continue operating through lightweight prompts.
+  * 刚刚已经触发过推荐，仍在冷却期内
 
-## 2. Proactive Reminder Supplement
+### 7.4 非通话模式下的其他交互
 
-The floating ball's proactive reminders should follow the principle of being **lightweight, ignorable, and non-interrupting**. Its goal is not to require users to interact immediately, but to make users aware that:
+* 非通话模式下，用户主要通过以下方式发起协作：
 
-* Agent can currently provide help
+  * 悬停推荐
 
-* Current content may be able to continue processing
+  * 轻量文字输入
 
-* Users can initiate collaboration at any time when needed
+  * 文件拖拽
 
-### 2.1 Reminder Dimensions
+  * 文本选中
 
-Proactive reminder capability is suggested to be split into two adjustable variables:
+* 在这一模式下，悬停承接层更关键，它既负责承接用户轻量表达，也负责通过适度推荐降低发起任务的门槛。
 
-* **Reminder level**: The degree of prominence and presence strength of the reminder method
+### 7.5 基于文本或文件的意图确认流程
 
-* **Reminder frequency**: The number of times and intervals between proactive reminders
+* 当用户选中文本，或将文件拖拽至悬浮球后，系统将对应内容识别为当前任务对象，并进入意图确认流程。
 
-The system should not use the same set of reminder strategies for a long time, but should allow short-term adjustment and long-term adaptation to coexist.
+* 对于文本场景，悬浮球进入可操作提示态，提示用户可继续围绕该段内容发起协作。具体视觉样式待后续视觉设计确定。
 
-### 2.2 Short-term Adjustment
+* 对于文件场景，系统可先完成基础解析，再结合文件内容与当前上下文进入意图判断。
 
-In the short term, the floating ball can use default reminder level and reminder frequency. Users can input thoughts through the dialog box below the floating ball, express positive or negative feedback, and quickly adjust the current reminder strategy. Adjustable directions include:
+* 系统接收到触发后，不直接返回结果，而是先结合任务对象与当前上下文进行意图分析，判断用户更可能希望执行的任务类型与输出方式。
 
-* Increase reminder level
+* 反馈结构如下：
 
-* Decrease reminder level
+  * **悬浮球上方气泡**：作为用户与 Agent 的轻量对话承接区域，用于展示系统对用户意图的判断、确认后的回复，以及后续轻量结果
 
-* Increase reminder frequency
+  * **悬浮球下方对话框**：作为轻量输入与控制区域，用于展示确认按钮，并允许用户输入修正后的意图
 
-* Decrease reminder frequency
+* 若用户点击确认，系统按照当前判断执行；若用户输入修正后的意图，系统按照新的意图执行。执行后的结果继续呈现在气泡中。
 
-The goal of short-term adjustment is quick correction, making the system closer to the user's acceptance range for disturbance level in the current stage.
+* 当气泡中的输出内容较长、不适合在气泡内完整展示时，系统自动将结果保存到工作区文档中，并自动打开该文档供用户查看。
 
-### 2.3 Long-term Adaptation
+## 八、仪表盘承接
 
-In the long-term use process, the floating ball can gradually adjust reminder level and reminder frequency based on mirror memory user profile and historical feedback. Long-term signals that can be referenced include:
+* 本产品不采用"输入和输出都在传统聊天框里完成"的模式。轻量对话、意图确认与即时结果优先通过悬浮球附近的气泡和下方轻量操作区承接；当用户需要进入更完整的工作界面时，可通过鼠标左键双击打开仪表盘。
 
-* Whether users frequently respond to proactive reminders
+* 详见：仪表盘细节[[ 仪表盘展示文档](https://lcnj4x9egfg0.feishu.cn/wiki/IwdzwWyZ5iIuquk0kagcLhmwndg?from=from_copylink)](https://lcnj4x9egfg0.feishu.cn/wiki/IwdzwWyZ5iIuquk0kagcLhmwndg?from=from_copylink)
 
-* Whether users frequently ignore proactive reminders
+## 九、交互总结
 
-* User positive and negative feedback on reminders
+* 整体交互逻辑如下：
 
-* User acceptance level for reminders in different task scenarios
+  * 悬浮球是默认入口
 
-* User overall collaboration preference and disturbance tolerance
+  * 在无事件触发时，左键单击属于待机形态下的轻量动作
 
-The goal of long-term adaptation is to form a reminder strategy that better fits personal preferences, rather than always relying on uniform default values.
+  * 通话是主要表达方式
 
-## 3. Floating Ball Form Design
+  * 左键长按负责唤起通话
 
-The floating ball should not always maintain a single visual state, but should switch between different forms according to **system state** and **current handling object**, allowing users to quickly understand:
+  * 上滑用于锁定通话
 
-* Whether it is currently available
+  * 下滑用于取消通话
 
-* What the system is doing
+  * 鼠标悬停提供轻量输入与主动推荐
 
-* Whether user attention is needed
+  * 文本选中后，悬浮球进入可操作提示态
 
-* What type of input is currently being mainly handled
+  * 用户可通过点击悬浮球、将文本拖拽到悬浮球，或将文件拖拽到悬浮球来发起协作
 
-It is suggested to split the form into two layers:
+  * 用户与 Agent 的轻量对话优先通过悬浮球上方气泡承接
 
-* **System state form**: Expresses the overall stage the system is currently in
+  * 悬浮球下方对话框主要用于轻量输入、确认与修改
 
-* **Interaction handling form**: Expresses the input type or task object the system is currently handling
+  * 系统先做意图分析，再通过气泡与下方对话框完成确认或修正
 
-The two layers can coexist, but at the same moment, there should always be one main state that is clearly perceivable.
+  * 鼠标左键双击可打开仪表盘
 
-### 3.1 System State Forms
 
-It is suggested to unify and converge into the following categories:
 
-#### Standby Form
 
-Indicates that the system is currently in default available state, with no ongoing tasks and no matters that require immediate user attention. This form should have low presence, not proactively disturb, be easy to identify, and be able to enter interaction at any time. It is also the default fallback state after other states end.
 
-#### Invocable Form
+# 悬浮球其他交互状态
 
-When the user approaches the floating ball, hovers near the floating ball, or the system judges that the user is currently in an active state that can be lightly handled, the floating ball can enter an invocable form. This form is used to remind the user that they can currently continue to click, input, long-press, or drag, but overall should remain restrained.
+本文档用于补充说明那些**不属于产品显式交互入口**、但会影响悬浮球存在感、主动提醒、意图承接与整体体验节奏的机制。
 
-#### Handling Form
+这些内容不与左键单击、双击、长按、鼠标悬停、文件拖拽、文本选中等显式入口并列，而是作为一套**辅助判断与表现机制**存在，用于让系统在不同状态下的行为更自然、更克制、更连续。
 
-When the user has started inputting or has provided a task object, the floating ball enters a handling form. This type of state can cover voice listening, text selection, text drag, file drag, and other scenarios, used to express that the system has started receiving current input.
+## 一、状态判断补充
 
-#### Intent Confirmation Form
+为了控制提醒节奏与表现强度，系统需要先判断当前所处状态，再决定是否提示、如何提示。
 
-When the system has identified the task object but still needs to confirm what the user really wants to do, the floating ball should enter an intent confirmation form. This state emphasizes that the current focus is not on direct execution, but on confirming intent.
+### 1. 静态模式
 
-#### Processing Form
+当鼠标在桌面停留较长时间、位置长期无明显变化、桌面内容持续稳定，且用户没有新的键盘、鼠标或其他交互行为时，系统可认为当前进入静态模式。
 
-When the system has received the task and is parsing context, understanding needs, or executing processing, the floating ball should switch to a processing form. This form is used to remind that the task has been successfully received and the system is continuing to advance.
+静态模式不等同于用户离开设备，也不等同于用户没有需求。它更适合作为一种保守判断，用于提示系统当前应降低主动打扰倾向。
 
-#### Waiting for Confirmation Form
+静态模式下建议：
 
-When the system has given intent judgment, result suggestion, or pending items but has not yet received user feedback, the floating ball can enter a waiting for confirmation form. This state reminds that the process has not yet ended, and the next step depends on user confirmation, modification, or ignoring.
+* 降低提醒频率
 
-#### Completed Form
+* 降低提醒强度
 
-When the system has completed the current task and has results to display or can enter the next action, the floating ball enters a completed form. This form can moderately increase presence for a short time, but should not be maintained for a long time, and should fall back at an appropriate time.
+* 延长下一次主动提醒的冷却时间
 
-#### Exception Form
+* 避免重复触发相同类型提示
 
-When task execution fails, understanding is abnormal, the process is interrupted, or current capability is temporarily unavailable, the floating ball enters an exception form. The focus of exception form is not simply to remind of failure, but to help users understand why it did not continue to complete, and whether retry, supplementation, method switching, or waiting for environment recovery is needed next.
+### 2. 活跃停留状态
 
-### 3.2 Interaction Handling Forms
+如果用户在近期持续有行为发生，即使在某一位置停留数秒，也不应直接判定为静态模式，而应理解为用户可能正在阅读、思考或观察当前内容。
 
-Interaction handling forms are used to express what type of input the system is currently mainly handling. It is suggested to unify into the following categories:
+在这种情况下，悬浮球可以适度刷一次存在感，但不应采用高强度、连续性的提醒方式。
 
-* Hover handling
+### 3. 可操作状态
 
-* Text selection handling
+当系统已识别到明确任务对象，例如用户已选中文本、已拖入文件或已形成明确上下文时，系统可进入可操作状态。
 
-* Text drag handling
+可操作状态不等于系统正在执行任务，而是表示当前已经具备继续承接协作的条件。此时悬浮球可通过轻量提示提醒用户继续操作。
 
-* File drag handling
+## 二、主动提醒补充
 
-* Voice handling
+悬浮球的主动提醒应以**轻量、可忽略、不打断**为原则。其目标不是要求用户立即互动，而是让用户意识到：
 
-* Recommendation handling
+* Agent 当前可提供帮助
 
-* Result handling
+* 当前内容可能可以继续处理
 
-The purpose of these forms is not to establish an independent state machine for each, but to provide context information for the system state, helping users quickly understand the current handling object.
+* 用户可以在需要时随时发起协作
 
-### 3.3 Combination Principles
+### 1. 提醒维度
 
-System state forms and interaction handling forms can appear in combination, for example:
+主动提醒能力建议拆分为两个可调变量：
 
-* Standby form + no handling
+* **提醒等级**：提示方式的显著程度与存在感强弱
 
-* Handling form + voice handling
+* **提醒频率**：主动提示出现的次数与间隔
 
-* Intent confirmation form + text selection handling
+系统不应长期固定使用同一组提醒策略，而应允许短期调节与长期自适应并存。
 
-* Processing form + file drag handling
+### 2. 短期调节
 
-* Completed form + result handling
+在短期内，悬浮球可使用默认提醒等级与提醒频率。  用户可通过悬浮球下方对话框输入感想，表达正反馈或负反馈，对当前提醒策略进行快速调整。可调方向包括：
 
-* Waiting for confirmation form + recommendation handling
+* 提高提醒等级
 
-Through this combination method, it is possible to avoid designing a completely independent new state for each fragmented scenario.
+* 降低提醒等级
 
-### 3.4 Switching Principles
+* 提高提醒频率
 
-Switching between different floating ball forms should follow the following principles:
+* 降低提醒频率
 
-* State meaning is clear, users can quickly understand
+短期调节的目标是快速纠偏，使系统在当前阶段更贴近用户对打扰程度的接受范围。
 
-* Only one main state is expressed at the same moment, avoiding mixing
+### 3. 长期自适应
 
-* Form switching has clear correspondence with user actions or system stages
+在长期使用过程中，悬浮球可基于 镜子记忆 用户画像与历史反馈，逐步调节提醒等级与提醒频率。可参考的长期信号包括：
 
-* Maintain naturalness when falling back from strong state to weak state
+* 用户是否经常响应主动提示
 
-* Do not frequently flash due to fragmented state changes
+* 用户是否经常忽略主动提示
 
-* Visual changes serve state understanding, not simply creating presence
+* 用户对提示的正负反馈情况
 
-## 4. Handling Logic for Different Interaction Methods
+* 用户在不同任务场景下对提醒的接受程度
 
-Although different interaction methods have different trigger methods, the overall logic should be unified: **First identify the input object, then judge whether intent confirmation is needed, then enter processing or result handling.**
+* 用户整体协作偏好与打扰容忍度
 
-### 4.1 Voice Recognition
+长期自适应的目标，是形成更符合个人偏好的提醒策略，而不是始终依赖统一默认值。
 
-When the user initiates a call through left long-press or enters continuous call mode, the floating ball should present a voice handling related form. This form needs to clearly express:
+## 三、悬浮球形态设计
 
-* The system is listening
+悬浮球不应始终保持单一视觉状态，而应根据**系统状态**与**当前承接对象**切换不同形态，让用户快速理解：
 
-* Current input method is voice
+* 当前是否可用
 
-* User can continue speaking or end current input
+* 系统正在做什么
 
-Voice scenarios can include the following stages:
+* 是否需要用户关注
 
-* Ready to receive
+* 当前重点承接的是哪类输入
 
-* Receiving
+建议将形态拆为两层：
 
-* Locked call
+* **系统状态形态**：表达系统当前整体所处阶段
 
-* Voice ended and transitioning to understanding or processing stage
+* **交互承接形态**：表达系统当前承接的输入类型或任务对象
 
-### 4.2 Text Selection
+两层可以组合存在，但同一时刻应始终保证有一个主状态清晰可感知。
 
-When the user selects a segment of text, the floating ball should enter an operable prompt state related to the local text object. The system should express:
+### 1. 系统状态形态
 
-* Current selected text has been identified
+建议统一收敛为以下几类：
 
-* Currently can continue to collaborate centered on that local content
+#### 待机形态
 
-* User can click the floating ball or drag selected text to enter subsequent process
+表示系统当前处于默认可用状态，没有正在进行中的任务，也没有需要用户立即处理的事项。  该形态应低存在感、不主动打扰、易于识别，并可随时进入交互。它也是其他状态结束后的默认回落状态。
 
-### 4.3 Text Drag
+#### 可唤起形态
 
-When the user drags text content to the floating ball, the system should clearly indicate that the currently being handled is dragged text, and enter intent confirmation or subsequent processing process after successful reception.
+当用户靠近悬浮球、悬停于悬浮球附近，或系统判断用户当前处于可被轻量承接的活跃状态时，悬浮球可进入可唤起形态。  这一形态用于提示用户当前可以继续点击、输入、长按或拖拽，但整体应保持克制。
 
-### 4.4 File Drag
+#### 承接中形态
 
-When the user drags a file to the floating ball, the system should clearly indicate that the current task object is a file, and enter file parsing, intent confirmation, or subsequent processing process after reception. Compared to text drag, file drag usually has an additional transitional stage of parsing the file.
+当用户已开始输入或已提供任务对象时，悬浮球进入承接中形态。  这类状态可覆盖语音监听、文本选中、文字拖拽、文件拖拽等场景，用于表达系统已开始接收当前输入。
 
-### 4.5 Hover Input
+#### 意图确认中形态
 
-When the user hovers over the floating ball and enters lightweight input or views recommended questions, the system should enter a hover handling related form. This scenario emphasizes quick supplementation and low-cost collaboration, rather than complete conversation.
+当系统已识别任务对象，但仍需确认用户真正想做什么时，悬浮球应进入意图确认中形态。  该状态强调当前重点不是直接执行，而是确认意图。
 
-### 4.6 Intent Confirmation
+#### 处理中形态
 
-When the system has identified the task object but still needs to judge what the user wants to do, it should enter the intent confirmation process. It is suggested to coordinate with the following interface structure:
+当系统已接收到任务，并正在解析上下文、理解需求或执行处理时，悬浮球应切换为处理中形态。  该形态用于提示任务已被成功接收，系统正在继续推进。
 
-* Bubble above floating ball: Displays the system's judgment of user intent
+#### 等待确认形态
 
-* Dialog box below floating ball: Provides confirmation button and allows user to input corrected intent
+当系统已给出意图判断、结果建议或待确认事项，但尚未收到用户反馈时，悬浮球可进入等待确认形态。  该状态提示流程尚未结束，下一步取决于用户确认、修改或忽略。
 
-The goal of intent confirmation is to first confirm "what the user wants to do" before executing "how to generate results." The entire confirmation process should be as short as possible, avoiding making users feel that they have entered another round of complex conversation.
+#### 完成形态
 
-### 4.7 Result Return
+当系统已完成当前任务，且已有结果可展示或可进入下一步动作时，悬浮球进入完成形态。  这一形态可以短时间提升存在感，但不应长时间维持，应在适当时机回落。
 
-When the system has completed lightweight processing and returned results, the floating ball should enter a result handling related form. This state needs to express:
+#### 异常形态
 
-* Current results are available
+当任务执行失败、理解异常、流程被中断，或当前能力暂不可用时，悬浮球进入异常形态。  异常形态的重点不是单纯提示失败，而是帮助用户理解当前为什么没有继续完成，以及接下来是否需要重试、补充、切换方式或等待环境恢复。
 
-* User can view results
+### 2. 交互承接形态
 
-* User can continue to ask, confirm, or advance to the next action
+交互承接形态用于表达系统当前主要承接的是哪类输入。建议统一为以下几类：
 
-### 4.8 Exception Handling
+* 悬停承接
 
-When input is incomplete, dragged object is unsupported, intent cannot be judged, task execution fails, or environment is unavailable, the floating ball should enter an exception related form. Exceptions can be further distinguished as:
+* 文本选中承接
 
-* Light exception: Insufficient content, unclear intent, needs supplementation
+* 文字拖拽承接
 
-* Execution failure: Task processing interrupted or failed
+* 文件拖拽承接
 
-* Environment unavailable: Permission, network, or capability temporarily unavailable
+* 语音承接
 
-* Recovery prompt: Prompt user on how to continue, such as retry, modification, or method switching
+* 推荐承接
 
-## 5. Operable Prompt State Supplement (This is the operable state triggered by left-click)
+* 结果承接
 
-When the system identifies that an explicit task object already exists, such as the user has selected text, the floating ball can enter an operable prompt state to remind the user that they can currently continue to initiate collaboration centered on that object.
+这些形态的作用不是分别建立一套独立状态机，而是为系统状态提供上下文信息，帮助用户快速理解当前承接对象。
 
-The visual presentation of this state does not need to be finalized at the current stage, and can be retained as: **Floating ball enters operable prompt state, specific visual style to be determined by subsequent visual design.**
+### 3. 组合原则
 
-The goals of the prompt state include:
+系统状态形态与交互承接形态可以组合出现，例如：
 
-* Let the user realize that the system has identified the current local object
+* 待机形态 + 无承接
 
-* Prompt the user that they can continue to operate
+* 承接中形态 + 语音承接
 
-* Do not disrupt the current reading and operation rhythm
+* 意图确认中形态 + 文本选中承接
 
-When the task object becomes invalid, the user switches context, there is no subsequent operation for a long time, or the system judges that the current state is no longer suitable for continuing to prompt, the floating ball should exit this state and restore to default form.
+* 处理中形态 + 文件拖拽承接
 
-## 6. Rhythm Control Supplement
+* 完成形态 + 结果承接
 
-In non-call mode, the system should both help users quickly initiate collaboration and avoid over-disturbance, so it is suggested to add overall rhythm control:
+* 等待确认形态 + 推荐承接
 
-* Minimum cooldown time should exist between two adjacent proactive reminders
+通过这种组合方式，可以避免为每个细碎场景都设计一个完全独立的新状态。
 
-* Same type of reminder should not repeatedly appear within a short time
+### 4. 切换原则
 
-* When users continuously ignore reminders, automatically reduce reminder intensity or frequency
+悬浮球不同形态之间的切换，应遵循以下原则：
 
-* When users continuously respond to reminders, moderately increase reminder positivity
+* 状态含义明确，用户能快速理解
 
-* In static mode, the overall strategy should be obviously more restrained than active stay state
+* 同一时刻只表达一个主状态，避免混杂
 
-## 7. Design Principles
+* 形态切换与用户动作或系统阶段存在明确对应关系
 
-Around these non-entry interaction details, it is suggested to uniformly follow the following principles:
+* 从强状态回落到弱状态时保持自然
 
-1. First judge state, then decide whether to remind
+* 不因细碎状态变化而频繁闪动
 
-2. Light reminders first, strong reminders used sparingly
+* 视觉变化服务于状态理解，而不是单纯制造存在感
 
-3. Short-term adjustable, long-term adaptive
+## 四、不同交互方式的承接逻辑
 
-4. Allow ignoring, do not force response
+不同交互方式虽然触发方式不同，但整体逻辑应统一：  **先识别输入对象，再判断是否需要意图确认，随后进入处理或结果承接。**
 
-5. State clarity prioritizes visual richness
+### 1. 语音识别
 
-6. Interaction type clarity prioritizes animation complexity
+当用户通过左键长按发起通话，或进入持续通话模式时，悬浮球应呈现语音承接相关形态。  该形态需清晰表达：
 
-## 8. Summary
+* 系统正在听
 
-Besides explicit interaction entries, the product also needs a set of supplementary mechanisms to control the floating ball's presence, proactive reminder rhythm, form changes, and intent confirmation methods.
+* 当前输入方式是语音
 
-The core functions of these mechanisms include:
+* 用户可以继续说，或结束当前输入
 
-* Reducing disturbance when users have no obvious behavior for a long time
+语音场景可包含以下阶段：
 
-* Moderately refreshing presence when users are active but briefly staying
+* 准备收音
 
-* Entering lightweight intent confirmation process when task object is clear
+* 收音中
 
-* Adjusting overall disturbance intensity through reminder level and reminder frequency
+* 锁定通话
 
-* Expressing current state through system state forms and interaction handling forms
+* 语音结束并过渡到理解或处理阶段
 
-* Combining short-term feedback and long-term user profile to form proactive reminder strategies that better fit individuals
+### 2. 文本选中
 
-These mechanisms do not belong to the product interaction entries themselves, but will directly affect whether the overall experience is natural, restrained, and sustainable.
+当用户选中一段文本后，悬浮球应进入与局部文本对象相关的可操作提示态。  系统应表达：
 
----
+* 已识别到当前选中文本
 
-# Floating Ball Interaction Output Document (Draft)
+* 当前可围绕该局部内容继续协作
 
-## 1. Document Positioning
+* 用户可点击悬浮球或拖拽选中文本进入后续流程
 
-This document describes the **interaction output** in the floating ball system, that is, how the system finally delivers results to users after completing understanding, judgment, and execution.
+### 3. 文字拖拽
 
-The "interaction output" here does not discuss the interaction entry itself, nor does it replace the main interaction design document, but focuses on the following questions:
+当用户将文本内容拖拽至悬浮球时，系统应明确当前正在承接的是拖入文本，并在接收成功后进入意图确认或后续处理流程。
 
-* Where are results finally delivered
+### 4. 文件拖拽
 
-* In what carrier are results presented
+当用户将文件拖拽至悬浮球时，系统应明确当前任务对象为文件，并在接收后进入文件解析、意图确认或后续处理流程。  相比文本拖拽，文件拖拽通常多一个解析文件的过渡阶段。
 
-* How do users continue to use results
+### 5. 悬停输入
 
-* How are lightweight feedback and formal delivery layered
+当用户悬停于悬浮球，并进入轻量输入或查看推荐问题的场景时，系统应进入悬停承接相关形态。  这一场景强调的是快速补充与低成本协作，而不是完整会话。
 
-In the floating ball system, interaction output is suggested to be divided into two layers:
+### 6. 意图确认
 
-* **Bubble-type handling method**: Used for immediate feedback, lightweight results, and single conversation handling
+当系统已识别任务对象，但仍需判断用户想做什么时，应进入意图确认流程。  建议配合以下界面结构：
 
-* **Action-type output method**: Used for real result delivery, determining the final form in which results are used by users
+* 悬浮球上方气泡：展示系统对用户意图的判断
 
-Among them, bubbles mainly assume lightweight handling and transitional roles; action-type output methods assume real delivery responsibilities.
+* 悬浮球下方对话框：提供确认按钮，并允许用户输入修正后的意图
 
----
+意图确认的目标是先确认"用户想做什么"，再执行"如何生成结果"。整个确认过程应尽量短，避免让用户感觉自己又进入一轮复杂对话。
 
-## 2. Overall Principles of Interaction Output
+### 7. 结果返回
 
-### 2.1 Prioritize Delivery at Task Site
+当系统已完成轻量处理并返回结果时，悬浮球应进入结果承接相关形态。  这一状态需表达：
 
-The system should prioritize completing result delivery near the user's current task site, minimizing unnecessary interface jumps and context switches.
+* 当前已有结果
 
-### 2.2 Lightweight Feedback and Formal Delivery Layered
+* 用户可以查看结果
 
-Not all results are suitable for directly entering documents, result pages, or dashboards. The system should first give lightweight feedback, then decide the final delivery method based on result nature.
+* 用户可以继续追问、确认或推进下一步动作
 
-### 2.3 Choose Output Based on Result Nature
+### 8. 异常处理
 
-The choice of interaction output should prioritize the nature of the result itself, rather than simply the trigger method.
+当出现输入不完整、拖拽对象不支持、意图无法判断、任务执行失败或环境不可用时，悬浮球应进入异常相关形态。  异常可进一步区分为：
 
-### 2.4 Result Delivery Prioritizes Form Unification
+* 轻异常：内容不足、意图不清，需要补充
 
-Different task types can have different optimal outputs. The system should prioritize ensuring "results are correctly used" rather than forcibly unifying the presentation form of all results.
+* 执行失败：任务处理中断或失败
 
----
+* 环境不可用：权限、网络或能力暂不可用
 
-## 3. Two-Layer Structure of Interaction Output
+* 恢复提示：提示用户可如何继续，例如重试、修改或切换方式
 
-### 3.1 Bubble-Type Handling Method
+## 五、可操作提示态补充（这个就是左键点击触发的那种可操作状态）
 
-The bubble above the floating ball is the **lightweight conversation handling area** between users and Agent, mainly assuming the following responsibilities:
+当系统识别到已有明确任务对象，例如用户已选中文本时，悬浮球可进入可操作提示态，以提示用户当前可以继续围绕该对象发起协作。
 
-* Immediate feedback
+该状态的视觉表现不必在当前阶段写死，可先保留为：  **悬浮球进入可操作提示态，具体视觉样式待后续视觉设计确定。**
 
-* Status explanation
+提示态的目标包括：
 
-* Intent judgment
+* 让用户意识到系统已识别到当前局部对象
 
-* Brief results
+* 提示用户可以继续操作
 
-* Next step suggestions
+* 不破坏当前阅读与操作节奏
 
-* Short-link handling for single tasks
+当任务对象失效、用户切换上下文、长时间无后续操作，或系统判断当前状态不再适合继续提示时，悬浮球应退出该状态并恢复默认形态。
 
-Bubbles are not traditional chat boxes, nor are they long-term result storage areas. Its core positioning is:
+## 六、节奏控制补充
 
-> Lightweight, temporary, recoverable, controllable task site conversation carrier.
+在非通话模式下，系统既要帮助用户快速发起协作，也要避免过度打扰，因此建议增加整体节奏控制：
 
-### 3.2 Action-Type Output Method
+* 相邻两次主动提示之间应存在最小冷却时间
 
-Action-type output method is the **real delivery layer** of results, determining the final form in which results are received, viewed, continued to be edited, or continued to be advanced by users.
+* 同类提醒不应在短时间内重复出现
 
-Action-type output methods can include:
+* 当用户连续忽略提醒时，应自动降低提醒强度或提醒频率
 
-* Write directly to bubble
+* 当用户连续响应提醒时，可适度提高提醒积极性
 
-* Open browser/result page
+* 在静态模式下，整体策略应明显比活跃停留状态更克制
 
-* Generate document in workspace and open
+## 七、设计原则
 
-* Open generated file
+围绕这些非入口类交互细节，建议统一遵循以下原则：
 
-* Open folder and highlight result
+1. 先判断状态，再决定是否提示
 
-* Open task details/historical tasks
+2. 轻提示优先，强提示慎用
 
-* Voice playback
+3. 短期可调，长期自适应
 
----
+4. 允许忽略，不强求响应
 
-## 4. Action-Type Output Methods
+5. 状态清晰优先于视觉丰富
 
-### 4.1 Write Directly to Bubble
+6. 交互类型清晰优先于动效复杂
 
-The system can directly write results into the bubble above the floating ball as the most lightweight and immediate delivery method.
+## 八、总结
 
-Suitable for carrying content including:
+除显式交互入口外，产品还需要通过一套补充机制来控制悬浮球的存在感、主动提醒节奏、形态变化和意图确认方式。
 
-* Rewrite
+这些机制的核心作用包括：
 
-* Completion
+* 在用户长时间无明显行为时降低打扰
 
-* Translation
+* 在用户活跃但短暂停留时适度刷存在感
 
-* Formatting
+* 在任务对象明确时进入轻量意图确认流程
 
-* Insert text
+* 通过提醒等级与提醒频率调节整体打扰强度
 
-* Local replacement
+* 通过系统状态形态与交互承接形态表达当前状态
 
-This method is applicable to the following situations:
+* 结合短期反馈与长期用户画像，形成更适合个人的主动提示策略
 
-* Content is short
+这些机制不属于产品交互入口本身，但会直接影响整体体验是否自然、克制和可持续。
 
-* User currently needs to see results immediately
 
-* No complex layout needed
 
-* No need to additionally open new interfaces
+# 悬浮球交互出口文档（草案）
 
-* Results are mainly used for continued operation at the current task site
+## 一、文档定位
 
-Writing directly to bubble is the default lightweight delivery method, but is not suitable for carrying results that are too long, strongly editable, or need long-term preservation.
+本文档用于说明悬浮球体系中的**交互出口**，即系统在完成理解、判断与执行后，最终如何把结果交付给用户。
 
-### 4.2 Open Browser/Result Page
+这里的"交互出口"不讨论交互入口本身，也不替代主交互设计文档，而是聚焦以下问题：
 
-The system can deliver results to a browser page or independent result page.
+* 结果最终交付到哪里
 
-Suitable for carrying content including:
+* 结果以什么载体呈现
 
-* Search results
+* 用户如何继续使用结果
 
-* Webpage task results
+* 轻量反馈与正式交付如何分层
 
-* Browsable, jumpable structured results
+在悬浮球体系中，交互出口建议分为两层：
 
-This method is applicable to the following situations:
+* **气泡型承接方式**：用于即时反馈、轻量结果与单次对话承接
 
-* Results themselves have external link structures
+* **动作型输出方式**：用于真正的结果交付，决定结果最终以什么形式被用户使用
 
-* Users need to continue browsing, clicking, jumping
+其中，气泡主要承担轻量承接与过渡作用；动作型输出方式承担真正的交付职责。
 
-* Results are not final text products, but information collections or webpage task results
+***
 
-* Suitable for "summary + jumpable details" delivery mode
+## 二、交互出口的总体原则
 
-In this method, the bubble near the floating ball is more suitable as a pre-explanation, for example:
+### 1. 优先在任务现场交付
 
-* Give a one-sentence summary
+系统应优先在用户当前任务现场附近完成结果交付，尽量减少无必要的界面跳转与上下文切换。
 
-* Inform that the task is completed
+### 2. 轻量反馈与正式交付分层
 
-* Inform that results will open in browser or result page
+不是所有结果都适合直接进入文档、结果页或仪表盘。系统应先给出轻量反馈，再视结果性质决定最终交付方式。
 
-### 4.3 Generate Document in Workspace and Open
+### 3. 根据结果性质选择出口
 
-The system can generate a document in the workspace and automatically open the document for users to view and continue editing.
+交互出口的选择应优先依据结果本身的性质，而不是单纯依据触发方式。
 
-Document forms can include:
+### 4. 结果交付优先于形式统一
+
+不同任务类型可以有不同的最优出口。系统应优先保证"结果被正确使用"，而不是强行统一所有结果的呈现形式。
+
+***
+
+## 三、交互出口的两层结构
+
+### 1. 气泡型承接方式
+
+悬浮球上方气泡是用户与 Agent 的**轻量对话承接区**，主要承担以下职责：
+
+* 即时反馈
+
+* 状态说明
+
+* 意图判断
+
+* 简短结果
+
+* 下一步建议
+
+* 单次任务的短链路承接
+
+气泡不是传统聊天框，也不是长期结果存储区。它的核心定位是：
+
+> 轻量、临时、可恢复、可控制的任务现场对话载体。
+
+### 2. 动作型输出方式
+
+动作型输出方式是结果的**真正交付层**，决定结果最终以什么形式被用户接收、查看、继续编辑或继续推进。
+
+动作型输出方式可包括：
+
+* 直接写入气泡
+
+* 打开浏览器 / 结果页
+
+* 在工作区生成文档并打开
+
+* 打开生成文件
+
+* 打开文件夹并高亮结果
+
+* 打开任务详情 / 历史任务
+
+* 语音播放
+
+***
+
+## 四、动作型输出方式
+
+### 1. 直接写入气泡
+
+系统可直接将结果写入悬浮球上方气泡中，作为最轻量、最即时的交付方式。
+
+适合承载的内容包括：
+
+* 改写
+
+* 补全
+
+* 翻译
+
+* 格式化
+
+* 插入文本
+
+* 局部替换
+
+这一方式适用于以下情况：
+
+* 内容较短
+
+* 用户当前需要立即看到结果
+
+* 不需要复杂排版
+
+* 不需要额外打开新界面
+
+* 结果主要用于当前任务现场的继续操作
+
+直接写入气泡是默认的轻量交付方式，但不适合承载过长、可编辑性强或需要长期保存的结果。
+
+### 2. 打开浏览器 / 结果页
+
+系统可将结果交付到浏览器页面或独立结果页中。
+
+适合承载的内容包括：
+
+* 搜索结果
+
+* 网页任务结果
+
+* 可浏览、可跳转的结构化结果
+
+这一方式适用于以下情况：
+
+* 结果本身具有外链结构
+
+* 用户需要继续浏览、点击、跳转
+
+* 结果不是最终文本产物，而是信息集合或网页任务结果
+
+* 适合"摘要 + 可跳转详情"的交付模式
+
+在这种方式下，悬浮球附近的气泡更适合作为前置说明，例如：
+
+* 给出一句摘要
+
+* 告知任务已完成
+
+* 告知结果将在浏览器或结果页中打开
+
+### 3. 在工作区生成文档并打开
+
+系统可在工作区中生成文档，并自动打开文档供用户查看和继续编辑。
+
+文档形式可包括：
 
 * Word
 
@@ -826,608 +826,608 @@ Document forms can include:
 
 * Markdown
 
-Suitable for carrying content including:
+适合承载的内容包括：
 
-* Drafts
+* 草稿
 
-* Summaries
+* 总结
 
-* Email drafts
+* 邮件初稿
 
-* Proposal drafts
+* 方案稿
 
-* Long text content that can be continued to be edited
+* 可继续编辑的长文本内容
 
-This method is applicable to the following situations:
+这一方式适用于以下情况：
 
-* Results are long and not suitable for complete display in bubbles
+* 结果较长，不适合在气泡中完整展示
 
-* Content has strong editing value
+* 内容具有较强编辑价值
 
-* Users may subsequently need to continue modifying, copying, or saving
+* 用户后续可能需要继续修改、复制或保存
 
-* Results themselves are already close to formal products
+* 结果本身已接近正式产物
 
-This is one of the main delivery methods for long text results.
+这是长文本结果的主要交付方式之一。
 
-### 4.4 Open Generated File
+### 4. 打开生成文件
 
-The system can directly open the generated target file.
+系统可直接打开生成后的目标文件。
 
-Suitable for carrying content including:
+适合承载的内容包括：
 
-* Already generated single target file
+* 已生成的单个目标文件
 
-* Directly viewable result files
+* 可直接查看的结果文件
 
-* Already converted or exported file products
+* 已完成转换或导出的文件产物
 
-This method is applicable to the following situations:
+这一方式适用于以下情况：
 
-* System output is already an explicit file
+* 系统输出已经是一个明确文件
 
-* What users need most at this moment is to directly view file content
+* 用户此刻最需要的是直接查看文件内容
 
-* The file itself is the delivery result, not an intermediate process
+* 文件本身就是交付结果，而不是中间过程
 
-Compared to "generate document in workspace and open," this emphasizes more that "the file has already been generated and is directly opened as the final product."
+相比"在工作区生成文档并打开"，这里更强调"文件已经生成完成，并作为最终产物直接打开"。
 
-### 4.5 Open Folder and Highlight Result
+### 5. 打开文件夹并高亮结果
 
-The system can directly open the target folder and highlight the result files generated this time.
+系统可直接打开目标文件夹，并高亮本次生成的结果文件。
 
-Suitable for carrying content including:
+适合承载的内容包括：
 
-* Exported files
+* 导出文件
 
-* Reports
+* 报告
 
-* Images
+* 图片
 
-* Compressed packages
+* 压缩包
 
-* Tables
+* 表格
 
-* Multiple file products
+* 多文件产物
 
-This method is applicable to the following situations:
+这一方式适用于以下情况：
 
-* Results are file-type products
+* 结果是文件类产物
 
-* Users need to drag, move, send, or secondarily process files
+* 用户需要对文件进行拖拽、移动、发送或二次处理
 
-* Results may be more than one file
+* 结果可能不止一个文件
 
-* Users need to clearly know the file save location
+* 用户需要明确知道文件保存位置
 
-This method is suitable as the main output for file delivery-type results.
+这一方式适合作为文件交付型结果的主要出口。
 
-### 4.6 Open Task Details/Historical Tasks
+### 6. 打开任务详情 / 历史任务
 
-The system can deliver results to the task details page or historical task page.
+系统可将结果交付到任务详情页或历史任务页中。
 
-Suitable for carrying content including:
+适合承载的内容包括：
 
-* Review
+* 回看
 
-* Recovery
+* 恢复
 
-* Continue processing
+* 继续处理
 
-* Audit
+* 审计
 
-* Failure diagnosis
+* 失败诊断
 
-This method is applicable to the following situations:
+这一方式适用于以下情况：
 
-* Task has continuity
+* 任务具有连续性
 
-* Results need to be tracked
+* 结果需要被追踪
 
-* Users may subsequently return to continue processing
+* 用户后续可能还会回来继续处理
 
-* Need to view task process, historical versions, or failure reasons
+* 需要查看任务过程、历史版本或失败原因
 
-This output is more suitable for continuous tasks and traceable tasks, rather than single lightweight delivery.
+这一出口更适合持续任务与可追溯任务，而不是单次轻量交付。
 
-### 4.7 Voice Playback
+### 7. 语音播放
 
-The system can play results through voice.
+系统可通过语音方式播放结果。
 
-This method has lower priority and is suitable for:
+这一方式优先级较低，适合用于：
 
-* Brief feedback
+* 简短反馈
 
-* Status notification
+* 状态通知
 
-* Small amount of result reporting
+* 少量结果播报
 
-Voice playback should not be the main delivery output, but is more suitable as a supplementary output method.
+语音播放不应作为主要交付出口，更适合作为补充性的输出方式存在。
 
----
+***
 
-## 5. Selection Principles for Action-Type Output Methods
+## 五、动作型输出方式的选择原则
 
-When the system chooses interaction output, it should prioritize the nature of the result, rather than simply judging by the trigger method.
+系统在选择交互出口时，应优先根据结果的性质，而不是单纯根据触发方式进行判断。
 
-### 5.1 Results Short and Immediate, Prioritize Bubble
+### 1. 结果短且即时，优先气泡
 
-Applicable to short text, local rewrite, translation, format adjustment, brief conclusions, and other results.
+适用于短文本、局部改写、翻译、格式调整、简短结论等结果。
 
-### 5.2 Results Browsable and Jumpable, Prioritize Browser or Result Page
+### 2. 结果可浏览、可跳转，优先浏览器或结果页
 
-Applicable to search results, webpage task results, structured information collections, and other content.
+适用于搜索结果、网页任务结果、结构化信息集合等内容。
 
-### 5.3 Results Need Editing or Long-term Preservation, Prioritize Workspace Document
+### 3. 结果需要编辑或长期保存，优先工作区文档
 
-Applicable to drafts, proposals, summaries, email drafts, and other long text results.
+适用于草稿、方案、总结、邮件初稿等长文本成果。
 
-### 5.4 Results Themselves are Files, Prioritize Open File or Open Folder
+### 4. 结果本身就是文件，优先打开文件或打开文件夹
 
-Applicable to exported files, images, compressed packages, tables, reports, and other file-type products.
+适用于导出文件、图片、压缩包、表格、报告等文件类产物。
 
-### 5.5 Results Have Continuity and Tracking Needs, Prioritize Task Details or Historical Tasks
+### 5. 结果具有连续性与追踪需求，优先任务详情或历史任务
 
-Applicable to tasks that need review, recovery, continued advancement, or failure troubleshooting.
+适用于需要回看、恢复、继续推进或失败排查的任务。
 
----
+***
 
-## 6. Bubble Responsibilities in Interaction Output
+## 六、气泡在交互出口中的职责
 
-Bubbles are not responsible for handling all results, but are responsible for the following types of content:
+气泡不负责承接一切结果，而是负责以下几类内容：
 
-### 6.1 Status-Type Output
+### 1. 状态型输出
 
-Used to tell users what the system is currently doing, for example:
+用于告诉用户系统现在正在做什么，例如：
 
-* Received
+* 已接收
 
-* Analyzing
+* 正在分析
 
-* Identifying
+* 正在识别
 
-* Generating
+* 正在生成
 
-* Completed
+* 已完成
 
-* Error
+* 出错
 
-* Needs confirmation
+* 需要确认
 
-### 6.2 Judgment-Type Output
+### 2. 判断型输出
 
-Used to tell users the system's current understanding and judgment, for example:
+用于告诉用户系统当前的理解与判断，例如：
 
-* Do you want to summarize this content
+* 你是想总结这段内容吗
 
-* Do you want to translate this file
+* 你是想翻译这个文件吗
 
-* Output method is three-point summary
+* 输出方式为三点摘要
 
-### 6.3 Lightweight Result-Type Output
+### 3. 轻量结果型输出
 
-Used to directly deliver shorter results, for example:
+用于直接交付较短结果，例如：
 
-* A segment of rewrite
+* 一段改写
 
-* A segment of completion
+* 一段补全
 
-* A segment of translation
+* 一段翻译
 
-* Three key points
+* 三条要点
 
-* A brief conclusion
+* 一个简短结论
 
-### 6.4 Suggestion-Type Output
+### 4. 建议型输出
 
-Used to prompt users what they might want to do next, for example:
+用于提示用户下一步可能要做什么，例如：
 
-* Whether to continue extracting
+* 是否继续提炼
 
-* Whether to change to email format
+* 是否改成邮件格式
 
-* Whether to write to document
+* 是否写入文档
 
-* Whether to view details
+* 是否查看详情
 
-Therefore, bubbles are more suitable as:
+因此，气泡更适合作为：
 
-> Default lightweight output, pre-explanation area, and short result delivery area.
+> 默认轻量出口、前置说明区与短结果交付区。
 
----
+***
 
-## 7. Bubble Details Supplement
+## 七、气泡细节补充
 
-Bubbles are the default lightweight handling carrier in the floating ball system, used to complete immediate feedback, single conversation handling, and lightweight result delivery near the current task site.
+气泡是悬浮球体系中的默认轻量承接载体，用于在当前任务现场附近完成即时反馈、单次对话承接与轻量结果交付。
 
-To avoid bubbles evolving into traditional chat interfaces, while ensuring their readability, controllability, and recoverability, it is suggested to supplement the following detailed rules.
+为了避免气泡演化为传统聊天界面，同时保证其可读性、可控性与可恢复性，建议补充以下细节规则。
 
-### 7.1 Single Conversation Single Bubble
+### 1. 单次对话单气泡
 
-A continuous interaction generated by the user and floating ball around one explicit task object is regarded as one bubble.
+用户与悬浮球围绕一次明确任务对象产生的一段连续交互，视为一个气泡。
 
-"Single conversation" here emphasizes the continuous handling formed around the same object, the same round of intent confirmation, and result delivery, rather than stacking all historical content as multi-round chat records.
+这里的"单次对话"强调的是围绕同一个对象、同一轮意图确认与结果交付形成的连续承接，而不是把所有历史内容都堆叠为多轮聊天记录。
 
-It is suggested to maintain the following principles:
+建议保持以下原则：
 
-* One explicit task object corresponds to one main bubble
+* 一次明确任务对象对应一个主气泡
 
-* Same bubble can handle status feedback, intent judgment, and lightweight results
+* 同一气泡内可承接状态反馈、意图判断与轻量结果
 
-* Do not design bubbles as infinitely extended chat threads
+* 不将气泡设计成无限延长的聊天线程
 
-### 7.2 Bubble Quantity Upper Limit
+### 2. 气泡数量上限
 
-Bubbles retain at most three at the same time.
+气泡最多同时保留三个。
 
-When a new bubble appears and the quantity exceeds three, the earliest appearing bubble begins to exit the current interface. Default priority is to eliminate the earliest appearing and unpinned bubble; if the earliest bubble is already pinned, continue searching backward for the earliest unpinned bubble.
+当新气泡出现且数量超过三个时，最早出现的气泡开始退出当前界面。默认优先淘汰最早出现且未被置顶的气泡；若最早气泡已置顶，则继续向后寻找最早的未置顶气泡。
 
-The goals of this rule are:
+这一规则的目标是：
 
-* Control visual complexity near the floating ball
+* 控制悬浮球附近的视觉复杂度
 
-* Prevent lightweight handling area from evolving into chat list
+* 防止轻量承接区演化为聊天列表
 
-* Maintain a fresh feeling at the current task site
+* 保持当前任务现场的清爽感
 
-* Let users always prioritize attention to the most recent results and feedback
+* 让用户始终优先关注最近的结果与反馈
 
-### 7.3 Bubble Basic Structure
+### 3. 气泡的基础结构
 
-A complete bubble should at least contain the following areas:
+一个完整气泡建议至少包含以下区域：
 
-* **Main content area**: Displays status, judgment, results, or suggestions
+* **主体内容区**：展示状态、判断、结果或建议
 
-* **Top-left pin entry**: Used to retain important bubbles
+* **左上角置顶入口**：用于保留重要气泡
 
-* **Top-right delete entry**: Used to actively destroy the current bubble
+* **右上角删除入口**：用于主动销毁当前气泡
 
-* **Additional action area when necessary**: For example, lightweight operations such as "continue," "retry," "write to document," "view details"
+* **必要时的附加动作区**：例如"继续""重试""写入文档""查看详情"等轻量操作
 
-It is suggested that the information hierarchy inside the bubble follows:
+建议气泡内部的信息层次遵循：
 
-* First layer: Currently most important conclusion or feedback
+* 第一层：当前最重要的结论或反馈
 
-* Second layer: Supplementary explanation or brief context
+* 第二层：补充说明或简要上下文
 
-* Third layer: Next step suggestion or lightweight action
+* 第三层：下一步建议或轻量动作
 
-### 7.4 Bubble Content Boundary
+### 4. 气泡的内容边界
 
-Bubbles are suitable for handling the following content:
+气泡适合承接以下内容：
 
-* One-sentence status feedback
+* 一句话状态反馈
 
-* A segment of intent judgment
+* 一段意图判断
 
-* A brief explanation
+* 一段简短解释
 
-* A small segment of rewrite or translation results
+* 一小段改写或翻译结果
 
-* 3 to 5 short key points
+* 3 到 5 条短要点
 
-* An explicit conclusion
+* 一个明确结论
 
-* Next step suggestions
+* 下一步建议
 
-Bubbles are not suitable for handling the following content:
+气泡不适合承接以下内容：
 
-* Large segments of continuous long text
+* 大段连续长文
 
-* Complex layout content
+* 复杂排版内容
 
-* Complete formal drafts
+* 完整正式稿件
 
-* Large tables
+* 大型表格
 
-* Content that needs long-term preservation and continuous editing
+* 需要长期保存和持续编辑的内容
 
-* Multi-round continuous historical records
+* 多轮连续历史记录
 
-Therefore, the default responsibility of bubbles should always be:
+因此，气泡的默认职责应始终是：
 
-> Lightweight handling, not complete storage.
+> 轻量承接，而不是完整存储。
 
-### 7.5 Bubble Lifecycle
+### 5. 气泡的生命周期
 
-Ordinary bubbles are suggested to follow the following lifecycle:
+普通气泡建议遵循以下生命周期：
 
-1. **Manifestation state**
+1. **显现状态**
 
-   * Bubble is completely visible
-   
-   * User can directly read and operate
+   * 气泡完整可见
 
-2. **Transparency state**
+   * 用户可直接阅读与操作
 
-   * If user has no new operations, bubble begins to slowly weaken presence
-   
-   * Visually gradually enters weak prompt state
+2. **透明化状态**
 
-3. **Hidden state**
+   * 若用户无新的操作，气泡开始缓慢减弱存在感
 
-   * Bubble is no longer completely manifested
-   
-   * But can still be re-invoked through mouse approach
+   * 视觉上逐渐进入弱提示状态
 
-4. **Dissipation state**
+3. **隐藏状态**
 
-   * If there are still no new user operations after hiding, bubble completely exits the interface
+   * 气泡不再完整显现
 
-It is suggested to default to using the progressive mechanism of "manifestation → transparency → hidden → dissipation," rather than sudden disappearance.
+   * 但仍可通过鼠标接近重新唤起
 
-### 7.6 Bubble Time Mechanism
+4. **消散状态**
 
-Regarding bubble time mechanism, it is suggested to at least clarify the following parameters:
+   * 若隐藏后仍无新的用户操作，气泡彻底退出界面
 
-* How many seconds after bubble appears to begin transparency
+建议默认采用"显现 → 透明化 → 隐藏 → 消散"的渐进式机制，而不是突然消失。
 
-* How long transparency continues before entering hidden state
+### 6. 气泡的时间机制
 
-* Maximum retention time in hidden state
+围绕气泡的时间机制，建议至少明确以下参数：
 
-* Whether to reset timing after mouse moves back
+* 气泡出现后多少秒开始透明化
 
-* Whether pinned bubbles skip automatic dissipation process
+* 透明化持续多久进入隐藏状态
 
-Suggested rules are as follows:
+* 隐藏状态最多保留多久
 
-* Ordinary bubbles: Follow complete lifecycle
+* 鼠标移回后是否重置计时
 
-* Mouse moves to bubble area in hidden state: Bubble re-manifests and resets timing
+* 被置顶气泡是否跳过自动消散流程
 
-* Pinned bubbles: Do not enter automatic dissipation process, unless user actively unpin or actively delete
+建议规则如下：
 
-Parameters can be temporarily retained as undetermined in the document, for example:
+* 普通气泡：遵循完整生命周期
 
-* Bubble begins transparency **Xs** after appearing
+* 鼠标移到隐藏状态下的气泡区域：气泡重新显现，并重置计时
 
-* Dissipates **Xmin** after entering hidden state
+* 被置顶气泡：不进入自动消散流程，除非用户主动取消置顶或主动删除
 
-### 7.7 Bubble Pin and Delete
+文档中可暂时保留为待定参数，例如：
 
-Each bubble should provide two basic control actions:
+* 气泡出现后 **Xs** 开始透明化
 
-* **Pin retain**: Fix the bubble in the current interface, not participating in automatic transparency, hiding, and dissipation
+* 进入隐藏状态后 **Xmin** 消散
 
-* **Delete destroy**: Immediately remove the current bubble from the interface
+### 7. 气泡的置顶与删除
 
-These two actions correspond to two types of user intent:
+每个气泡应提供两个基础控制动作：
 
-* "I want to keep this content to view"
+* **置顶保留**：将气泡固定在当前界面中，不参与自动透明化、隐藏与消散
 
-* "I don't need this content anymore, make it disappear directly"
+* **删除销毁**：立即从界面中移除当前气泡
 
-Suggested supplementary rules are as follows:
+这两个动作分别对应两类用户意图：
 
-* Pinned bubbles should have clear visual distinction
+* "这个内容我还要留着看"
 
-* Delete action takes effect immediately, without hidden buffer
+* "这个内容我不需要了，直接消失"
 
-* Pinned bubbles can still be unpinned, restoring ordinary lifecycle
+建议补充规则如下：
 
-* If bubble is already pinned, it does not participate in automatic elimination after exceeding quantity upper limit
+* 置顶后的气泡应具有明确视觉区分
 
-### 7.8 Bubble Recovery Mechanism
+* 删除动作立即生效，不经过隐藏缓冲
 
-Bubbles in hidden state should not be regarded as completely disappeared, but should retain lightweight recoverability.
+* 已置顶气泡仍可取消置顶，恢复普通生命周期
 
-When the mouse moves to the bubble area after hidden state, the bubble re-manifests and restores to readable state. After re-manifestation, the bubble's display timing should be reset.
+* 若气泡已被置顶，则不参与超过数量上限后的自动淘汰
 
-The goals of this mechanism are:
+### 8. 气泡的恢复机制
 
-* Allow users to quickly retrieve recent results
+隐藏状态下的气泡不应被视为彻底消失，而应保留轻量可恢复性。
 
-* Reduce frustration of "bubble disappeared too quickly"
+当鼠标移动到隐藏状态后的气泡区域时，气泡重新显现，并恢复可读状态。重新显现后，气泡的显示计时应被重置。
 
-* Improve fault tolerance of lightweight result handling
+这一机制的目标是：
 
-### 7.9 Bubble and Result Diversion
+* 允许用户快速找回刚刚的结果
 
-When the content handled in the bubble exceeds its suitable range, the system should trigger diversion, rather than forcibly continuing to stack in the bubble.
+* 降低"气泡消失太快"的挫败感
 
-Suggested diversion directions include:
+* 提高轻量结果承接的容错性
 
-* **Write to workspace document and open**: Suitable for long text, drafts, summaries, editable content
+### 9. 气泡与结果分流
 
-* **Open browser/result page**: Suitable for structured results, search results, webpage task results
+当气泡中承接的内容超出其适合范围时，系统应触发分流，而不是强行继续堆叠在气泡内。
 
-* **Open generated file**: Suitable for single file products
+建议的分流方向包括：
 
-* **Open folder and highlight result**: Suitable for file-type products, multiple file products
+* **写入工作区文档并打开**：适合长文本、草稿、总结、可编辑内容
 
-* **Open task details/historical tasks**: Suitable for continuous tasks, review, recovery, failure diagnosis
+* **打开浏览器 / 结果页**：适合结构化结果、搜索结果、网页任务结果
 
-It is suggested that when diverting, the bubble still retains a brief sentence explanation, for example:
+* **打开生成文件**：适合单一文件产物
 
-* Has written to document and opened for you
+* **打开文件夹并高亮结果**：适合文件类产物、多文件产物
 
-* Results have been generated, opening result page
+* **打开任务详情 / 历史任务**：适合连续任务、回看、恢复、失败诊断
 
-* File has been exported, has located to save location
+建议分流时，气泡仍保留一句简短说明，例如：
 
-That is, the bubble is still responsible for "informing," and the formal output is responsible for "delivery."
+* 已为你写入文档并打开
 
-### 7.10 Action Suggestions in Bubbles
+* 结果已生成，正在打开结果页
 
-Bubbles can carry a small amount of lightweight actions, but should control quantity, avoiding evolving into complex panels.
+* 文件已导出，已定位到保存位置
 
-Suggested action types to retain include:
+也就是说，气泡仍然负责"告知"，正式出口负责"交付"。
 
-* Continue
+### 10. 气泡中的动作建议
 
-* Retry
+气泡中可以承载少量轻量动作，但应控制数量，避免其演化为复杂面板。
 
-* Modify
+建议保留的动作类型包括：
 
-* Write to document
+* 继续
 
-* View details
+* 重试
 
-* Open result
+* 修改
 
-* Regenerate
+* 写入文档
 
-Suggested limitation principles are as follows:
+* 查看详情
 
-* Main actions in a single bubble should not be too many
+* 打开结果
 
-* Prioritize presenting one main action, others as secondary actions
+* 重新生成
 
-* Action naming should be as short, clear, and predictable as possible
+建议限制原则如下：
 
-* Action area should serve current results, not open new complex flows
+* 单个气泡中的主要动作不宜过多
 
-### 7.11 Bubble Design Principles
+* 优先呈现一个主动作，其余为次动作
 
-Around bubble details, it is suggested to uniformly follow the following principles:
+* 动作命名尽量短、明确、可预期
 
-#### 7.11.1 Single Task Prioritizes Historical Stacking
+* 动作区应服务于当前结果，而不是开启新的复杂流程
 
-Bubbles first serve the current task object, rather than assuming historical conversation recording functions.
+### 11. 气泡的设计原则
 
-#### 7.11.2 Recoverable Prioritizes Immediate Destruction
+围绕气泡细节，建议统一遵循以下原则：
 
-Ordinary bubbles should first enter hidden state, rather than disappearing directly.
+#### 1. 单次任务优先于历史堆叠
 
-#### 7.11.3 User-Controllable Prioritizes System Strong Recycling
+气泡首先服务于当前任务对象，而不是承担历史会话记录职能。
 
-Important bubbles should allow users to pin retain, rather than all being handed over to the system for automatic recycling.
+#### 2. 可恢复优先于立即销毁
 
-#### 7.11.4 Result Delivery Prioritizes Visual Stay
+普通气泡应先进入隐藏状态，而不是直接消失。
 
-The primary goal of bubbles is to help results be received, not to make them stay as long as possible.
+#### 3. 用户可控优先于系统强回收
 
-#### 7.11.5 Lightweight Handling Prioritizes Complex Extension
+重要气泡应允许用户置顶保留，而不是全部交由系统自动回收。
 
-When content or process exceeds bubble carrying capacity, it should naturally divert to documents, result pages, files, or task details, rather than making bubbles into complete workbenches.
+#### 4. 结果交付优先于视觉停留
 
----
+气泡的首要目标是帮助结果被接收，而不是让其停留得尽可能久。
 
-## 8. Relationship Between Bubbles and Formal Delivery
+#### 5. 轻量承接优先于复杂扩展
 
-Bubbles are not necessarily the final output, but are usually the **first output**.
+当内容或流程超出气泡承载能力时，应自然分流到文档、结果页、文件或任务详情，而不是把气泡做成完整工作台。
 
-Suggested default rhythm is as follows:
+***
 
-### Step 1: First Give Status Feedback
+## 八、气泡与正式交付之间的关系
 
-First tell the user that the system has received, is understanding, or is processing, avoiding users not knowing whether the system has responded.
+气泡不一定是最终出口，但通常应当是**第一出口**。
 
-### Step 2: Give Intent Judgment When Necessary
+建议默认节奏如下：
 
-In scenarios where the task object is clear but intent still needs confirmation, first give system judgment through the bubble.
+### 第一步：先给状态反馈
 
-### Step 3: Deliver Lightweight Results or Pre-Explanation
+先告诉用户系统已接收、正在理解或正在处理，避免用户不知道系统是否有响应。
 
-If results are short, can be given directly in the bubble; if results are long or need further diversion, can first give summary or explanation through the bubble.
+### 第二步：必要时给意图判断
 
-### Step 4: Enter Formal Output
+在任务对象明确、但意图仍需确认的场景下，先通过气泡给出系统判断。
 
-According to result nature, enter the corresponding action-type output method:
+### 第三步：交付轻量结果或前置说明
 
-* Workspace document
+若结果较短，可直接在气泡中给出；若结果较长或需要进一步分流，可先通过气泡给出摘要或说明。
 
-* Browser/result page
+### 第四步：进入正式出口
 
-* Generated file
+根据结果性质，进入对应的动作型输出方式：
 
-* Folder
+* 工作区文档
 
-* Task details/historical tasks
+* 浏览器 / 结果页
 
----
+* 生成文件
 
-## 9. Relationship Between Interaction Output and Other Carriers
+* 文件夹
 
-### 9.1 Relationship with Lightweight Dialog Box Below Floating Ball
+* 任务详情 / 历史任务
 
-The lightweight dialog box below the floating ball is not a main output area, but a lightweight input and control area, mainly responsible for:
+***
 
-* Confirmation
+## 九、交互出口与其他载体的关系
 
-* Modification
+### 1. 与悬浮球下方轻量对话框的关系
 
-* Supplement a sentence of input
+悬浮球下方轻量对话框不属于主要输出区，而是轻量输入与控制区，主要负责：
 
-* Upload attachments
+* 确认
 
-* Trigger next step action
+* 修改
 
-Therefore, the lightweight dialog box below mainly handles "actions," not "results."
+* 补充一句输入
 
-### 9.2 Relationship with Workspace Documents
+* 上传附件
 
-Workspace documents are the main handling output for long text, editable content, and saveable content.
+* 触发下一步动作
 
-When results are too long, unsuitable for placement in bubbles, or results themselves have strong editing value, the system should prioritize transferring to workspace documents.
+因此，下方轻量对话框主要承接"动作"，而不是承接"结果"。
 
-### 9.3 Relationship with Dashboard
+### 2. 与工作区文档的关系
 
-The dashboard is not the default output area, but the handling output for continuous tasks, complete workflows, and traceable tasks.
+工作区文档是长文本、可编辑内容与可保存内容的主要承接出口。
 
-When tasks have continuity, need to view historical processes, or need to uniformly view multiple results, the system can further handle results to the dashboard or task details.
+当结果过长、不适合放在气泡中，或结果本身具有较强编辑价值时，系统应优先转入工作区文档。
 
----
+### 3. 与仪表盘的关系
 
-## 10. Interaction Output Design Principles
+仪表盘不是默认输出区，而是持续任务、完整工作流与可追踪任务的承接出口。
 
-### 10.1 Prioritize Delivering Results, Not Opening Interfaces
+当任务具有连续性、需要查看历史过程，或需要统一查看多个结果时，系统可将结果进一步承接到仪表盘或任务详情中。
 
-The system should first solve "how results are used by users," then decide whether to open new interfaces.
+***
 
-### 10.2 Prioritize Reducing Context Switching
+## 十、交互出口的设计原则
 
-If delivery can be completed at the current task site, do not prioritize pulling users away from the current interface.
+### 1. 优先交付结果，而不是优先打开界面
 
-### 10.3 Lightweight Output First, Heavy Output as Needed
+系统应先解决"结果如何被用户使用"，再决定是否需要打开新界面。
 
-First complete lightweight handling through bubbles, then enter documents, result pages, files, or task details as needed.
+### 2. 优先减少上下文切换
 
-### 10.4 Output Should Match Result Nature
+能在当前任务现场完成交付的，不优先拉用户离开当前界面。
 
-Delivery method should serve the result itself, not serve a fixed process.
+### 3. 轻量出口优先，重出口按需进入
 
-### 10.5 Allow Results to Naturally Divert from Lightweight Output to Formal Output
+先通过气泡完成轻量承接，再根据需要进入文档、结果页、文件或任务详情。
 
-For example:
+### 4. 出口应与结果性质匹配
 
-* Bubble first gives summary
+交付方式要服务于结果本身，而不是服务于某种固定流程。
 
-* Then opens result page
+### 5. 允许结果从轻量出口自然分流到正式出口
 
-* Then enters workspace document
+例如：
 
-* Then enters task details
+* 气泡先给摘要
 
-This type of diversion is natural extension, not process fragmentation.
+* 再打开结果页
 
----
+* 再进入工作区文档
 
-## 11. Summary
+* 再进入任务详情
 
-Interaction output in the floating ball system is suggested to be divided into two layers:
+这类分流是自然的延展，而不是流程割裂。
 
-* **Bubble-type handling method**: Responsible for immediate feedback, lightweight conversation, short results, and transitional explanation
+***
 
-* **Action-type output method**: Responsible for real result delivery
+## 十一、总结
 
-Action-type output methods can include:
+悬浮球体系中的交互出口，建议分为两层：
 
-* Write directly to bubble
+* **气泡型承接方式**：负责即时反馈、轻量对话、短结果与过渡说明
 
-* Open browser/result page
+* **动作型输出方式**：负责真正的结果交付
 
-* Generate document in workspace and open
+动作型输出方式可包括：
 
-* Open generated file
+* 直接写入气泡
 
-* Open folder and highlight result
+* 打开浏览器 / 结果页
 
-* Open task details/historical tasks
+* 在工作区生成文档并打开
 
-* Voice playback
+* 打开生成文件
 
-Among them, bubbles are not long-term result storage areas, nor traditional chat boxes, but lightweight conversation handling mechanisms around the floating ball.
+* 打开文件夹并高亮结果
 
-The overall goal is: Without evolving into traditional chat interfaces, enable the floating ball to complete lightweight feedback, result explanation, and multi-type result delivery, and let users always prioritize completing result reception and subsequent processing at the current task site.
+* 打开任务详情 / 历史任务
+
+* 语音播放
+
+其中，气泡不是长期结果存储区，也不是传统聊天框，而是围绕悬浮球附近的轻量对话承接机制。
+
+整体目标是：在不演化为传统聊天界面的前提下，让悬浮球能够完成轻量反馈、结果说明与多类型结果交付，并让用户始终优先在当前任务现场完成结果接收与后续处理。
