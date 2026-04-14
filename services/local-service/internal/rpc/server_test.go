@@ -434,6 +434,83 @@ func TestDispatchReturnsTaskArtifactOpen(t *testing.T) {
 	}
 }
 
+func TestDispatchReturnsDeliveryOpenForArtifact(t *testing.T) {
+	server := newTestServer()
+	storageService := storage.NewService(platform.NewLocalStorageAdapter(filepath.Join(t.TempDir(), "delivery-open-artifact.db")))
+	defer func() { _ = storageService.Close() }()
+	server.orchestrator.WithStorage(storageService)
+	err := storageService.ArtifactStore().SaveArtifacts(context.Background(), []storage.ArtifactRecord{{
+		ArtifactID:          "art_delivery_rpc_001",
+		TaskID:              "task_delivery_rpc_001",
+		ArtifactType:        "generated_doc",
+		Title:               "delivery-rpc.md",
+		Path:                "workspace/delivery-rpc.md",
+		MimeType:            "text/markdown",
+		DeliveryType:        "open_file",
+		DeliveryPayloadJSON: `{"path":"workspace/delivery-rpc.md","task_id":"task_delivery_rpc_001"}`,
+		CreatedAt:           "2026-04-14T10:10:00Z",
+	}})
+	if err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	response := server.dispatch(requestEnvelope{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`"req-delivery-open-artifact"`),
+		Method:  "agent.delivery.open",
+		Params: mustMarshal(t, map[string]any{
+			"task_id":     "task_delivery_rpc_001",
+			"artifact_id": "art_delivery_rpc_001",
+		}),
+	})
+	success, ok := response.(successEnvelope)
+	if !ok {
+		t.Fatalf("expected success response envelope, got %#v", response)
+	}
+	data := success.Result.Data.(map[string]any)
+	if data["open_action"] != "open_file" {
+		t.Fatalf("expected open_file action, got %+v", data)
+	}
+}
+
+func TestDispatchReturnsDeliveryOpenForTaskResult(t *testing.T) {
+	server := newTestServer()
+	startResult, err := server.orchestrator.StartTask(map[string]any{
+		"session_id": "sess_delivery_rpc",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请整理成文档",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+	response := server.dispatch(requestEnvelope{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`"req-delivery-open-task"`),
+		Method:  "agent.delivery.open",
+		Params: mustMarshal(t, map[string]any{
+			"task_id": taskID,
+		}),
+	})
+	success, ok := response.(successEnvelope)
+	if !ok {
+		t.Fatalf("expected success response envelope, got %#v", response)
+	}
+	data := success.Result.Data.(map[string]any)
+	if data["open_action"] != "workspace_document" {
+		t.Fatalf("expected workspace_document action, got %+v", data)
+	}
+}
+
 func TestDispatchMapsSecurityAuditListStorageErrors(t *testing.T) {
 	_, rpcErr := wrapOrchestratorResult(nil, orchestrator.ErrStorageQueryFailed)
 	if rpcErr == nil {

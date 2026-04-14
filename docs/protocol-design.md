@@ -505,7 +505,6 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 ### 7.2 planned
 
 - `agent.mirror.memory.manage`
-- `agent.delivery.open`
 - `agent.plugin.list`
 - `agent.plugin.enable`
 - `agent.plugin.disable`
@@ -690,6 +689,17 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - **系统处理**：根据 `task_id + artifact_id` 定位真实 artifact，并返回与之对齐的 `delivery_result`、`open_action`、`resolved_payload`。
 - **入参**：`task_id`、`artifact_id`
 - **出参**：`artifact`、`delivery_result`、`open_action`、`resolved_payload`
+
+### 8.1.5 `agent.delivery.open`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：前端需要统一打开最终交付对象时，无论入口来自任务主交付还是某个 artifact。
+- **系统处理**：
+  - 若携带 `artifact_id`，则优先基于真实 artifact 解析打开动作；
+  - 若未携带 `artifact_id`，则基于任务当前 `delivery_result` 解析打开动作；
+  - 返回统一的 `delivery_result`、`open_action`、`resolved_payload`，供前端直接执行打开。
+- **入参**：`task_id`，可选 `artifact_id`
+- **出参**：`delivery_result`、`open_action`、`resolved_payload`，按需附带 `artifact`
 - **出参**：任务对象、气泡消息、交付结果（如已完成）
 
 ### agent.task.start 入参说明

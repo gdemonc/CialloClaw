@@ -499,6 +499,61 @@ func (s *Service) TaskArtifactOpen(params map[string]any) (map[string]any, error
 		if stringValue(artifact, "artifact_id", "") != artifactID {
 			continue
 		}
+		openResult := buildDeliveryOpenResult(cloneMap(artifact), nil, taskID)
+		openResult["artifact"] = cloneMap(artifact)
+		return openResult, nil
+	}
+	return nil, ErrTaskNotFound
+}
+
+// DeliveryOpen handles agent.delivery.open and resolves the final open action.
+func (s *Service) DeliveryOpen(params map[string]any) (map[string]any, error) {
+	taskID := stringValue(params, "task_id", "")
+	if strings.TrimSpace(taskID) == "" {
+		return nil, errors.New("task_id is required")
+	}
+	artifactID := stringValue(params, "artifact_id", "")
+	if strings.TrimSpace(artifactID) != "" {
+		for _, artifact := range s.artifactsForTask(taskID, nil) {
+			if stringValue(artifact, "artifact_id", "") == artifactID {
+				result := buildDeliveryOpenResult(cloneMap(artifact), nil, taskID)
+				result["artifact"] = cloneMap(artifact)
+				return result, nil
+			}
+		}
+		return nil, ErrTaskNotFound
+	}
+	task, ok := s.runEngine.GetTask(taskID)
+	if !ok {
+		task, ok = s.taskDetailFromStorage(taskID)
+	}
+	if !ok {
+		return nil, ErrTaskNotFound
+	}
+	return buildDeliveryOpenResult(nil, cloneMap(task.DeliveryResult), taskID), nil
+}
+
+func inferArtifactDeliveryType(artifact map[string]any) string {
+	if deliveryType := stringValue(artifact, "delivery_type", ""); deliveryType != "" {
+		return deliveryType
+	}
+	if path := stringValue(artifact, "path", ""); path != "" {
+		return "open_file"
+	}
+	return "task_detail"
+}
+
+func buildDeliveryOpenResult(artifact map[string]any, deliveryResult map[string]any, taskID string) map[string]any {
+	resolvedDelivery := normalizeDeliveryOpenResult(artifact, deliveryResult, taskID)
+	return map[string]any{
+		"delivery_result":  resolvedDelivery,
+		"open_action":      stringValue(resolvedDelivery, "type", "task_detail"),
+		"resolved_payload": cloneMap(mapValue(resolvedDelivery, "payload")),
+	}
+}
+
+func normalizeDeliveryOpenResult(artifact map[string]any, deliveryResult map[string]any, taskID string) map[string]any {
+	if len(deliveryResult) == 0 {
 		payload := cloneMap(mapValue(artifact, "delivery_payload"))
 		if payload == nil {
 			payload = map[string]any{}
@@ -511,23 +566,31 @@ func (s *Service) TaskArtifactOpen(params map[string]any) (map[string]any, error
 			payload["task_id"] = taskID
 		}
 		return map[string]any{
-			"artifact":         cloneMap(artifact),
-			"delivery_result":  map[string]any{"type": firstNonEmptyString(stringValue(artifact, "delivery_type", ""), inferArtifactDeliveryType(artifact)), "title": stringValue(artifact, "title", ""), "payload": payload, "preview_text": stringValue(artifact, "title", "")},
-			"open_action":      inferArtifactDeliveryType(artifact),
-			"resolved_payload": payload,
-		}, nil
+			"type":         firstNonEmptyString(stringValue(artifact, "delivery_type", ""), inferArtifactDeliveryType(artifact)),
+			"title":        stringValue(artifact, "title", ""),
+			"payload":      payload,
+			"preview_text": stringValue(artifact, "title", ""),
+		}
 	}
-	return nil, ErrTaskNotFound
-}
-
-func inferArtifactDeliveryType(artifact map[string]any) string {
-	if deliveryType := stringValue(artifact, "delivery_type", ""); deliveryType != "" {
-		return deliveryType
+	resolved := cloneMap(deliveryResult)
+	payload := cloneMap(mapValue(resolved, "payload"))
+	if payload == nil {
+		payload = map[string]any{}
 	}
-	if path := stringValue(artifact, "path", ""); path != "" {
-		return "open_file"
+	if payload["task_id"] == nil {
+		payload["task_id"] = taskID
 	}
-	return "task_detail"
+	resolved["payload"] = payload
+	if stringValue(resolved, "type", "") == "" {
+		resolved["type"] = "task_detail"
+	}
+	if stringValue(resolved, "title", "") == "" {
+		resolved["title"] = "任务交付结果"
+	}
+	if stringValue(resolved, "preview_text", "") == "" {
+		resolved["preview_text"] = stringValue(resolved, "title", "")
+	}
+	return resolved
 }
 
 // TaskControl 处理当前模块的相关逻辑。

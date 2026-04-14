@@ -301,6 +301,21 @@ export interface AgentTaskArtifactOpenResult {
   resolved_payload: DeliveryPayload;
 }
 
+// AgentDeliveryOpenParams defines the parameters for agent.delivery.open.
+export interface AgentDeliveryOpenParams {
+  request_meta: RequestMeta;
+  task_id: string;
+  artifact_id?: string;
+}
+
+// AgentDeliveryOpenResult defines the result for agent.delivery.open.
+export interface AgentDeliveryOpenResult {
+  artifact?: Artifact;
+  delivery_result: DeliveryResult;
+  open_action: DeliveryType;
+  resolved_payload: DeliveryPayload;
+}
+
 // AgentTaskControlParams 定义当前模块的接口约束。
 export interface AgentTaskControlParams {
   request_meta: RequestMeta;

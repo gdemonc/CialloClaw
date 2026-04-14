@@ -18,6 +18,7 @@ func (s *Server) registerHandlers() {
 		"agent.task.confirm":                   s.handleAgentTaskConfirm,
 		"agent.task.artifact.list":             s.handleAgentTaskArtifactList,
 		"agent.task.artifact.open":             s.handleAgentTaskArtifactOpen,
+		"agent.delivery.open":                  s.handleAgentDeliveryOpen,
 		"agent.recommendation.get":             s.handleAgentRecommendationGet,
 		"agent.recommendation.feedback.submit": s.handleAgentRecommendationFeedbackSubmit,
 		"agent.task.list":                      s.handleAgentTaskList,
@@ -51,6 +52,12 @@ func (s *Server) handleAgentTaskArtifactList(params map[string]any) (any, *rpcEr
 // handleAgentTaskArtifactOpen handles agent.task.artifact.open.
 func (s *Server) handleAgentTaskArtifactOpen(params map[string]any) (any, *rpcError) {
 	data, err := s.orchestrator.TaskArtifactOpen(params)
+	return wrapOrchestratorResult(data, err)
+}
+
+// handleAgentDeliveryOpen handles agent.delivery.open.
+func (s *Server) handleAgentDeliveryOpen(params map[string]any) (any, *rpcError) {
+	data, err := s.orchestrator.DeliveryOpen(params)
 	return wrapOrchestratorResult(data, err)
 }
 

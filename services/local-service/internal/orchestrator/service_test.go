@@ -3340,6 +3340,71 @@ func TestServiceTaskArtifactOpenReturnsStableOpenPayload(t *testing.T) {
 	}
 }
 
+func TestServiceDeliveryOpenReturnsTaskDeliveryResult(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "delivery open task")
+	startResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_delivery_open",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请整理成文档",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+	result, err := service.DeliveryOpen(map[string]any{"task_id": taskID})
+	if err != nil {
+		t.Fatalf("delivery open failed: %v", err)
+	}
+	if result["open_action"] != "workspace_document" {
+		t.Fatalf("expected workspace_document open action, got %+v", result)
+	}
+	payload := result["resolved_payload"].(map[string]any)
+	if payload["task_id"] != taskID {
+		t.Fatalf("expected payload to carry task_id, got %+v", payload)
+	}
+}
+
+func TestServiceDeliveryOpenReturnsArtifactDeliveryResult(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "delivery open artifact")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	err := service.storage.ArtifactStore().SaveArtifacts(context.Background(), []storage.ArtifactRecord{{
+		ArtifactID:          "art_delivery_open_001",
+		TaskID:              "task_delivery_open",
+		ArtifactType:        "generated_doc",
+		Title:               "delivery-open.md",
+		Path:                "workspace/delivery-open.md",
+		MimeType:            "text/markdown",
+		DeliveryType:        "open_file",
+		DeliveryPayloadJSON: `{"path":"workspace/delivery-open.md","task_id":"task_delivery_open"}`,
+		CreatedAt:           "2026-04-14T10:10:00Z",
+	}})
+	if err != nil {
+		t.Fatalf("save artifact failed: %v", err)
+	}
+	result, err := service.DeliveryOpen(map[string]any{"task_id": "task_delivery_open", "artifact_id": "art_delivery_open_001"})
+	if err != nil {
+		t.Fatalf("delivery open artifact failed: %v", err)
+	}
+	if result["open_action"] != "open_file" {
+		t.Fatalf("expected open_file action, got %+v", result)
+	}
+	if result["artifact"].(map[string]any)["artifact_id"] != "art_delivery_open_001" {
+		t.Fatalf("expected artifact payload, got %+v", result)
+	}
+}
+
 func TestServiceTaskControlRejectsInvalidStatusTransition(t *testing.T) {
 	service := newTestService()
 
