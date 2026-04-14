@@ -1549,6 +1549,47 @@ func TestServiceSecurityRespondAllowOnceExecCommandCompletesAfterApproval(t *tes
 	}
 }
 
+func TestServiceSecurityRespondAllowOnceCompletesDerivedWriteFileAfterApproval(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "新的文档内容")
+
+	startResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_derived_write",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请总结成文档",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style":                 "key_points",
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+	if startResult["task"].(map[string]any)["status"] != "waiting_auth" {
+		t.Fatalf("expected derived write flow to wait for auth, got %+v", startResult)
+	}
+
+	respondResult, err := service.SecurityRespond(map[string]any{
+		"task_id":       taskID,
+		"approval_id":   "appr_derived_write",
+		"decision":      "allow_once",
+		"remember_rule": false,
+	})
+	if err != nil {
+		t.Fatalf("security respond failed: %v", err)
+	}
+	if respondResult["task"].(map[string]any)["status"] != "completed" {
+		t.Fatalf("expected completed task after approved derived write_file, got %+v", respondResult)
+	}
+}
+
 func TestServiceSecurityRespondAllowOnceReturnsStructuredRecoveryFailure(t *testing.T) {
 	service, workspaceRoot := newTestServiceWithExecutionOptions(t, "unused", platform.LocalExecutionBackend{}, failingCheckpointWriter{err: errors.New("checkpoint unavailable")})
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "notes"), 0o755); err != nil {
@@ -2276,14 +2317,33 @@ func TestServiceSecurityRestoreApplyRestoresWorkspaceAndReturnsFormalResult(t *t
 	if err != nil {
 		t.Fatalf("security restore apply failed: %v", err)
 	}
-	if applyResult["applied"] != true {
-		t.Fatalf("expected restore apply success, got %+v", applyResult)
+	if applyResult["task"].(map[string]any)["status"] != "waiting_auth" || applyResult["applied"] != false {
+		t.Fatalf("expected restore apply to require authorization first, got %+v", applyResult)
 	}
-	auditRecord := applyResult["audit_record"].(map[string]any)
+	contentBeforeApproval, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read file before restore approval: %v", err)
+	}
+	if !strings.Contains(string(contentBeforeApproval), "新的内容") {
+		t.Fatalf("expected restore request not to mutate workspace before approval, got %q", string(contentBeforeApproval))
+	}
+	respondApplyResult, err := service.SecurityRespond(map[string]any{
+		"task_id":       taskID,
+		"approval_id":   "appr_restore_apply",
+		"decision":      "allow_once",
+		"remember_rule": false,
+	})
+	if err != nil {
+		t.Fatalf("security respond for restore apply failed: %v", err)
+	}
+	if respondApplyResult["applied"] != true {
+		t.Fatalf("expected approved restore apply success, got %+v", respondApplyResult)
+	}
+	auditRecord := respondApplyResult["audit_record"].(map[string]any)
 	if auditRecord["action"] != "restore_apply" || auditRecord["result"] != "success" {
 		t.Fatalf("expected restore audit success, got %+v", auditRecord)
 	}
-	bubble := applyResult["bubble_message"].(map[string]any)
+	bubble := respondApplyResult["bubble_message"].(map[string]any)
 	if !strings.Contains(stringValue(bubble, "text", ""), "恢复点") {
 		t.Fatalf("expected bubble message to mention recovery point, got %+v", bubble)
 	}
@@ -2363,6 +2423,18 @@ func TestServiceSecurityRestoreApplyReturnsStructuredFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("security restore apply returned rpc error unexpectedly: %v", err)
 	}
+	if applyResult["task"].(map[string]any)["status"] != "waiting_auth" {
+		t.Fatalf("expected restore apply to wait for auth before execution, got %+v", applyResult)
+	}
+	applyResult, err = service.SecurityRespond(map[string]any{
+		"task_id":       taskID,
+		"approval_id":   "appr_restore_apply_failure",
+		"decision":      "allow_once",
+		"remember_rule": false,
+	})
+	if err != nil {
+		t.Fatalf("security respond for restore apply failure failed: %v", err)
+	}
 	if applyResult["applied"] != false {
 		t.Fatalf("expected restore apply failure result, got %+v", applyResult)
 	}
@@ -2435,6 +2507,13 @@ func TestServiceSecurityRestoreApplySupportsPersistedTaskFallback(t *testing.T) 
 	applyResult, err := service.SecurityRestoreApply(map[string]any{"task_id": taskID, "recovery_point_id": points[0]["recovery_point_id"]})
 	if err != nil {
 		t.Fatalf("security restore apply failed with persisted task fallback: %v", err)
+	}
+	if applyResult["task"].(map[string]any)["status"] != "waiting_auth" {
+		t.Fatalf("expected restore apply fallback to wait for auth, got %+v", applyResult)
+	}
+	applyResult, err = service.SecurityRespond(map[string]any{"task_id": taskID, "approval_id": "appr_restore_apply_persisted", "decision": "allow_once"})
+	if err != nil {
+		t.Fatalf("security respond failed with persisted fallback: %v", err)
 	}
 	if applyResult["applied"] != true {
 		t.Fatalf("expected restore apply success with persisted task fallback, got %+v", applyResult)
