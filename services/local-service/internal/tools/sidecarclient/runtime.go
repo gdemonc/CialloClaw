@@ -51,7 +51,7 @@ func newCommandWorkerInvoker(workdir string) commandWorkerInvoker {
 	return commandWorkerInvoker{
 		workdir: workdir,
 		command: "node",
-		args:    []string{"workers/playwright-worker/src/index.ts"},
+		args:    []string{"workers/playwright-worker/src/index.js"},
 	}
 }
 

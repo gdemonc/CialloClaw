@@ -1,26 +1,12 @@
 import { stdin as input, stdout as output, stderr as errorOutput } from "node:process";
 
-type WorkerRequest =
-  | { action: "health" }
-  | { action: "page_read"; url: string }
-  | { action: "page_search"; url: string; query: string; limit?: number };
-
-type WorkerResponse = {
-  ok: boolean;
-  result?: Record<string, unknown>;
-  error?: {
-    code: string;
-    message: string;
-  };
-};
-
 const manifest = {
   worker_name: "playwright_worker",
   transport: ["stdio", "jsonrpc"],
   capabilities: ["page_read", "page_search", "page_interact", "structured_dom"],
 };
 
-function readAllStdin(): Promise<string> {
+function readAllStdin() {
   return new Promise((resolve, reject) => {
     let data = "";
     input.setEncoding("utf8");
@@ -32,7 +18,7 @@ function readAllStdin(): Promise<string> {
   });
 }
 
-function normalizeText(html: string): string {
+function normalizeText(html) {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -45,7 +31,7 @@ function normalizeText(html: string): string {
     .trim();
 }
 
-function extractTitle(html: string, url: string): string {
+function extractTitle(html, url) {
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   if (titleMatch?.[1]) {
     return normalizeText(titleMatch[1]);
@@ -57,7 +43,7 @@ function extractTitle(html: string, url: string): string {
   }
 }
 
-async function fetchPage(url: string): Promise<{ url: string; html: string; contentType: string }> {
+async function fetchPage(url) {
   const response = await fetch(url, {
     redirect: "follow",
     headers: {
@@ -77,7 +63,7 @@ async function fetchPage(url: string): Promise<{ url: string; html: string; cont
   };
 }
 
-async function handleRequest(request: WorkerRequest): Promise<WorkerResponse> {
+async function handleRequest(request) {
   switch (request.action) {
     case "health":
       return {
@@ -107,7 +93,8 @@ async function handleRequest(request: WorkerRequest): Promise<WorkerResponse> {
       const page = await fetchPage(request.url);
       const textContent = normalizeText(page.html);
       const normalizedQuery = request.query.trim().toLowerCase();
-      const limit = Number.isFinite(request.limit) && (request.limit ?? 0) > 0 ? Math.floor(request.limit as number) : 5;
+      const rawLimit = Number(request.limit ?? 0);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 5;
       const segments = textContent
         .split(/[.!?。！？]\s*/)
         .map((segment) => segment.trim())
@@ -135,7 +122,7 @@ async function handleRequest(request: WorkerRequest): Promise<WorkerResponse> {
   }
 }
 
-async function main(): Promise<void> {
+async function main() {
   const raw = await readAllStdin();
   const trimmed = raw.trim();
   if (trimmed === "" || trimmed === "--manifest") {
@@ -143,14 +130,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  const request = JSON.parse(trimmed) as WorkerRequest;
+  const request = JSON.parse(trimmed);
   const response = await handleRequest(request);
   output.write(`${JSON.stringify(response)}\n`);
 }
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  const response: WorkerResponse = {
+  const response = {
     ok: false,
     error: {
       code: "worker_failed",
