@@ -3536,6 +3536,64 @@ func TestServiceDeliveryOpenReturnsArtifactDeliveryResult(t *testing.T) {
 	}
 }
 
+func TestTaskArtifactHelpersCoverFallbackBranches(t *testing.T) {
+	if got := inferArtifactDeliveryType(map[string]any{"path": "workspace/file.md"}); got != "open_file" {
+		t.Fatalf("expected path-backed artifact to infer open_file, got %q", got)
+	}
+	if got := inferArtifactDeliveryType(map[string]any{"title": "no-path"}); got != "task_detail" {
+		t.Fatalf("expected no-path artifact to infer task_detail, got %q", got)
+	}
+	result := normalizeDeliveryOpenResult(nil, map[string]any{"payload": map[string]any{}}, "task_001")
+	if result["type"] != "task_detail" || result["title"] != "任务交付结果" || result["preview_text"] != "任务交付结果" {
+		t.Fatalf("expected defaulted delivery result fields, got %+v", result)
+	}
+}
+
+func TestServiceTaskArtifactListFallsBackToRuntimeArtifactsWhenStoreEmpty(t *testing.T) {
+	service := newTestService()
+	startResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_runtime_artifact",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请整理成文档",
+		},
+		"intent": map[string]any{
+			"name": "summarize",
+			"arguments": map[string]any{
+				"style": "key_points",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+	task, ok := service.runEngine.GetTask(taskID)
+	if !ok {
+		t.Fatal("expected runtime task to exist")
+	}
+	_, _ = service.runEngine.SetPresentation(taskID, task.BubbleMessage, task.DeliveryResult, []map[string]any{{
+		"artifact_id":      "art_runtime_001",
+		"task_id":          taskID,
+		"artifact_type":    "generated_doc",
+		"title":            "runtime.md",
+		"path":             "workspace/runtime.md",
+		"mime_type":        "text/markdown",
+		"delivery_type":    "workspace_document",
+		"delivery_payload": map[string]any{"path": "workspace/runtime.md", "task_id": taskID},
+	}})
+	result, err := service.TaskArtifactList(map[string]any{"task_id": taskID, "limit": 20, "offset": 0})
+	if err != nil {
+		t.Fatalf("task artifact list failed: %v", err)
+	}
+	items := result["items"].([]map[string]any)
+	if len(items) != 1 || items[0]["artifact_id"] != "art_runtime_001" {
+		t.Fatalf("expected runtime artifact fallback to return item, got %+v", items)
+	}
+}
+
 func TestServiceTaskControlRejectsInvalidStatusTransition(t *testing.T) {
 	service := newTestService()
 

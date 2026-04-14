@@ -2944,7 +2944,7 @@ func (s *Service) listArtifactsPage(taskID string, limit, offset int) ([]map[str
 			return items, total, nil
 		}
 	}
-	items := s.artifactsForTask(taskID, nil)
+	items := s.artifactsForTask(taskID, currentTaskArtifacts(s.runEngine, taskID))
 	total := len(items)
 	if offset >= total {
 		return []map[string]any{}, total, nil
@@ -2954,6 +2954,17 @@ func (s *Service) listArtifactsPage(taskID string, limit, offset int) ([]map[str
 		end = total
 	}
 	return cloneMapSlice(items[offset:end]), total, nil
+}
+
+func currentTaskArtifacts(engine *runengine.Engine, taskID string) []map[string]any {
+	if engine == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	task, ok := engine.GetTask(taskID)
+	if !ok {
+		return nil
+	}
+	return cloneMapSlice(task.Artifacts)
 }
 
 func (s *Service) findArtifactForTask(taskID, artifactID string) (map[string]any, error) {
