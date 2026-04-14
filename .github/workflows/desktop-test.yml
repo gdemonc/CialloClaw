@@ -68,4 +68,5 @@ jobs:
         run: pnpm --filter @cialloclaw/desktop build
 
       - name: Build Tauri app
-        run: pnpm --dir apps/desktop tauri build --debug
+        working-directory: apps/desktop
+        run: pnpm exec tauri build --debug
