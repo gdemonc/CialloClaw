@@ -55,6 +55,7 @@ func (s *Service) Assess(input AssessmentInput) AssessmentResult {
 	if isApprovalCommand(input.CommandPreview) {
 		result.RiskLevel = RiskLevelRed
 		result.ApprovalRequired = true
+		result.CheckpointRequired = input.OperationName == "exec_command"
 		result.Reason = ReasonCommandApproval
 		return result
 	}
@@ -73,8 +74,24 @@ func (s *Service) Assess(input AssessmentInput) AssessmentResult {
 		return result
 	}
 
+	if isWebpageOperation(input.OperationName) {
+		result.RiskLevel = RiskLevelYellow
+		result.ApprovalRequired = true
+		result.Reason = ReasonWebpageApproval
+		return result
+	}
+
+	if input.OperationName == "exec_command" {
+		result.RiskLevel = RiskLevelYellow
+		result.ApprovalRequired = true
+		result.CheckpointRequired = len(input.ImpactScope.Files) > 0
+		result.Reason = ReasonCommandApproval
+		return result
+	}
+
 	if input.ImpactScope.OverwriteOrDeleteRisk {
 		result.RiskLevel = RiskLevelYellow
+		result.ApprovalRequired = true
 		result.CheckpointRequired = true
 		result.Reason = ReasonOverwriteOrDelete
 		return result
@@ -128,4 +145,13 @@ func isApprovalCommand(commandPreview string) bool {
 	}
 
 	return false
+}
+
+func isWebpageOperation(operationName string) bool {
+	switch strings.TrimSpace(operationName) {
+	case "page_read", "page_search":
+		return true
+	default:
+		return false
+	}
 }

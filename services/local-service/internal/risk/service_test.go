@@ -68,9 +68,31 @@ func TestServiceAssess(t *testing.T) {
 				CommandPreview:      "powershell Get-Process",
 			},
 			want: AssessmentResult{
-				RiskLevel:        RiskLevelRed,
-				ApprovalRequired: true,
-				Reason:           ReasonCommandApproval,
+				RiskLevel:          RiskLevelRed,
+				ApprovalRequired:   true,
+				CheckpointRequired: true,
+				Reason:             ReasonCommandApproval,
+			},
+		},
+		{
+			name: "safe_command_still_requires_approval",
+			input: AssessmentInput{
+				OperationName:       "exec_command",
+				TargetObject:        "D:/workspace",
+				CapabilityAvailable: true,
+				WorkspaceKnown:      true,
+				ImpactScope: ImpactScope{
+					Files: []string{"D:/workspace"},
+				},
+			},
+			want: AssessmentResult{
+				RiskLevel:          RiskLevelYellow,
+				ApprovalRequired:   true,
+				CheckpointRequired: true,
+				Reason:             ReasonCommandApproval,
+				ImpactScope: ImpactScope{
+					Files: []string{"D:/workspace"},
+				},
 			},
 		},
 		{
@@ -93,6 +115,23 @@ func TestServiceAssess(t *testing.T) {
 					Files:          []string{"D:/outside/report.md"},
 					OutOfWorkspace: true,
 				},
+			},
+		},
+		{
+			name: "webpage_read_requires_approval",
+			input: AssessmentInput{
+				OperationName:       "page_read",
+				TargetObject:        "https://example.com/demo",
+				CapabilityAvailable: true,
+				ImpactScope: ImpactScope{
+					Webpages: []string{"https://example.com/demo"},
+				},
+			},
+			want: AssessmentResult{
+				RiskLevel:        RiskLevelYellow,
+				ApprovalRequired: true,
+				Reason:           ReasonWebpageApproval,
+				ImpactScope:      ImpactScope{Webpages: []string{"https://example.com/demo"}},
 			},
 		},
 		{
@@ -123,6 +162,7 @@ func TestServiceAssess(t *testing.T) {
 			},
 			want: AssessmentResult{
 				RiskLevel:          RiskLevelYellow,
+				ApprovalRequired:   true,
 				CheckpointRequired: true,
 				Reason:             ReasonOverwriteOrDelete,
 				ImpactScope: ImpactScope{

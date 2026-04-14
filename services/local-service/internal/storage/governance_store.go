@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,6 +52,8 @@ type inMemoryRecoveryPointStore struct {
 	points []checkpoint.RecoveryPoint
 }
 
+var ErrRecoveryPointNotFound = errors.New("recovery point not found")
+
 func newInMemoryRecoveryPointStore() *inMemoryRecoveryPointStore {
 	return &inMemoryRecoveryPointStore{points: make([]checkpoint.RecoveryPoint, 0)}
 }
@@ -75,6 +78,17 @@ func (s *inMemoryRecoveryPointStore) ListRecoveryPoints(_ context.Context, taskI
 		return parseGovernanceTime(items[i].CreatedAt).After(parseGovernanceTime(items[j].CreatedAt))
 	})
 	return pageRecoveryPoints(items, limit, offset), len(items), nil
+}
+
+func (s *inMemoryRecoveryPointStore) GetRecoveryPoint(_ context.Context, recoveryPointID string) (checkpoint.RecoveryPoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, point := range s.points {
+		if point.RecoveryPointID == recoveryPointID {
+			return point, nil
+		}
+	}
+	return checkpoint.RecoveryPoint{}, ErrRecoveryPointNotFound
 }
 
 type SQLiteAuditStore struct {
@@ -263,6 +277,22 @@ func (s *SQLiteRecoveryPointStore) ListRecoveryPoints(ctx context.Context, taskI
 	return items, total, nil
 }
 
+func (s *SQLiteRecoveryPointStore) GetRecoveryPoint(ctx context.Context, recoveryPointID string) (checkpoint.RecoveryPoint, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT recovery_point_id, task_id, summary, created_at, objects_json FROM recovery_points WHERE recovery_point_id = ?`, recoveryPointID)
+	var point checkpoint.RecoveryPoint
+	var objectsJSON string
+	if err := row.Scan(&point.RecoveryPointID, &point.TaskID, &point.Summary, &point.CreatedAt, &objectsJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return checkpoint.RecoveryPoint{}, ErrRecoveryPointNotFound
+		}
+		return checkpoint.RecoveryPoint{}, fmt.Errorf("get recovery point: %w", err)
+	}
+	if err := json.Unmarshal([]byte(objectsJSON), &point.Objects); err != nil {
+		return checkpoint.RecoveryPoint{}, fmt.Errorf("unmarshal recovery point objects: %w", err)
+	}
+	return point, nil
+}
+
 func (s *SQLiteRecoveryPointStore) Close() error {
 	if s.db == nil {
 		return nil
@@ -311,11 +341,14 @@ func openSQLiteDatabase(databasePath string) (*sql.DB, error) {
 }
 
 func pageAuditRecords(items []audit.Record, limit, offset int) []audit.Record {
+	if offset < 0 {
+		offset = 0
+	}
 	if offset >= len(items) {
 		return nil
 	}
 	if limit <= 0 {
-		limit = len(items)
+		limit = 20
 	}
 	end := offset + limit
 	if end > len(items) {
@@ -325,11 +358,14 @@ func pageAuditRecords(items []audit.Record, limit, offset int) []audit.Record {
 }
 
 func pageRecoveryPoints(items []checkpoint.RecoveryPoint, limit, offset int) []checkpoint.RecoveryPoint {
+	if offset < 0 {
+		offset = 0
+	}
 	if offset >= len(items) {
 		return nil
 	}
 	if limit <= 0 {
-		limit = len(items)
+		limit = 20
 	}
 	end := offset + limit
 	if end > len(items) {

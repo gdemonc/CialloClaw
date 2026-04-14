@@ -1,6 +1,7 @@
-import type { AgentInputSubmitParams, RequestMeta } from "@cialloclaw/protocol";
+import type { AgentInputSubmitParams } from "@cialloclaw/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
+import { submitTextInput, createTextInputSubmitParams } from "../../services/agentInputService";
 import {
   createShellBallInteractionController,
   getShellBallInputBarMode,
@@ -33,44 +34,31 @@ type ShellBallInteractionConsumedEvent =
 
 type ShellBallVoiceRecognitionStopReason = "none" | "finish" | "cancel";
 
-function createShellBallRequestMeta(): RequestMeta {
-  const now = new Date().toISOString();
-  const traceId = typeof globalThis.crypto?.randomUUID === "function"
-    ? globalThis.crypto.randomUUID()
-    : `trace_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  return {
-    trace_id: traceId,
-    client_time: now,
-  };
-}
+export type ShellBallInputSubmitResult = NonNullable<Awaited<ReturnType<typeof submitTextInput>>> & {
+  delivery_result?: {
+    type?: string;
+    preview_text?: string | null;
+    payload?: {
+      task_id?: string | null;
+    } | null;
+  } | null;
+};
 
 export function createShellBallInputSubmitParams(input: {
   text: string;
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
 }): AgentInputSubmitParams | null {
-  const normalizedText = input.text.trim();
-
-  if (normalizedText === "") {
-    return null;
-  }
-
-  const requestMeta = createShellBallRequestMeta();
-
-  return {
-    request_meta: requestMeta,
+  return createTextInputSubmitParams({
+    text: input.text,
     source: "floating_ball",
     trigger: input.trigger,
-    input: {
-      type: "text",
-      text: normalizedText,
-      input_mode: input.inputMode,
+    inputMode: input.inputMode,
+    options: {
+      confirm_required: false,
+      preferred_delivery: "bubble",
     },
-    context: {
-      files: [],
-    },
-  };
+  });
 }
 
 async function submitShellBallInput(input: {
@@ -78,17 +66,16 @@ async function submitShellBallInput(input: {
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
 }) {
-  const params = createShellBallInputSubmitParams(input);
-
-  if (params === null) {
-    return null;
-  }
-
-  const importRpcMethods = new Function("return import('../../rpc/methods')") as () => Promise<{
-    submitInput: (request: AgentInputSubmitParams) => Promise<unknown>;
-  }>;
-  const rpcMethods = await importRpcMethods();
-  return rpcMethods.submitInput(params);
+  return submitTextInput({
+    text: input.text,
+    source: "floating_ball",
+    trigger: input.trigger,
+    inputMode: input.inputMode,
+    options: {
+      confirm_required: false,
+      preferred_delivery: "bubble",
+    },
+  });
 }
 
 export function mapShellBallInteractionConsumedEventToFlag(event: ShellBallInteractionConsumedEvent) {
@@ -151,6 +138,10 @@ export function getShellBallPressCancelEvent(state: ShellBallVisualState): Extra
   return state === "voice_listening" ? "voice_cancel" : null;
 }
 
+export function resolveShellBallVoiceReleaseEvent(preview: ShellBallVoicePreview): Extract<ShellBallInteractionEvent, "voice_cancel" | "voice_finish"> {
+  return preview === "cancel" ? "voice_cancel" : "voice_finish";
+}
+
 export function syncShellBallInteractionController(input: {
   controller: ShellBallInteractionController;
   visualState: ShellBallVisualState;
@@ -186,10 +177,6 @@ export function resolveShellBallVoiceRecognitionFinalState(input: {
     nextInputValue: input.baseDraft,
     nextVisualState,
   };
-}
-
-function resolveShellBallVoiceReleaseEvent(preview: ShellBallVoicePreview): Extract<ShellBallInteractionEvent, "voice_cancel" | "voice_finish"> {
-  return preview === "cancel" ? "voice_cancel" : "voice_finish";
 }
 
 export function useShellBallInteraction() {
@@ -488,28 +475,28 @@ export function useShellBallInteraction() {
     });
   }
 
-  function handleSubmitText() {
+  async function handleSubmitText() {
     const currentDraft = inputValue.trim();
     const reset = getShellBallPostSubmitInputReset(inputValue);
     if (reset === null) {
-      return;
+      return null;
     }
 
-    void (async () => {
-      try {
-        await submitShellBallInput({
-          text: currentDraft,
-          trigger: "hover_text_input",
-          inputMode: "text",
-        });
-        dispatch("submit_text");
-        setInputValue(reset.nextInputValue);
-        inputFocusedRef.current = reset.nextFocused;
-        setInputFocused(reset.nextFocused);
-      } catch (error) {
-        console.warn("shell-ball text submit failed", error);
-      }
-    })();
+    try {
+      const result = await submitShellBallInput({
+        text: currentDraft,
+        trigger: "hover_text_input",
+        inputMode: "text",
+      });
+      dispatch("submit_text");
+      setInputValue(reset.nextInputValue);
+      inputFocusedRef.current = reset.nextFocused;
+      setInputFocused(reset.nextFocused);
+      return result;
+    } catch (error) {
+      console.warn("shell-ball text submit failed", error);
+      return null;
+    }
   }
 
   function handleAttachFile() {
