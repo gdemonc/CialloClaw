@@ -4,7 +4,6 @@ import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "r
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardVoiceField } from "@/features/dashboard/home/components/DashboardVoiceField";
 import { getDashboardHomeFallbackData, loadDashboardHomeData, submitDashboardHomeRecommendationFeedback } from "@/features/dashboard/home/dashboardHome.service";
-import type { DashboardHomeModuleKey } from "@/features/dashboard/home/dashboardHome.types";
 import { MemoryPage } from "@/features/dashboard/memory/MemoryPage";
 import { NotesPage } from "@/features/dashboard/notes/NotesPage";
 import { SafetyPage } from "@/features/dashboard/safety/SafetyPage";
@@ -160,14 +159,9 @@ function DashboardRoutes() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [navigate, voiceOpen]);
 
-  const handleVoiceCommand = (module: DashboardHomeModuleKey) => {
-    navigate(resolveDashboardModuleRoutePath(module));
-  };
-
   const handleRecommendationFeedback = (recommendationId: string, feedback: "positive" | "negative") => {
     recommendationFeedbackMutation.mutate({ feedback, recommendationId });
   };
-
   return (
     <div className={cn("dashboard-app", isOpening && "is-opening")}>
       <AnimatePresence mode="wait">
@@ -203,7 +197,6 @@ function DashboardRoutes() {
       <DashboardVoiceField
         isOpen={voiceOpen}
         onClose={() => setVoiceOpen(false)}
-        onCommand={handleVoiceCommand}
         onRecommendationConfirm={(recommendationId) => {
           recommendationFeedbackMutation.mutate({ feedback: "positive", recommendationId });
         }}

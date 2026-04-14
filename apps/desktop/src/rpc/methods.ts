@@ -42,8 +42,8 @@ import type {
   AgentTaskStartParams,
   AgentTaskStartResult,
 } from "@cialloclaw/protocol";
-import { RPC_METHODS } from "@cialloclaw/protocol";
 import { rpcClient, type JsonRpcResponsePayload } from "./client";
+import { RPC_METHODS } from "./protocolConstants";
 
 export function submitInput(params: AgentInputSubmitParams) {
   return rpcClient.request<AgentInputSubmitResult>(RPC_METHODS.AGENT_INPUT_SUBMIT, params);

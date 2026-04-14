@@ -1,6 +1,7 @@
-import type { AgentInputSubmitParams, AgentInputSubmitResult, DeliveryResult, RequestMeta } from "@cialloclaw/protocol";
+import type { AgentInputSubmitParams } from "@cialloclaw/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
+import { submitTextInput, createTextInputSubmitParams } from "../../services/agentInputService";
 import {
   createShellBallInteractionController,
   getShellBallInputBarMode,
@@ -37,51 +38,30 @@ type ShellBallInteractionConsumedEvent =
 
 type ShellBallVoiceRecognitionStopReason = "none" | "finish" | "cancel";
 
-export type ShellBallInputSubmitResult = AgentInputSubmitResult & {
-  delivery_result?: DeliveryResult | null;
+export type ShellBallInputSubmitResult = NonNullable<Awaited<ReturnType<typeof submitTextInput>>> & {
+  delivery_result?: {
+    type?: string;
+    preview_text?: string | null;
+    payload?: {
+      task_id?: string | null;
+    } | null;
+  } | null;
 };
-
-function createShellBallRequestMeta(): RequestMeta {
-  const now = new Date().toISOString();
-  const traceId = typeof globalThis.crypto?.randomUUID === "function"
-    ? globalThis.crypto.randomUUID()
-    : `trace_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  return {
-    trace_id: traceId,
-    client_time: now,
-  };
-}
 
 export function createShellBallInputSubmitParams(input: {
   text: string;
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
 }): AgentInputSubmitParams | null {
-  const normalizedText = input.text.trim();
-
-  if (normalizedText === "") {
-    return null;
-  }
-
-  const requestMeta = createShellBallRequestMeta();
-
-  return {
-    request_meta: requestMeta,
+  return createTextInputSubmitParams({
+    text: input.text,
     source: "floating_ball",
     trigger: input.trigger,
-    input: {
-      type: "text",
-      text: normalizedText,
-      input_mode: input.inputMode,
-    },
-    context: {
-      files: [],
-    },
+    inputMode: input.inputMode,
     options: {
       preferred_delivery: "bubble",
     },
-  };
+  });
 }
 
 async function submitShellBallInput(input: {
@@ -89,19 +69,16 @@ async function submitShellBallInput(input: {
   trigger: "voice_commit" | "hover_text_input";
   inputMode: "voice" | "text";
 }): Promise<ShellBallInputSubmitResult | null> {
-  const params = createShellBallInputSubmitParams(input);
-
-  if (params === null) {
-    return null;
-  }
-
-  const importRpcMethods = new Function("return import('../../rpc/methods')") as () => Promise<{
-    submitInput: (request: AgentInputSubmitParams) => Promise<ShellBallInputSubmitResult>;
-  }>;
-
   try {
-    const rpcMethods = await importRpcMethods();
-    return rpcMethods.submitInput(params);
+    return await submitTextInput({
+      text: input.text,
+      source: "floating_ball",
+      trigger: input.trigger,
+      inputMode: input.inputMode,
+      options: {
+        preferred_delivery: "bubble",
+      },
+    });
   } catch (error) {
     if (isRpcChannelUnavailable(error)) {
       logRpcMockFallback("shell-ball submit", error);
