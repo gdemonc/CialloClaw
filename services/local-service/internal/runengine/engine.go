@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -611,8 +612,8 @@ func (e *Engine) CompleteTask(taskID string, deliveryResult map[string]any, bubb
 	return record.clone(), true
 }
 
-// ApplyRecoveryOutcome 在恢复点应用后刷新任务的安全摘要与通知回写。
-func (e *Engine) ApplyRecoveryOutcome(taskID, securityStatus string, recoveryPoint map[string]any, bubbleMessage map[string]any) (TaskRecord, bool) {
+// ApplyRecoveryOutcome 在恢复点应用后刷新任务的状态、安全摘要与通知回写。
+func (e *Engine) ApplyRecoveryOutcome(taskID, taskStatus, securityStatus string, recoveryPoint map[string]any, bubbleMessage map[string]any) (TaskRecord, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -622,7 +623,18 @@ func (e *Engine) ApplyRecoveryOutcome(taskID, securityStatus string, recoveryPoi
 	}
 
 	record.UpdatedAt = e.now()
+	if strings.TrimSpace(taskStatus) != "" {
+		record.Status = taskStatus
+		if taskStatus == "completed" || taskStatus == "failed" || taskStatus == "cancelled" {
+			now := e.now()
+			record.FinishedAt = &now
+		} else {
+			record.FinishedAt = nil
+		}
+	}
 	record.BubbleMessage = cloneMap(bubbleMessage)
+	record.PendingExecution = nil
+	record.ApprovalRequest = nil
 	record.SecuritySummary = map[string]any{
 		"security_status":        firstNonEmpty(securityStatus, "recovered"),
 		"risk_level":             record.RiskLevel,
@@ -755,11 +767,12 @@ func (e *Engine) MarkWaitingApprovalWithPlan(taskID string, approvalRequest map[
 		record.RiskLevel = riskLevel
 	}
 	record.BubbleMessage = cloneMap(bubbleMessage)
+	latestRestorePoint := latestRestorePointFromSummary(record.SecuritySummary)
 	record.SecuritySummary = map[string]any{
 		"security_status":        "pending_confirmation",
 		"risk_level":             record.RiskLevel,
 		"pending_authorizations": 1,
-		"latest_restore_point":   nil,
+		"latest_restore_point":   latestRestorePoint,
 	}
 	record.Timeline = advanceTimeline(record.Timeline, "waiting_authorization", "running", "等待用户授权")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
