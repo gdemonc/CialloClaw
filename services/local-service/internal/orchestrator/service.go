@@ -2192,17 +2192,108 @@ func activeTaskDetailApprovalRequest(task runengine.TaskRecord) map[string]any {
 	if task.Status != "waiting_auth" || len(task.ApprovalRequest) == 0 {
 		return nil
 	}
-	return cloneMap(task.ApprovalRequest)
+	return normalizeTaskDetailApprovalRequest(task.TaskID, task.RiskLevel, task.ApprovalRequest)
 }
 
 func (s *Service) normalizeTaskDetailRestorePoint(taskID string, securitySummary map[string]any) map[string]any {
-	if latestRestorePoint := latestRestorePointFromSummary(securitySummary); latestRestorePoint != nil {
+	if latestRestorePoint := normalizeTaskDetailRecoveryPoint(taskID, latestRestorePointFromSummary(securitySummary)); latestRestorePoint != nil {
 		return latestRestorePoint
 	}
 	if restorePoint := s.latestRestorePointFromStorage(taskID); restorePoint != nil {
 		return restorePoint
 	}
 	return nil
+}
+
+func normalizeTaskDetailApprovalRequest(taskID, fallbackRiskLevel string, approvalRequest map[string]any) map[string]any {
+	if len(approvalRequest) == 0 {
+		return nil
+	}
+
+	approvalID := strings.TrimSpace(stringValue(approvalRequest, "approval_id", ""))
+	approvalTaskID := strings.TrimSpace(stringValue(approvalRequest, "task_id", ""))
+	operationName := strings.TrimSpace(stringValue(approvalRequest, "operation_name", ""))
+	targetObject := strings.TrimSpace(stringValue(approvalRequest, "target_object", ""))
+	reason := strings.TrimSpace(stringValue(approvalRequest, "reason", ""))
+	status := strings.TrimSpace(stringValue(approvalRequest, "status", ""))
+	createdAt := strings.TrimSpace(stringValue(approvalRequest, "created_at", ""))
+	riskLevel := strings.TrimSpace(stringValue(approvalRequest, "risk_level", ""))
+	if riskLevel == "" {
+		riskLevel = strings.TrimSpace(fallbackRiskLevel)
+	}
+
+	if approvalID == "" || approvalTaskID != taskID || operationName == "" || targetObject == "" || reason == "" || createdAt == "" {
+		return nil
+	}
+	if status != "pending" || !isSupportedRiskLevel(riskLevel) {
+		return nil
+	}
+
+	return map[string]any{
+		"approval_id":    approvalID,
+		"task_id":        approvalTaskID,
+		"operation_name": operationName,
+		"risk_level":     riskLevel,
+		"target_object":  targetObject,
+		"reason":         reason,
+		"status":         status,
+		"created_at":     createdAt,
+	}
+}
+
+func normalizeTaskDetailRecoveryPoint(taskID string, recoveryPoint map[string]any) map[string]any {
+	if len(recoveryPoint) == 0 {
+		return nil
+	}
+
+	recoveryPointID := strings.TrimSpace(stringValue(recoveryPoint, "recovery_point_id", ""))
+	recoveryTaskID := strings.TrimSpace(stringValue(recoveryPoint, "task_id", ""))
+	summary := strings.TrimSpace(stringValue(recoveryPoint, "summary", ""))
+	createdAt := strings.TrimSpace(stringValue(recoveryPoint, "created_at", ""))
+	objects, ok := normalizeStringSlice(recoveryPoint["objects"])
+	if !ok {
+		return nil
+	}
+
+	if recoveryPointID == "" || recoveryTaskID != taskID || summary == "" || createdAt == "" {
+		return nil
+	}
+
+	return map[string]any{
+		"recovery_point_id": recoveryPointID,
+		"task_id":           recoveryTaskID,
+		"summary":           summary,
+		"created_at":        createdAt,
+		"objects":           objects,
+	}
+}
+
+func isSupportedRiskLevel(riskLevel string) bool {
+	switch riskLevel {
+	case "green", "yellow", "red":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeStringSlice(value any) ([]string, bool) {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...), true
+	case []any:
+		items := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			items = append(items, text)
+		}
+		return items, true
+	default:
+		return nil, false
+	}
 }
 
 func (s *Service) latestRestorePointFromStorage(taskID string) map[string]any {

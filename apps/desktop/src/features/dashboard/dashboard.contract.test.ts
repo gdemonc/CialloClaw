@@ -43,6 +43,11 @@ function loadDashboardSafetyNavigationModule() {
         approvalSnapshot: ApprovalRequest | null;
         cardKeys: string[];
       }) => boolean;
+      isDashboardSafetyApprovalSnapshotOnly: (input: {
+        activeDetailKey: string | null;
+        approvalSnapshot: ApprovalRequest | null;
+        cardKeys: string[];
+      }) => boolean;
       resolveDashboardSafetySnapshotLifecycle: (input: {
         activeDetailKey: string | null;
         routeDrivenDetailKey: string | null;
@@ -563,7 +568,7 @@ test("SecurityApp route resolution reacts to each new route state and exposes ta
 });
 
 test("SecurityApp keeps snapshot-only approval detail renderable when live cards no longer contain it", () => {
-  const { resolveDashboardSafetySnapshotLifecycle, shouldRetainDashboardSafetyActiveDetail } = loadDashboardSafetyNavigationModule();
+  const { isDashboardSafetyApprovalSnapshotOnly, resolveDashboardSafetySnapshotLifecycle, shouldRetainDashboardSafetyActiveDetail } = loadDashboardSafetyNavigationModule();
 
   assert.equal(
     shouldRetainDashboardSafetyActiveDetail({
@@ -590,6 +595,24 @@ test("SecurityApp keeps snapshot-only approval detail renderable when live cards
       cardKeys: ["status", "restore"],
     }),
     true,
+  );
+
+  assert.equal(
+    isDashboardSafetyApprovalSnapshotOnly({
+      activeDetailKey: "approval:approval_dashboard_001",
+      approvalSnapshot: createApprovalRequest(),
+      cardKeys: ["status", "restore"],
+    }),
+    true,
+  );
+
+  assert.equal(
+    isDashboardSafetyApprovalSnapshotOnly({
+      activeDetailKey: "approval:approval_dashboard_001",
+      approvalSnapshot: createApprovalRequest(),
+      cardKeys: ["status", "approval:approval_dashboard_001"],
+    }),
+    false,
   );
 
   assert.deepEqual(

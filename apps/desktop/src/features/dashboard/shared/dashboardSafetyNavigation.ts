@@ -206,6 +206,22 @@ export function shouldRetainDashboardSafetyActiveDetail({
   return activeDetailKey.startsWith("approval:") && approvalSnapshot?.approval_id === activeDetailKey.slice("approval:".length);
 }
 
+export function isDashboardSafetyApprovalSnapshotOnly({
+  activeDetailKey,
+  approvalSnapshot,
+  cardKeys,
+}: {
+  activeDetailKey: string | null;
+  approvalSnapshot: ApprovalRequest | null;
+  cardKeys: string[];
+}) {
+  if (!activeDetailKey?.startsWith("approval:") || !approvalSnapshot) {
+    return false;
+  }
+
+  return !cardKeys.includes(activeDetailKey);
+}
+
 export function resolveDashboardSafetySnapshotLifecycle({
   activeDetailKey,
   routeDrivenDetailKey,

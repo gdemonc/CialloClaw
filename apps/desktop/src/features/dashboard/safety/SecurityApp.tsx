@@ -35,6 +35,7 @@ import { subscribeApprovalPending, subscribeTask } from "@/rpc/subscriptions";
 import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
 import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
 import {
+  isDashboardSafetyApprovalSnapshotOnly,
   resolveDashboardSafetyNavigationRoute,
   resolveDashboardSafetyFocusTarget,
   resolveDashboardSafetySnapshotLifecycle,
@@ -1257,7 +1258,7 @@ export function SecurityApp() {
     );
   };
   
-  const renderApprovalDetail = (approval: ApprovalRequest | undefined) => {
+  const renderApprovalDetail = (approval: ApprovalRequest | undefined, snapshotOnly = false) => {
     if (!approval) {
       return <p className="security-page__empty-state">该待确认授权已经从当前列表中移除。</p>;
     }
@@ -1295,12 +1296,15 @@ export function SecurityApp() {
         </article>
 
         <div className="security-page__detail-callout">
+          {snapshotOnly ? (
+            <div className="security-page__detail-copy">该审批已不在当前实时待处理列表中，详情仅保留快照展示，不能继续提交授权决策。</div>
+          ) : null}
           <label className="security-page__approval-remember">
             <input
               className="security-page__approval-remember-checkbox"
               type="checkbox"
               checked={rememberRule}
-              disabled={activeApprovalId === approval.approval_id}
+              disabled={snapshotOnly || activeApprovalId === approval.approval_id}
               onChange={(event) => {
                 const checked = event.currentTarget.checked;
                 setRememberRuleByApprovalId((current) => ({
@@ -1320,7 +1324,7 @@ export function SecurityApp() {
           <Button
             color="gray"
             variant="soft"
-            disabled={activeApprovalId === approval.approval_id}
+            disabled={snapshotOnly || activeApprovalId === approval.approval_id}
             onClick={() => void handleRespond(approval, "deny_once", rememberRule)}
           >
             拒绝
@@ -1328,7 +1332,7 @@ export function SecurityApp() {
           <Button
             color="amber"
             variant="solid"
-            disabled={activeApprovalId === approval.approval_id}
+            disabled={snapshotOnly || activeApprovalId === approval.approval_id}
             onClick={() => void handleRespond(approval, "allow_once", rememberRule)}
           >
             允许一次
@@ -1338,7 +1342,12 @@ export function SecurityApp() {
     );
   };
 
-  const renderDetailBody = (key: SecurityCardKey, resolvedApproval: ApprovalRequest | null, resolvedRestorePoint: RecoveryPoint | null) => {
+  const renderDetailBody = (
+    key: SecurityCardKey,
+    resolvedApproval: ApprovalRequest | null,
+    resolvedRestorePoint: RecoveryPoint | null,
+    snapshotOnlyApproval: boolean,
+  ) => {
     if (key === "status") {
       return renderStatusDetail();
     }
@@ -1355,7 +1364,7 @@ export function SecurityApp() {
       return renderGovernanceDetail();
     }
 
-    return renderApprovalDetail(resolvedApproval ?? approvalLookup.get(key) ?? undefined);
+    return renderApprovalDetail(resolvedApproval ?? approvalLookup.get(key) ?? undefined, snapshotOnlyApproval);
   };
 
   const renderDetailOverlay = () => {
@@ -1369,6 +1378,11 @@ export function SecurityApp() {
       approvalSnapshot: activeSnapshotState.approvalSnapshot,
       moduleData,
       restorePointSnapshot: activeSnapshotState.restorePointSnapshot,
+    });
+    const snapshotOnlyApproval = isDashboardSafetyApprovalSnapshotOnly({
+      activeDetailKey,
+      approvalSnapshot: activeSnapshotState.approvalSnapshot,
+      cardKeys,
     });
     const preview = getCardPreview(
       activeDetailKey,
@@ -1411,7 +1425,7 @@ export function SecurityApp() {
               </div>
             </div>
 
-            <div className="security-page__detail-body">{renderDetailBody(activeDetailKey, resolvedDetail.approval, resolvedDetail.restorePoint)}</div>
+            <div className="security-page__detail-body">{renderDetailBody(activeDetailKey, resolvedDetail.approval, resolvedDetail.restorePoint, snapshotOnlyApproval)}</div>
           </section>
         </div>
       </div>
