@@ -2260,10 +2260,11 @@ func (s *Service) materializeMemoryReadReferences(taskID, runID string, snapshot
 	if err != nil {
 		return nil, err
 	}
-	if err := s.memory.WriteRetrievalHits(context.Background(), hits); err != nil {
+	persistedHits := cloneRetrievalHitsForTask(taskID, runID, hits)
+	if err := s.memory.WriteRetrievalHits(context.Background(), persistedHits); err != nil {
 		return nil, err
 	}
-	return mirrorReferencesFromRetrievalHits(hits), nil
+	return mirrorReferencesFromRetrievalHits(persistedHits), nil
 }
 
 func (s *Service) materializeMemoryWriteReferences(taskID, runID string, snapshot contextsvc.TaskContextSnapshot, taskIntent map[string]any, deliveryResult map[string]any) ([]map[string]any, error) {
@@ -2300,6 +2301,20 @@ func mirrorReferencesFromRetrievalHits(hits []memory.RetrievalHit) []map[string]
 		})
 	}
 	return references
+}
+
+func cloneRetrievalHitsForTask(taskID, runID string, hits []memory.RetrievalHit) []memory.RetrievalHit {
+	if len(hits) == 0 {
+		return nil
+	}
+	cloned := make([]memory.RetrievalHit, 0, len(hits))
+	for _, hit := range hits {
+		hit.TaskID = taskID
+		hit.RunID = runID
+		hit.RetrievalHitID = ""
+		cloned = append(cloned, hit)
+	}
+	return cloned
 }
 
 func mirrorReferenceFromSummary(summary memory.MemorySummary) map[string]any {
