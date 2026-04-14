@@ -33,6 +33,7 @@ export function ShellBallMarkdown({ text }: ShellBallMarkdownProps) {
 }
 
 function renderMarkdownBlock(block: MarkdownBlock, key: string) {
+
   switch (block.kind) {
     case "heading": {
       const HeadingTag = `h${block.level}` as const;
@@ -101,7 +102,12 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     switch (match.kind) {
       case "link":
         nodes.push(
-          <a key={matchKey} href={match.href} target="_blank" rel="noreferrer">
+          <a
+            key={matchKey}
+            href={match.href}
+            target="_blank"
+            rel="noreferrer"
+          >
             {renderInline(match.label, `${matchKey}-label`)}
           </a>,
         );
@@ -125,9 +131,12 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
 }
 
 function findFirstInlineMatch(text: string): InlineMatch | null {
-  const matches = [matchLink(text), matchInlineCode(text), matchStrong(text), matchEmphasis(text)].filter(
-    (match): match is InlineMatch => match !== null,
-  );
+  const matches = [
+    matchLink(text),
+    matchInlineCode(text),
+    matchStrong(text),
+    matchEmphasis(text),
+  ].filter((match): match is InlineMatch => match !== null);
 
   if (matches.length === 0) {
     return null;
@@ -210,82 +219,67 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
 
   const lines = normalized.split("\n");
   const blocks: MarkdownBlock[] = [];
-  let index = 0;
 
-  while (index < lines.length) {
-    const line = lines[index]?.trimEnd() ?? "";
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index] ?? "";
+    const trimmedLine = line.trim();
 
-    if (line.trim() === "") {
+    if (trimmedLine === "") {
       index += 1;
       continue;
     }
 
-    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (headingMatch !== null) {
-      blocks.push({
-        kind: "heading",
-        level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-        text: headingMatch[2].trim(),
-      });
+    const fencedCodeStart = trimmedLine.match(/^```([\w-]*)\s*$/);
+    if (fencedCodeStart !== null) {
+      const codeLines: string[] = [];
+      const language = fencedCodeStart[1] ?? "";
       index += 1;
-      continue;
-    }
-
-    if (/^```/.test(line)) {
-      const language = line.slice(3).trim();
-      index += 1;
-      const content: string[] = [];
-      while (index < lines.length && !/^```/.test(lines[index] ?? "")) {
-        content.push(lines[index] ?? "");
+      while (index < lines.length && !lines[index]!.trim().startsWith("```")) {
+        codeLines.push(lines[index]!);
         index += 1;
       }
       if (index < lines.length) {
         index += 1;
       }
-      blocks.push({
-        kind: "code",
-        language,
-        content: content.join("\n"),
-      });
+      blocks.push({ kind: "code", language, content: codeLines.join("\n") });
       continue;
     }
 
-    if (/^>\s?/.test(line)) {
+    const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.*)$/);
+    if (headingMatch !== null) {
+      blocks.push({
+        kind: "heading",
+        level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+        text: headingMatch[2],
+      });
+      index += 1;
+      continue;
+    }
+
+    if (/^>\s?/.test(trimmedLine)) {
       const quoteLines: string[] = [];
-      while (index < lines.length) {
-        const currentLine = lines[index] ?? "";
-        if (!/^>\s?/.test(currentLine)) {
-          break;
-        }
-        quoteLines.push(currentLine.replace(/^>\s?/, ""));
+      while (index < lines.length && /^>\s?/.test(lines[index]!.trim())) {
+        quoteLines.push(lines[index]!.trim().replace(/^>\s?/, ""));
         index += 1;
       }
       blocks.push({ kind: "blockquote", lines: quoteLines });
       continue;
     }
 
-    if (/^[-*]\s+/.test(line)) {
+    if (/^[-*+]\s+/.test(trimmedLine)) {
       const items: string[] = [];
-      while (index < lines.length) {
-        const currentLine = lines[index] ?? "";
-        if (!/^[-*]\s+/.test(currentLine)) {
-          break;
-        }
-        items.push(currentLine.replace(/^[-*]\s+/, "").trim());
+      while (index < lines.length && /^[-*+]\s+/.test(lines[index]!.trim())) {
+        items.push(lines[index]!.trim().replace(/^[-*+]\s+/, ""));
         index += 1;
       }
       blocks.push({ kind: "unordered-list", items });
       continue;
     }
 
-    if (/^\d+\.\s+/.test(line)) {
+    if (/^\d+\.\s+/.test(trimmedLine)) {
       const items: string[] = [];
-      while (index < lines.length) {
-        const currentLine = lines[index] ?? "";
-        if (!/^\d+\.\s+/.test(currentLine)) {
-          break;
-        }
-        items.push(currentLine.replace(/^\d+\.\s+/, "").trim());
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index]!.trim())) {
+        items.push(lines[index]!.trim().replace(/^\d+\.\s+/, ""));
         index += 1;
       }
       blocks.push({ kind: "ordered-list", items });
@@ -295,7 +289,8 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
     const paragraphLines: string[] = [];
     while (index < lines.length) {
       const currentLine = lines[index] ?? "";
-      if (currentLine.trim() === "" || /^(#{1,6})\s+/.test(currentLine) || /^```/.test(currentLine) || /^>\s?/.test(currentLine) || /^[-*]\s+/.test(currentLine) || /^\d+\.\s+/.test(currentLine)) {
+      const currentTrimmed = currentLine.trim();
+      if (currentTrimmed === "" || isMarkdownBlockBoundary(currentTrimmed)) {
         break;
       }
       paragraphLines.push(currentLine);
@@ -307,6 +302,16 @@ function parseMarkdownBlocks(text: string): MarkdownBlock[] {
   return blocks;
 }
 
+function isMarkdownBlockBoundary(line: string) {
+  return (
+    /^```/.test(line)
+    || /^(#{1,6})\s+/.test(line)
+    || /^>\s?/.test(line)
+    || /^[-*+]\s+/.test(line)
+    || /^\d+\.\s+/.test(line)
+  );
+}
+
 function createBlockKey(block: MarkdownBlock) {
   switch (block.kind) {
     case "heading":
@@ -314,9 +319,9 @@ function createBlockKey(block: MarkdownBlock) {
     case "paragraph":
       return `paragraph-${createStableKeyFragment(block.lines.join("\n"))}`;
     case "unordered-list":
-      return `unordered-${createStableKeyFragment(block.items.join("\n"))}`;
+      return `unordered-${createStableKeyFragment(block.items.join("|"))}`;
     case "ordered-list":
-      return `ordered-${createStableKeyFragment(block.items.join("\n"))}`;
+      return `ordered-${createStableKeyFragment(block.items.join("|"))}`;
     case "blockquote":
       return `blockquote-${createStableKeyFragment(block.lines.join("\n"))}`;
     case "code":
@@ -325,9 +330,15 @@ function createBlockKey(block: MarkdownBlock) {
 }
 
 function createStableKeyFragment(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "empty";
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized === "") {
+    return "empty";
+  }
+
+  let hash = 0;
+  for (const rune of normalized) {
+    hash = (hash * 33 + rune.charCodeAt(0)) >>> 0;
+  }
+
+  return `${normalized.slice(0, 24)}-${hash.toString(16)}`;
 }
