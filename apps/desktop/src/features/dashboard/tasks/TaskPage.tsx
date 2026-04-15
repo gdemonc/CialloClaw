@@ -10,6 +10,7 @@ import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockTo
 import { buildDashboardSafetyNavigationState } from "@/features/dashboard/shared/dashboardSafetyNavigation";
 import { resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { dashboardModules } from "@/features/dashboard/shared/dashboardRoutes";
+import { showShellBallWindow } from "@/platform/shellBallWindowController";
 import { cn } from "@/utils/cn";
 import { describeCurrentStep, getFinishedTaskGroups, isTaskEnded, sortTasksByLatest } from "./taskPage.mapper";
 import {
@@ -222,12 +223,15 @@ export function TaskPage() {
     navigate(resolveDashboardRoutePath("safety"), { state: buildDashboardSafetyNavigationState(resolvedDetailData.detail) });
   }
 
-  function handlePrimaryAction(action: "pause" | "resume" | "cancel" | "restart" | "edit" | "open-safety") {
+  function handlePrimaryAction(action: "pause" | "resume" | "cancel" | "restart" | "open-safety" | "open-shell-ball") {
     if (!detailData) {
       return;
     }
 
-    if (action === "edit") {
+    if (action === "open-shell-ball") {
+      void showShellBallWindow("input")
+        .then(() => showFeedback("已打开悬浮球输入窗口，继续补充这条任务。"))
+        .catch(() => showFeedback("悬浮球输入窗口暂时不可用，请稍后再试。"));
       return;
     }
 
