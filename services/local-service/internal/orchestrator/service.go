@@ -168,6 +168,7 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 			CurrentStep:       "collect_input",
 			RiskLevel:         s.risk.DefaultLevel(),
 			Timeline:          initialTimeline("waiting_input", "collect_input"),
+			Snapshot:          snapshot,
 		})
 
 		bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "请先告诉我你希望我处理什么内容。", task.StartedAt.Format(dateTimeLayout))
@@ -192,6 +193,7 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 		CurrentStep:       currentStepForSuggestion(suggestion.RequiresConfirm, suggestion.Intent),
 		RiskLevel:         s.risk.DefaultLevel(),
 		Timeline:          initialTimeline(taskStatusForSuggestion(suggestion.RequiresConfirm), currentStepForSuggestion(suggestion.RequiresConfirm, suggestion.Intent)),
+		Snapshot:          snapshot,
 	})
 	s.attachMemoryReadPlans(task.TaskID, task.RunID, snapshot, suggestion.Intent)
 
@@ -227,6 +229,7 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 	response := map[string]any{
 		"task":           taskMap(task),
 		"bubble_message": bubble,
+		"delivery_result": nil,
 	}
 	if deliveryResult != nil {
 		response["delivery_result"] = deliveryResult
@@ -259,6 +262,7 @@ func (s *Service) StartTask(params map[string]any) (map[string]any, error) {
 		CurrentStep:       currentStepForSuggestion(suggestion.RequiresConfirm, suggestion.Intent),
 		RiskLevel:         s.risk.DefaultLevel(),
 		Timeline:          initialTimeline(taskStatusForSuggestion(suggestion.RequiresConfirm), currentStepForSuggestion(suggestion.RequiresConfirm, suggestion.Intent)),
+		Snapshot:          snapshot,
 	})
 	s.attachMemoryReadPlans(task.TaskID, task.RunID, snapshot, suggestion.Intent)
 
@@ -361,6 +365,15 @@ func (s *Service) ConfirmTask(params map[string]any) (map[string]any, error) {
 		return nil, ErrTaskNotFound
 	}
 	s.attachMemoryReadPlans(updatedTask.TaskID, updatedTask.RunID, snapshotFromTask(updatedTask), intentValue)
+	if queuedTask, queueBubble, queued, queueErr := s.queueTaskIfSessionBusy(updatedTask); queueErr != nil {
+		return nil, queueErr
+	} else if queued {
+		return map[string]any{
+			"task":            taskMap(queuedTask),
+			"bubble_message":  queueBubble,
+			"delivery_result": nil,
+		}, nil
+	}
 	governedTask, governedResponse, handled, governanceErr := s.handleTaskGovernanceDecision(updatedTask, intentValue)
 	if governanceErr != nil {
 		return nil, governanceErr
@@ -1423,6 +1436,9 @@ func (s *Service) drainSessionQueue(sessionID string) error {
 	for {
 		nextTask, ok := s.runEngine.NextQueuedTaskForSession(sessionID)
 		if !ok {
+			return nil
+		}
+		if activeTask, busy := s.runEngine.ActiveSessionTask(sessionID, nextTask.TaskID); busy && activeTask.TaskID != "" {
 			return nil
 		}
 
@@ -3067,11 +3083,36 @@ func (s *Service) buildImpactScope(task runengine.TaskRecord, pendingExecution m
 
 // snapshotFromTask 从任务记录反推一个最小上下文快照，用于授权恢复等场景。
 func snapshotFromTask(task runengine.TaskRecord) contextsvc.TaskContextSnapshot {
+	if !isEmptySnapshot(task.Snapshot) {
+		return cloneTaskSnapshot(task.Snapshot)
+	}
 	return contextsvc.TaskContextSnapshot{
 		Trigger:   task.SourceType,
 		InputType: "text",
 		Text:      originalTextFromTaskTitle(task.Title),
 	}
+}
+
+func cloneTaskSnapshot(snapshot contextsvc.TaskContextSnapshot) contextsvc.TaskContextSnapshot {
+	cloned := snapshot
+	if len(snapshot.Files) > 0 {
+		cloned.Files = append([]string(nil), snapshot.Files...)
+	}
+	return cloned
+}
+
+func isEmptySnapshot(snapshot contextsvc.TaskContextSnapshot) bool {
+	return strings.TrimSpace(snapshot.Source) == "" &&
+		strings.TrimSpace(snapshot.Trigger) == "" &&
+		strings.TrimSpace(snapshot.InputType) == "" &&
+		strings.TrimSpace(snapshot.InputMode) == "" &&
+		strings.TrimSpace(snapshot.Text) == "" &&
+		strings.TrimSpace(snapshot.SelectionText) == "" &&
+		strings.TrimSpace(snapshot.ErrorText) == "" &&
+		len(snapshot.Files) == 0 &&
+		strings.TrimSpace(snapshot.PageTitle) == "" &&
+		strings.TrimSpace(snapshot.PageURL) == "" &&
+		strings.TrimSpace(snapshot.AppName) == ""
 }
 
 func originalTextFromTaskTitle(title string) string {

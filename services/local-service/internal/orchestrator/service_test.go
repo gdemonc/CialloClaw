@@ -329,7 +329,7 @@ func TestServiceSubmitInputKeepsUnknownShortTextInIntentConfirmation(t *testing.
 	if bubble["text"] != "我还不确定你想如何处理这段内容，请确认目标。" {
 		t.Fatalf("expected neutral confirmation prompt, got %v", bubble["text"])
 	}
-	if _, ok := result["delivery_result"]; ok {
+	if result["delivery_result"] != nil {
 		t.Fatalf("expected no delivery result before intent is confirmed, got %+v", result["delivery_result"])
 	}
 	if _, ok := service.runEngine.GetTask(task["task_id"].(string)); !ok {
@@ -449,8 +449,221 @@ func TestServiceSubmitInputQueuesDirectAgentLoopTaskBehindSameSessionWork(t *tes
 	if secondTask["current_step"] != "session_queue" {
 		t.Fatalf("expected queued task current_step=session_queue, got %+v", secondTask)
 	}
-	if _, ok := secondResult["delivery_result"]; ok {
+	if secondResult["delivery_result"] != nil {
 		t.Fatalf("expected queued task not to return delivery_result yet, got %+v", secondResult["delivery_result"])
+	}
+}
+
+func TestServiceConfirmTaskQueuesConfirmedTaskBehindSameSessionWork(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Queued confirm output.")
+
+	firstResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_confirm_queue",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Please write this into a file after authorization.",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"target_path":           "workspace_document",
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("first start task failed: %v", err)
+	}
+	if firstResult["task"].(map[string]any)["status"] != "waiting_auth" {
+		t.Fatalf("expected first task to wait for authorization, got %+v", firstResult["task"])
+	}
+
+	secondResult, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_confirm_queue",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "ok",
+		},
+	})
+	if err != nil {
+		t.Fatalf("second submit input failed: %v", err)
+	}
+	secondTaskID := secondResult["task"].(map[string]any)["task_id"].(string)
+
+	confirmResult, err := service.ConfirmTask(map[string]any{
+		"task_id":   secondTaskID,
+		"confirmed": true,
+		"corrected_intent": map[string]any{
+			"name":      "agent_loop",
+			"arguments": map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("confirm task failed: %v", err)
+	}
+	confirmedTask := confirmResult["task"].(map[string]any)
+	if confirmedTask["status"] != "blocked" || confirmedTask["current_step"] != "session_queue" {
+		t.Fatalf("expected confirmed task to queue behind active session work, got %+v", confirmedTask)
+	}
+	if confirmResult["delivery_result"] != nil {
+		t.Fatalf("expected queued confirmed task not to return delivery_result, got %+v", confirmResult["delivery_result"])
+	}
+}
+
+func TestServiceTaskControlCancelQueuedTaskDoesNotResumeWhileSessionBusy(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Queued cancel output.")
+
+	firstResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_cancel_queue",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Please write this into a file after authorization.",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"target_path":           "workspace_document",
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("first start task failed: %v", err)
+	}
+	firstTaskID := firstResult["task"].(map[string]any)["task_id"].(string)
+
+	secondResult, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_cancel_queue",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Translate this note into English",
+		},
+	})
+	if err != nil {
+		t.Fatalf("second submit input failed: %v", err)
+	}
+	secondTaskID := secondResult["task"].(map[string]any)["task_id"].(string)
+
+	thirdResult, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_cancel_queue",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Summarize this release note for me",
+		},
+	})
+	if err != nil {
+		t.Fatalf("third submit input failed: %v", err)
+	}
+	thirdTaskID := thirdResult["task"].(map[string]any)["task_id"].(string)
+
+	if _, err := service.TaskControl(map[string]any{
+		"task_id": secondTaskID,
+		"action":  "cancel",
+	}); err != nil {
+		t.Fatalf("cancel queued task failed: %v", err)
+	}
+
+	thirdTask, ok := service.runEngine.GetTask(thirdTaskID)
+	if !ok {
+		t.Fatal("expected third task to remain available in runtime")
+	}
+	if thirdTask.Status != "blocked" || thirdTask.CurrentStep != "session_queue" {
+		t.Fatalf("expected later queued task to remain queued while first task still owns the session, got %+v", thirdTask)
+	}
+
+	firstTask, ok := service.runEngine.GetTask(firstTaskID)
+	if !ok || firstTask.Status != "waiting_auth" {
+		t.Fatalf("expected first task to remain the active session owner, got %+v ok=%v", firstTask, ok)
+	}
+}
+
+func TestServiceSecurityRespondResumesQueuedTaskWithOriginalSnapshot(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Snapshot resume output.")
+
+	firstResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_snapshot_queue",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Please write this into a file after authorization.",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"target_path":           "workspace_document",
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("first start task failed: %v", err)
+	}
+	firstTaskID := firstResult["task"].(map[string]any)["task_id"].(string)
+
+	secondResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_snapshot_queue",
+		"source":     "floating_ball",
+		"trigger":    "text_selected_click",
+		"input": map[string]any{
+			"type": "text_selection",
+			"text": "Selected source text",
+		},
+		"context": map[string]any{
+			"selection": map[string]any{
+				"text": "Selected source text",
+			},
+			"files": []any{"workspace/docs/input.md"},
+			"page": map[string]any{
+				"title":    "Release Notes",
+				"url":      "https://example.com/release",
+				"app_name": "browser",
+			},
+		},
+		"intent": map[string]any{
+			"name":      "agent_loop",
+			"arguments": map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("second start task failed: %v", err)
+	}
+	secondTaskID := secondResult["task"].(map[string]any)["task_id"].(string)
+
+	if _, err := service.SecurityRespond(map[string]any{
+		"task_id":       firstTaskID,
+		"approval_id":   "appr_snapshot_queue",
+		"decision":      "allow_once",
+		"remember_rule": false,
+	}); err != nil {
+		t.Fatalf("security respond failed: %v", err)
+	}
+
+	secondTask, ok := service.runEngine.GetTask(secondTaskID)
+	if !ok {
+		t.Fatal("expected resumed task to remain available")
+	}
+	if secondTask.Status != "completed" {
+		t.Fatalf("expected queued task to resume and complete, got %+v", secondTask)
+	}
+	if secondTask.Snapshot.SelectionText != "Selected source text" {
+		t.Fatalf("expected selection text to survive queue resume, got %+v", secondTask.Snapshot)
+	}
+	if len(secondTask.Snapshot.Files) != 1 || secondTask.Snapshot.Files[0] != "workspace/docs/input.md" {
+		t.Fatalf("expected file list to survive queue resume, got %+v", secondTask.Snapshot)
+	}
+	if secondTask.Snapshot.PageTitle != "Release Notes" || secondTask.Snapshot.PageURL != "https://example.com/release" {
+		t.Fatalf("expected page metadata to survive queue resume, got %+v", secondTask.Snapshot)
 	}
 }
 

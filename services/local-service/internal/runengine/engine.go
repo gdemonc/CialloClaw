@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	contextsvc "github.com/cialloclaw/cialloclaw/services/local-service/internal/context"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
 )
 
@@ -50,6 +51,7 @@ type TaskRecord struct {
 	Artifacts         []map[string]any
 	AuditRecords      []map[string]any
 	MirrorReferences  []map[string]any
+	Snapshot          contextsvc.TaskContextSnapshot
 	SecuritySummary   map[string]any
 	ApprovalRequest   map[string]any
 	PendingExecution  map[string]any
@@ -109,6 +111,7 @@ type CreateTaskInput struct {
 	DeliveryResult    map[string]any
 	Artifacts         []map[string]any
 	MirrorReferences  []map[string]any
+	Snapshot          contextsvc.TaskContextSnapshot
 }
 
 // InspectorConfig 描述当前模块配置。
@@ -245,6 +248,7 @@ func (e *Engine) CreateTask(input CreateTaskInput) TaskRecord {
 		DeliveryResult:    cloneMap(input.DeliveryResult),
 		Artifacts:         cloneMapSlice(input.Artifacts),
 		MirrorReferences:  cloneMapSlice(input.MirrorReferences),
+		Snapshot:          cloneContextSnapshot(input.Snapshot),
 		SecuritySummary:   buildSecuritySummary(input.RiskLevel, nil),
 		CurrentStepStatus: currentTimelineStatus(stepTimeline),
 	}
@@ -1999,6 +2003,7 @@ func taskRecordToStorage(record TaskRecord) storage.TaskRunRecord {
 		Artifacts:         cloneMapSlice(record.Artifacts),
 		AuditRecords:      cloneMapSlice(record.AuditRecords),
 		MirrorReferences:  cloneMapSlice(record.MirrorReferences),
+		Snapshot:          cloneContextSnapshot(record.Snapshot),
 		SecuritySummary:   cloneMap(record.SecuritySummary),
 		ApprovalRequest:   cloneMap(record.ApprovalRequest),
 		PendingExecution:  cloneMap(record.PendingExecution),
@@ -2038,6 +2043,7 @@ func taskRecordFromStorage(record storage.TaskRunRecord) TaskRecord {
 		Artifacts:         cloneMapSlice(record.Artifacts),
 		AuditRecords:      cloneMapSlice(record.AuditRecords),
 		MirrorReferences:  cloneMapSlice(record.MirrorReferences),
+		Snapshot:          cloneContextSnapshot(record.Snapshot),
 		SecuritySummary:   cloneMap(record.SecuritySummary),
 		ApprovalRequest:   cloneMap(record.ApprovalRequest),
 		PendingExecution:  cloneMap(record.PendingExecution),
@@ -2138,4 +2144,12 @@ func cloneTimePointer(value *time.Time) *time.Time {
 
 	cloned := *value
 	return &cloned
+}
+
+func cloneContextSnapshot(snapshot contextsvc.TaskContextSnapshot) contextsvc.TaskContextSnapshot {
+	cloned := snapshot
+	if len(snapshot.Files) > 0 {
+		cloned.Files = append([]string(nil), snapshot.Files...)
+	}
+	return cloned
 }
