@@ -147,8 +147,8 @@ export function getFinishedTaskGroups(items: TaskListItem[], expanded: boolean):
   return groups.filter((group) => group.items.length > 0);
 }
 
-function buildTaskSafetyAction(detail: AgentTaskDetailGetResult): TaskPrimaryAction {
-  const hasAnchor = detail.approval_request !== null || detail.security_summary.latest_restore_point !== null;
+function buildTaskSafetyAction(task: Task, detail: AgentTaskDetailGetResult): TaskPrimaryAction {
+  const hasAnchor = task.status === "waiting_auth" || detail.approval_request !== null || detail.security_summary.latest_restore_point !== null;
 
   return {
     action: "open-safety",
@@ -158,7 +158,7 @@ function buildTaskSafetyAction(detail: AgentTaskDetailGetResult): TaskPrimaryAct
 }
 
 export function getTaskPrimaryActions(task: Task, detail: AgentTaskDetailGetResult): TaskPrimaryAction[] {
-  const safetyAction = buildTaskSafetyAction(detail);
+  const safetyAction = buildTaskSafetyAction(task, detail);
 
   if (task.status === "processing") {
     return [
@@ -176,8 +176,16 @@ export function getTaskPrimaryActions(task: Task, detail: AgentTaskDetailGetResu
     ];
   }
 
-  if (task.status === "waiting_auth" || task.status === "waiting_input") {
+  if (task.status === "waiting_auth") {
     return [
+      { action: "cancel", label: "取消", tooltip: "结束当前任务，并保留已有轨迹。" },
+      safetyAction,
+    ];
+  }
+
+  if (task.status === "waiting_input") {
+    return [
+      { action: "open-shell-ball", label: "补充输入", tooltip: "打开悬浮球输入窗口，继续补齐这条任务需要的内容。" },
       { action: "cancel", label: "取消", tooltip: "结束当前任务，并保留已有轨迹。" },
       safetyAction,
     ];
