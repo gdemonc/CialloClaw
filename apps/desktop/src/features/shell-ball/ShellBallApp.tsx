@@ -155,6 +155,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   const [dashboardTransitionPhase, setDashboardTransitionPhase] = useState<ShellBallDashboardTransitionPhase>("idle");
   const [globalDragActive, setGlobalDragActive] = useState(false);
   const [fileDropActive, setFileDropActive] = useState(false);
+  const [shellBallWindowDragActive, setShellBallWindowDragActive] = useState(false);
   const anchorRef = useRef<ShellBallWindowAnchor | null>(null);
   const dashboardTransitionPhaseRef = useRef<ShellBallDashboardTransitionPhase>("idle");
   const transitionQueueRef = useRef(Promise.resolve());
@@ -163,6 +164,26 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   }>({
     handleDroppedFiles: () => undefined,
   });
+
+  useEffect(() => {
+    if (!shellBallWindowDragActive) {
+      return;
+    }
+
+    function clearShellBallWindowDragState() {
+      setShellBallWindowDragActive(false);
+    }
+
+    window.addEventListener("mouseup", clearShellBallWindowDragState);
+    window.addEventListener("pointerup", clearShellBallWindowDragState);
+    window.addEventListener("pointercancel", clearShellBallWindowDragState);
+
+    return () => {
+      window.removeEventListener("mouseup", clearShellBallWindowDragState);
+      window.removeEventListener("pointerup", clearShellBallWindowDragState);
+      window.removeEventListener("pointercancel", clearShellBallWindowDragState);
+    };
+  }, [shellBallWindowDragActive]);
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
@@ -282,6 +303,9 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       shellBallWindowSyncEvents.globalDragState,
       ({ payload }) => {
         setGlobalDragActive(payload.active);
+        if (!payload.active) {
+          setShellBallWindowDragActive(false);
+        }
       },
     ).then((unlisten) => {
       if (disposed) {
@@ -373,12 +397,13 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     <ShellBallSurface
       containerRef={rootRef}
       dashboardTransitionPhase={dashboardTransitionPhase}
-      fileDropActive={globalDragActive || fileDropActive}
+      fileDropActive={fileDropActive || (globalDragActive && !shellBallWindowDragActive)}
       visualState={visualState}
       voicePreview={voicePreview}
       voiceHoldProgress={voiceHoldProgress}
       motionConfig={motionConfig}
       onDragStart={() => {
+        setShellBallWindowDragActive(true);
         void startShellBallWindowDragging();
       }}
       onPrimaryClick={handlePrimaryClick}

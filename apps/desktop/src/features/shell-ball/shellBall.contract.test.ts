@@ -1638,7 +1638,7 @@ test("shell-ball interaction contract leaves the region only from hoverable rest
   );
 });
 
-test("shell-ball interaction contract retains hover input while focus or draft is active", () => {
+test("shell-ball interaction contract retains hover input only while focus is active", () => {
   assert.equal(
     shouldRetainShellBallHoverInput({
       regionActive: false,
@@ -1654,7 +1654,7 @@ test("shell-ball interaction contract retains hover input while focus or draft i
       inputFocused: false,
       hasDraft: true,
     }),
-    true,
+    false,
   );
 
   assert.deepEqual(
@@ -3485,6 +3485,12 @@ test("shell-ball cancel callback path is wired from mascot through app interacti
   assert.match(interactionSource, /dispatch\(cancelEvent\);/);
 });
 
+test("shell-ball region leave keeps hover input visible while the text field is focused", () => {
+  const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");
+
+  assert.match(interactionSource, /function handleRegionLeave\(\) \{[\s\S]*hoverRetained: getHoverRetained\(\),[\s\S]*\}/);
+});
+
 test("shell-ball surface passes mascot double-click and drag wiring through the mascot only", () => {
   const surfaceSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallSurface.tsx"), "utf8");
 
@@ -3493,6 +3499,15 @@ test("shell-ball surface passes mascot double-click and drag wiring through the 
   assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onHotspotDragStart=\{onDragStart\}/);
   assert.doesNotMatch(surfaceSource, /data-shell-ball-zone="host-drag"/);
   assert.match(surfaceSource, /data-shell-ball-zone="interaction"/);
+});
+
+test("shell-ball app suppresses the file overlay while the mascot is dragging the window", () => {
+  const appSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallApp.tsx"), "utf8");
+
+  assert.match(appSource, /const \[shellBallWindowDragActive, setShellBallWindowDragActive\] = useState\(false\);/);
+  assert.match(appSource, /fileDropActive=\{fileDropActive \|\| \(globalDragActive && !shellBallWindowDragActive\)\}/);
+  assert.match(appSource, /setShellBallWindowDragActive\(true\);\s*void startShellBallWindowDragging\(\);/);
+  assert.match(appSource, /if \(!payload\.active\) \{\s*setShellBallWindowDragActive\(false\);\s*\}/);
 });
 
 test("shell-ball app dashboard-open gate stays blocked for consumed or non-resting double clicks", () => {

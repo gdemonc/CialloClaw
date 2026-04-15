@@ -1,5 +1,5 @@
 import type { AgentInputSubmitParams, AgentTaskStartParams, RequestMeta } from "@cialloclaw/protocol";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import { submitTextInput, createTextInputSubmitParams } from "../../services/agentInputService";
 import {
@@ -347,7 +347,7 @@ export function useShellBallInteraction() {
     syncVisualState();
   }
 
-  function clearLongPressTimer() {
+  const clearLongPressTimer = useCallback(() => {
     if (longPressHandleRef.current === null) {
       if (longPressProgressHandleRef.current !== null) {
         cancelAnimationFrame(longPressProgressHandleRef.current);
@@ -367,7 +367,7 @@ export function useShellBallInteraction() {
     }
     longPressStartAtRef.current = null;
     setVoiceHoldProgress(0);
-  }
+  }, []);
 
   function resetInteractionConsumed() {
     setInteractionConsumed(mapShellBallInteractionConsumedEventToFlag("press_start"));
@@ -447,7 +447,7 @@ export function useShellBallInteraction() {
     setFinalizedSpeechPayload(null);
   }
 
-  function disposeVoiceRecognition() {
+  const disposeVoiceRecognition = useCallback(() => {
     recognitionSessionIdRef.current += 1;
     recognitionStopReasonRef.current = "none";
     voiceTranscriptRef.current = "";
@@ -465,7 +465,7 @@ export function useShellBallInteraction() {
     try {
       recognition.abort();
     } catch {}
-  }
+  }, []);
 
   function stopVoiceRecognition(reason: Exclude<ShellBallVoiceRecognitionStopReason, "none">) {
     recognitionStopReasonRef.current = reason;
@@ -594,7 +594,7 @@ export function useShellBallInteraction() {
 
     dispatch("pointer_leave_region", {
       regionActive: false,
-      hoverRetained: false,
+      hoverRetained: getHoverRetained(),
     });
   }
 
@@ -838,10 +838,6 @@ export function useShellBallInteraction() {
   }
 
   useEffect(() => {
-    syncHoverRetention();
-  }, [inputValue, pendingFiles]);
-
-  useEffect(() => {
     if (controllerRef.current === null) {
       return;
     }
@@ -862,7 +858,7 @@ export function useShellBallInteraction() {
       voicePreviewRef.current = null;
       controllerRef.current?.dispose();
     };
-  }, []);
+  }, [clearLongPressTimer, disposeVoiceRecognition]);
 
   return {
     visualState,

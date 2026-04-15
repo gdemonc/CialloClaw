@@ -539,7 +539,7 @@
   opacity: 0;
   pointer-events: none;
   position: absolute;
-  top: 50%;
+  top: calc(50% - 2px);
   transform: translate(-50%, -50%) scale(0.96);
   transition:
     opacity 180ms ease,
