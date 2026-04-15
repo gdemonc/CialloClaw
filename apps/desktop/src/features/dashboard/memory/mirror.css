@@ -1110,6 +1110,7 @@
 
 .mirror-page__detail-tabs,
 .mirror-page__detail-tab-panel,
+.mirror-page__conversation-filter-bar,
 .mirror-page__conversation-days,
 .mirror-page__conversation-records,
 .mirror-page__profile-grid,
@@ -1208,6 +1209,56 @@
 .mirror-page__conversation-meta-copy {
   display: grid;
   gap: 0.18rem;
+}
+
+.mirror-page__conversation-filter-bar,
+.mirror-page__conversation-actions,
+.mirror-page__stage-task-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.mirror-page__conversation-filter {
+  background: rgba(255, 250, 242, 0.84);
+  border: 1px solid rgba(143, 111, 77, 0.14);
+  border-radius: 999px;
+  color: var(--mirror-copy);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.4rem 0.82rem;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.mirror-page__conversation-filter.is-active,
+.mirror-page__conversation-filter:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(143, 111, 77, 0.24);
+  color: var(--mirror-ink);
+  transform: translateY(-1px);
+}
+
+.mirror-page__task-link {
+  background: rgba(255, 250, 242, 0.84);
+  border: 1px solid rgba(143, 111, 77, 0.14);
+  border-radius: 999px;
+  color: var(--mirror-copy);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.38rem 0.78rem;
+}
+
+.mirror-page__task-link:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(143, 111, 77, 0.24);
+  color: var(--mirror-ink);
+}
+
+.mirror-page__conversation-filter:focus-visible,
+.mirror-page__task-link:focus-visible {
+  outline: 2px solid var(--mirror-focus);
+  outline-offset: 4px;
 }
 
 .mirror-page__conversation-bubble {

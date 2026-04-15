@@ -25,10 +25,16 @@ import type {
   AgentTaskInspectorRunResult,
   AgentSecurityPendingListParams,
   AgentSecurityPendingListResult,
+  AgentSecurityRestoreApplyParams,
+  AgentSecurityRestoreApplyResult,
+  AgentSecurityRestorePointsListParams,
+  AgentSecurityRestorePointsListResult,
   AgentSecurityRespondParams,
   AgentSecurityRespondResult,
   AgentSecuritySummaryGetParams,
   AgentSecuritySummaryGetResult,
+  AgentSecurityAuditListParams,
+  AgentSecurityAuditListResult,
   AgentMirrorOverviewGetParams,
   AgentMirrorOverviewGetResult,
   AgentTaskConfirmParams,
@@ -121,12 +127,36 @@ export function listSecurityPendingDetailed(params: AgentSecurityPendingListPara
   return rpcClient.requestDetailed<AgentSecurityPendingListResult>(RPC_METHODS.AGENT_SECURITY_PENDING_LIST, params);
 }
 
+export function listSecurityRestorePoints(params: AgentSecurityRestorePointsListParams) {
+  return rpcClient.request<AgentSecurityRestorePointsListResult>(RPC_METHODS.AGENT_SECURITY_RESTORE_POINTS_LIST, params);
+}
+
+export function listSecurityRestorePointsDetailed(params: AgentSecurityRestorePointsListParams): Promise<JsonRpcResponsePayload<AgentSecurityRestorePointsListResult>> {
+  return rpcClient.requestDetailed<AgentSecurityRestorePointsListResult>(RPC_METHODS.AGENT_SECURITY_RESTORE_POINTS_LIST, params);
+}
+
+export function applySecurityRestore(params: AgentSecurityRestoreApplyParams) {
+  return rpcClient.request<AgentSecurityRestoreApplyResult>(RPC_METHODS.AGENT_SECURITY_RESTORE_APPLY, params);
+}
+
+export function applySecurityRestoreDetailed(params: AgentSecurityRestoreApplyParams): Promise<JsonRpcResponsePayload<AgentSecurityRestoreApplyResult>> {
+  return rpcClient.requestDetailed<AgentSecurityRestoreApplyResult>(RPC_METHODS.AGENT_SECURITY_RESTORE_APPLY, params);
+}
+
 export function respondSecurity(params: AgentSecurityRespondParams) {
   return rpcClient.request<AgentSecurityRespondResult>(RPC_METHODS.AGENT_SECURITY_RESPOND, params);
 }
 
 export function respondSecurityDetailed(params: AgentSecurityRespondParams): Promise<JsonRpcResponsePayload<AgentSecurityRespondResult>> {
   return rpcClient.requestDetailed<AgentSecurityRespondResult>(RPC_METHODS.AGENT_SECURITY_RESPOND, params);
+}
+
+export function listSecurityAudit(params: AgentSecurityAuditListParams) {
+  return rpcClient.request<AgentSecurityAuditListResult>(RPC_METHODS.AGENT_SECURITY_AUDIT_LIST, params);
+}
+
+export function listSecurityAuditDetailed(params: AgentSecurityAuditListParams): Promise<JsonRpcResponsePayload<AgentSecurityAuditListResult>> {
+  return rpcClient.requestDetailed<AgentSecurityAuditListResult>(RPC_METHODS.AGENT_SECURITY_AUDIT_LIST, params);
 }
 
 export function getSettings(params: AgentSettingsGetParams) {

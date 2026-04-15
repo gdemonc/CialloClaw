@@ -21,6 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type {
+  AuditRecord,
   AgentSecurityRespondResult,
   ApprovalDecision,
   ApprovalPendingNotification,
@@ -43,13 +44,19 @@ import {
 } from "@/features/dashboard/shared/dashboardSafetyNavigation";
 import {
   getInitialSecurityModuleData,
+  applySecurityRestorePoint,
+  loadSecurityAuditRecords,
   loadSecurityModuleData,
   loadSecurityModuleRpcData,
+  loadSecurityRestorePoints,
   respondToApproval,
+  type SecurityAuditRecordListData,
   type SecurityModuleData,
+  type SecurityRestoreApplyOutcome,
+  type SecurityRestorePointListData,
   type SecurityRespondOutcome,
 } from "./securityService";
-import { resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
+import { resolveDashboardModuleRoutePath, resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { getDashboardTaskSecurityRefreshPlan } from "../tasks/taskPage.query";
 import "./securityPage.css";
 
@@ -237,6 +244,37 @@ function renderDetailEntryList(items: string[], emptyCopy: string, keyPrefix: st
       ))}
     </ul>
   );
+}
+
+function groupAuditRecordsByType(records: AuditRecord[]) {
+  return records.reduce<Record<string, AuditRecord[]>>((groups, record) => {
+    const key = record.type.trim() || "unknown";
+    const nextItems = groups[key] ?? [];
+    groups[key] = [...nextItems, record];
+    return groups;
+  }, {});
+}
+
+function resolveSecurityDetailTaskId(args: {
+  activeDetailKey: SecurityCardKey | null;
+  approvalLookup: Map<string, ApprovalRequest>;
+  approvalSnapshot: ApprovalRequest | null;
+  lastResolvedApproval: SecurityRespondOutcome | null;
+  latestRestorePoint: RecoveryPoint | null;
+  restorePointSnapshot: RecoveryPoint | null;
+  subscribedTaskId: string | null;
+}) {
+  const { activeDetailKey, approvalLookup, approvalSnapshot, lastResolvedApproval, latestRestorePoint, restorePointSnapshot, subscribedTaskId } = args;
+
+  if (activeDetailKey === "restore") {
+    return restorePointSnapshot?.task_id ?? latestRestorePoint?.task_id ?? lastResolvedApproval?.response.task.task_id ?? subscribedTaskId ?? null;
+  }
+
+  if (activeDetailKey?.startsWith("approval:")) {
+    return approvalLookup.get(activeDetailKey)?.task_id ?? approvalSnapshot?.task_id ?? subscribedTaskId ?? null;
+  }
+
+  return subscribedTaskId ?? lastResolvedApproval?.response.task.task_id ?? latestRestorePoint?.task_id ?? null;
 }
 
 function mergePendingApproval(current: SecurityModuleData, payload: ApprovalPendingNotification): SecurityModuleData {
@@ -575,7 +613,16 @@ export function SecurityApp() {
   const [routeDrivenDetailKey, setRouteDrivenDetailKey] = useState<SecurityCardKey | null>(null);
   const [subscribedTaskId, setSubscribedTaskId] = useState<string | null>(null);
   const [lastResolvedApproval, setLastResolvedApproval] = useState<SecurityRespondOutcome | null>(null);
+  const [lastRestoreApply, setLastRestoreApply] = useState<SecurityRestoreApplyOutcome | null>(null);
   const [rememberRuleByApprovalId, setRememberRuleByApprovalId] = useState<Record<string, boolean>>({});
+  const [restorePointsData, setRestorePointsData] = useState<SecurityRestorePointListData | null>(null);
+  const [restorePointsError, setRestorePointsError] = useState<string | null>(null);
+  const [restorePointsLoading, setRestorePointsLoading] = useState(false);
+  const [auditRecordsData, setAuditRecordsData] = useState<SecurityAuditRecordListData | null>(null);
+  const [auditRecordsError, setAuditRecordsError] = useState<string | null>(null);
+  const [auditRecordsLoading, setAuditRecordsLoading] = useState(false);
+  const [activeRestorePointId, setActiveRestorePointId] = useState<string | null>(null);
+  const [activeRestoreRequestId, setActiveRestoreRequestId] = useState<string | null>(null);
   const [titleMotionTick, setTitleMotionTick] = useState(0);
   const [cardPositions, setCardPositions] = useState<Record<string, CardPosition>>({});
   const [cardStack, setCardStack] = useState<SecurityCardKey[]>([]);
@@ -607,6 +654,27 @@ export function SecurityApp() {
         subscribedTaskId,
       }),
     [activeDetailKey, approvalSnapshot, restorePointSnapshot, routeDrivenDetailKey, subscribedTaskId],
+  );
+  const focusedTaskId = useMemo(
+    () =>
+      resolveSecurityDetailTaskId({
+        activeDetailKey,
+        approvalLookup,
+        approvalSnapshot: activeSnapshotState.approvalSnapshot,
+        lastResolvedApproval,
+        latestRestorePoint: moduleData?.summary.latest_restore_point ?? null,
+        restorePointSnapshot: activeSnapshotState.restorePointSnapshot,
+        subscribedTaskId: activeSnapshotState.subscribedTaskId,
+      }),
+    [
+      activeDetailKey,
+      activeSnapshotState.approvalSnapshot,
+      activeSnapshotState.restorePointSnapshot,
+      activeSnapshotState.subscribedTaskId,
+      approvalLookup,
+      lastResolvedApproval,
+      moduleData?.summary.latest_restore_point,
+    ],
   );
 
   const queueRpcRefresh = useCallback(() => {
@@ -763,6 +831,84 @@ export function SecurityApp() {
     });
   }, [dataMode, queueRpcRefresh, subscribedTaskId]);
 
+  useEffect(() => {
+    if (!moduleData || (activeDetailKey !== "restore" && activeDetailKey !== "governance")) {
+      return;
+    }
+
+    let disposed = false;
+    setRestorePointsLoading(true);
+    setRestorePointsError(null);
+
+    void loadSecurityRestorePoints(moduleData.source, { limit: 20, offset: 0, taskId: focusedTaskId })
+      .then((nextData) => {
+        if (disposed) {
+          return;
+        }
+
+        setRestorePointsData(nextData);
+        setRestorePointsError(null);
+        setActiveRestorePointId((current) => {
+          if (current && nextData.items.some((item) => item.recovery_point_id === current)) {
+            return current;
+          }
+
+          const preferredId =
+            activeSnapshotState.restorePointSnapshot?.recovery_point_id ??
+            moduleData.summary.latest_restore_point?.recovery_point_id ??
+            nextData.items[0]?.recovery_point_id ??
+            null;
+          return preferredId;
+        });
+      })
+      .catch((error) => {
+        if (!disposed) {
+          setRestorePointsError(formatRpcError(error));
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setRestorePointsLoading(false);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeDetailKey, activeSnapshotState.restorePointSnapshot, focusedTaskId, moduleData]);
+
+  useEffect(() => {
+    if (!moduleData || activeDetailKey !== "governance" || !focusedTaskId) {
+      return;
+    }
+
+    let disposed = false;
+    setAuditRecordsLoading(true);
+    setAuditRecordsError(null);
+
+    void loadSecurityAuditRecords(moduleData.source, focusedTaskId, { limit: 20, offset: 0 })
+      .then((nextData) => {
+        if (!disposed) {
+          setAuditRecordsData(nextData);
+          setAuditRecordsError(null);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) {
+          setAuditRecordsError(formatRpcError(error));
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setAuditRecordsLoading(false);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeDetailKey, focusedTaskId, moduleData]);
+
   const handleTitleClick = useCallback(() => {
     setTitleMotionTick((currentTick) => currentTick + 1);
   }, []);
@@ -861,6 +1007,18 @@ export function SecurityApp() {
 
   const resolvedSourceCopy = sourceCopy ?? getSourceCopy(moduleData);
 
+  const openTaskDetail = useCallback(
+    (taskId: string) => {
+      navigate(resolveDashboardModuleRoutePath("tasks"), {
+        state: {
+          focusTaskId: taskId,
+          openDetail: true,
+        },
+      });
+    },
+    [navigate],
+  );
+
   const handleRespond = async (approval: ApprovalRequest, decision: ApprovalDecision, rememberRule: boolean) => {
     setActiveApprovalId(approval.approval_id);
 
@@ -920,6 +1078,31 @@ export function SecurityApp() {
       setFeedback(formatRpcError(error));
     } finally {
       setActiveApprovalId(null);
+    }
+  };
+
+  const handleApplyRestore = async (restorePoint: RecoveryPoint) => {
+    setActiveRestoreRequestId(restorePoint.recovery_point_id);
+
+    try {
+      const result = await applySecurityRestorePoint(restorePoint, moduleData.source);
+      setLastRestoreApply(result);
+      setRestorePointSnapshot(result.response.recovery_point);
+      setSubscribedTaskId(result.response.task.task_id);
+      setFeedback(
+        `${result.response.bubble_message?.text ?? "恢复点操作已提交。"} · task ${result.response.task.task_id} / ${result.response.task.status} · restore ${result.response.recovery_point.recovery_point_id}`,
+      );
+      for (const queryKey of taskRefreshPlan.invalidatePrefixes) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+
+      if (moduleData.source === "rpc") {
+        queueRpcRefresh();
+      }
+    } catch (error) {
+      setFeedback(formatRpcError(error));
+    } finally {
+      setActiveRestoreRequestId(null);
     }
   };
 
@@ -1057,33 +1240,105 @@ export function SecurityApp() {
   );
 
   const renderRestoreDetail = (restorePoint: RecoveryPoint | null) => {
-    if (!restorePoint) {
+    const restorePoints = restorePointsData?.items ?? (restorePoint ? [restorePoint] : []);
+    const selectedRestorePoint =
+      restorePoints.find((item) => item.recovery_point_id === activeRestorePointId) ??
+      restorePoint ??
+      restorePoints[0] ??
+      null;
+
+    if (!selectedRestorePoint) {
       return <p className="security-page__empty-state">当前没有可展示的恢复点。</p>;
     }
 
     return (
       <div className="security-page__detail-stack">
+        <div className="security-page__detail-note">
+          {focusedTaskId
+            ? `当前正在查看 task ${focusedTaskId} 的恢复链路。恢复操作会先进入授权，再继续执行回滚。`
+            : "当前展示的是最近可见的恢复点列表；选择某一项后可继续查看对象范围并发起恢复。"}
+        </div>
+
         <div className="security-page__detail-grid">
           <article className="security-page__detail-card">
             <p className="security-page__detail-label">恢复点 ID</p>
-            <p className="security-page__detail-value security-page__detail-value--mono">{restorePoint.recovery_point_id}</p>
-            <p className="security-page__detail-copy">关联 task：{restorePoint.task_id}</p>
+            <p className="security-page__detail-value security-page__detail-value--mono">{selectedRestorePoint.recovery_point_id}</p>
+            <p className="security-page__detail-copy">关联 task：{selectedRestorePoint.task_id}</p>
           </article>
           <article className="security-page__detail-card">
             <p className="security-page__detail-label">创建时间</p>
-            <p className="security-page__detail-value">{formatDateTime(restorePoint.created_at)}</p>
-            <p className="security-page__detail-copy">{restorePoint.summary}</p>
+            <p className="security-page__detail-value">{formatDateTime(selectedRestorePoint.created_at)}</p>
+            <p className="security-page__detail-copy">{selectedRestorePoint.summary}</p>
+          </article>
+          <article className="security-page__detail-card">
+            <p className="security-page__detail-label">对象数量</p>
+            <p className="security-page__detail-value">{selectedRestorePoint.objects.length}</p>
+            <p className="security-page__detail-copy">
+              当前已加载 {restorePoints.length} 条恢复点
+              {restorePointsData ? ` · total ${restorePointsData.page.total}` : ""}
+            </p>
           </article>
         </div>
 
         <div className="security-page__detail-list">
-          {restorePoint.objects.map((item) => (
+          {selectedRestorePoint.objects.map((item) => (
             <article key={item} className="security-page__detail-list-item">
               <p className="security-page__detail-label">影响对象</p>
               <p className="security-page__detail-copy">{item}</p>
             </article>
           ))}
         </div>
+
+        <Flex align="center" gap="3" wrap="wrap">
+          <Button variant="soft" color="gray" onClick={() => openTaskDetail(selectedRestorePoint.task_id)}>
+            查看关联任务
+            <ArrowUpRight className="h-4 w-4" />
+          </Button>
+          <Button
+            color="amber"
+            variant="solid"
+            disabled={activeRestoreRequestId === selectedRestorePoint.recovery_point_id}
+            onClick={() => void handleApplyRestore(selectedRestorePoint)}
+          >
+            {activeRestoreRequestId === selectedRestorePoint.recovery_point_id ? "提交中..." : "申请恢复"}
+          </Button>
+        </Flex>
+
+        {restorePointsLoading ? <div className="security-page__detail-note">正在同步恢复点列表…</div> : null}
+        {restorePointsError ? <div className="security-page__detail-callout">恢复点列表同步失败：{restorePointsError}</div> : null}
+        {lastRestoreApply ? (
+          <div className="security-page__detail-callout">
+            最近一次恢复申请：task {lastRestoreApply.response.task.task_id} / {lastRestoreApply.response.task.status} · restore{" "}
+            {lastRestoreApply.response.recovery_point.recovery_point_id}
+          </div>
+        ) : null}
+
+        {restorePoints.length > 1 ? (
+          <div className="security-page__detail-section">
+            <div className="security-page__detail-toolbar">
+              <div>
+                <p className="security-page__detail-label">恢复点列表</p>
+                <p className="security-page__detail-copy">选择要查看或回滚的恢复点；列表按当前 task 过滤。</p>
+              </div>
+            </div>
+            <div className="security-page__detail-selection-list">
+              {restorePoints.map((item) => (
+                <button
+                  key={item.recovery_point_id}
+                  type="button"
+                  className={`security-page__detail-selection-item${item.recovery_point_id === selectedRestorePoint.recovery_point_id ? " is-active" : ""}`}
+                  onClick={() => setActiveRestorePointId(item.recovery_point_id)}
+                >
+                  <span className="security-page__detail-label">{formatDateTime(item.created_at)}</span>
+                  <strong className="security-page__detail-selection-title">{item.summary}</strong>
+                  <span className="security-page__detail-copy">
+                    {item.recovery_point_id} · {item.objects.length} 个对象 · task {item.task_id}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -1125,11 +1380,12 @@ export function SecurityApp() {
     const task = response?.task;
     const bubbleMessage = response?.bubble_message;
     const impactScope = response?.impact_scope as ImpactScopeDetails | undefined;
+    const auditGroups = groupAuditRecordsByType(auditRecordsData?.items ?? []);
 
     return (
       <div className="security-page__detail-stack">
         <div className="security-page__detail-note">
-          工作区边界、影响范围展示、恢复点与预算治理会继续统一承接在这个模块里，但前端当前只稳定使用 summary / pending / respond 三条 RPC 通道。
+          工作区边界、影响范围展示、恢复点与预算治理继续统一承接在这个模块里；这次前端已经把 restore points / restore apply / audit list 接进来了。
         </div>
 
         <div className="security-page__detail-note">
@@ -1242,6 +1498,64 @@ export function SecurityApp() {
           </>
         ) : null}
 
+        <div className="security-page__detail-section">
+          <div className="security-page__detail-toolbar">
+            <div>
+              <p className="security-page__detail-label">审计记录</p>
+              <p className="security-page__detail-copy">
+                {focusedTaskId ? `当前聚焦 task ${focusedTaskId}。` : "当前没有绑定到具体 task，审计记录将等待任务上下文。"}
+              </p>
+            </div>
+            {focusedTaskId ? (
+              <Button variant="soft" color="gray" onClick={() => openTaskDetail(focusedTaskId)}>
+                查看关联任务
+                <ArrowUpRight className="h-4 w-4" />
+              </Button>
+            ) : null}
+          </div>
+
+          {auditRecordsLoading ? <div className="security-page__detail-note">正在同步审计记录…</div> : null}
+          {auditRecordsError ? <div className="security-page__detail-callout">审计记录同步失败：{auditRecordsError}</div> : null}
+          {!auditRecordsLoading && !auditRecordsError && focusedTaskId && (auditRecordsData?.items.length ?? 0) === 0 ? (
+            <p className="security-page__empty-state">当前 task 还没有可展示的审计记录。</p>
+          ) : null}
+
+          {Object.entries(auditGroups).length > 0 ? (
+            Object.entries(auditGroups).map(([groupKey, records]) => (
+              <div key={groupKey} className="security-page__detail-section">
+                <div className="security-page__detail-toolbar">
+                  <div>
+                    <p className="security-page__detail-label">审计分组</p>
+                    <p className="security-page__detail-copy">
+                      {groupKey} · {records.length} 条
+                    </p>
+                  </div>
+                </div>
+                <div className="security-page__detail-list">
+                  {records.map((record) => (
+                    <article key={record.audit_id} className="security-page__detail-list-item">
+                      <p className="security-page__detail-label">
+                        {formatDateTime(record.created_at)} · {record.action}
+                      </p>
+                      <p className="security-page__detail-value security-page__detail-value--mono">{record.target}</p>
+                      <p className="security-page__detail-copy">{record.summary}</p>
+                      <p className="security-page__detail-copy">
+                        result：{record.result} · audit_id：{record.audit_id}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ))
+          ) : null}
+
+          {restorePointsData?.items.length ? (
+            <div className="security-page__detail-callout">
+              当前任务可见恢复点 {restorePointsData.items.length} 条；最近一条为 {restorePointsData.items[0].recovery_point_id}。
+            </div>
+          ) : null}
+        </div>
+
         {moduleData.rpcContext.warnings.length ? (
           <div className="security-page__detail-callout">warnings：{moduleData.rpcContext.warnings.join("；")}</div>
         ) : null}
@@ -1321,6 +1635,9 @@ export function SecurityApp() {
         </div>
 
         <div className="security-page__approval-actions">
+          <Button color="gray" variant="soft" onClick={() => openTaskDetail(approval.task_id)}>
+            查看关联任务
+          </Button>
           <Button
             color="gray"
             variant="soft"

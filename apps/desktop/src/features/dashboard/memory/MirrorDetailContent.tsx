@@ -1,9 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { AgentMirrorOverviewGetResult } from "@cialloclaw/protocol";
 import { BookMarked, BrainCircuit, CalendarDays } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "@cialloclaw/ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { resolveDashboardModuleRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import {
   buildMirrorConversationSummary,
   formatMirrorConversationRecordMoment,
@@ -32,18 +34,42 @@ type MirrorDetailContentProps = {
   profileView: MirrorProfileView;
 };
 
+type MirrorConversationFilter = "all" | "with_task" | "failed";
+
 function MirrorEmptyState({ children }: { children: string }) {
   return <p className="mirror-page__empty-state">{children}</p>;
+}
+
+function filterMirrorConversationRecords(records: MirrorConversationRecord[], filter: MirrorConversationFilter) {
+  if (filter === "with_task") {
+    return records.filter((record) => record.task_id);
+  }
+
+  if (filter === "failed") {
+    return records.filter((record) => record.status === "failed");
+  }
+
+  return records;
 }
 
 function MirrorHistoryDetail({
   overview,
   conversations,
   conversationSummary,
-}: Pick<MirrorDetailContentProps, "overview" | "conversations" | "conversationSummary">) {
-  const groupedConversations = useMemo(() => groupMirrorConversationRecords(conversations), [conversations]);
+  onOpenTaskDetail,
+}: Pick<MirrorDetailContentProps, "overview" | "conversations" | "conversationSummary"> & {
+  onOpenTaskDetail: (taskId: string) => void;
+}) {
+  const [conversationFilter, setConversationFilter] = useState<MirrorConversationFilter>("all");
+  const filteredConversations = useMemo(
+    () => filterMirrorConversationRecords(conversations, conversationFilter),
+    [conversationFilter, conversations],
+  );
+  const groupedConversations = useMemo(() => groupMirrorConversationRecords(filteredConversations), [filteredConversations]);
   const dominantSource = conversationSummary.dominant_source ? getMirrorConversationSourceLabel(conversationSummary.dominant_source) : "等待新记录";
   const dominantMode = conversationSummary.dominant_input_mode ? getMirrorConversationInputModeLabel(conversationSummary.dominant_input_mode) : "等待新记录";
+  const taskLinkedConversationCount = conversations.filter((record) => record.task_id).length;
+  const failedConversationCount = conversations.filter((record) => record.status === "failed").length;
 
   return (
     <Tabs className="mirror-page__detail-tabs" defaultValue={conversations.length > 0 ? "conversation" : "summary"}>
@@ -75,6 +101,11 @@ function MirrorHistoryDetail({
             </p>
             <p className="mirror-page__summary-copy">{conversationSummary.latest_agent_text ?? conversationSummary.latest_user_text ?? "下一条本地记录会显示在这里。"}</p>
           </article>
+          <article className="mirror-page__continuity-card">
+            <p className="mirror-page__micro-label">挂载任务记录</p>
+            <p className="mirror-page__stage-headline">{taskLinkedConversationCount} 条</p>
+            <p className="mirror-page__summary-copy">这些记录可以直接回跳到对应任务详情，不需要把镜子当成聊天历史翻页。</p>
+          </article>
         </div>
 
         {overview.history_summary.length > 0 ? (
@@ -95,8 +126,32 @@ function MirrorHistoryDetail({
       </TabsContent>
 
       <TabsContent className="mirror-page__detail-tab-panel" value="conversation">
+        <div className="mirror-page__conversation-filter-bar">
+          <button
+            type="button"
+            className={`mirror-page__conversation-filter${conversationFilter === "all" ? " is-active" : ""}`}
+            onClick={() => setConversationFilter("all")}
+          >
+            全部 {conversations.length}
+          </button>
+          <button
+            type="button"
+            className={`mirror-page__conversation-filter${conversationFilter === "with_task" ? " is-active" : ""}`}
+            onClick={() => setConversationFilter("with_task")}
+          >
+            已挂任务 {taskLinkedConversationCount}
+          </button>
+          <button
+            type="button"
+            className={`mirror-page__conversation-filter${conversationFilter === "failed" ? " is-active" : ""}`}
+            onClick={() => setConversationFilter("failed")}
+          >
+            失败记录 {failedConversationCount}
+          </button>
+        </div>
+
         {groupedConversations.length === 0 ? (
-          <MirrorEmptyState>最近 100 条本地对话还没有记录。</MirrorEmptyState>
+          <MirrorEmptyState>{conversationFilter === "all" ? "最近 100 条本地对话还没有记录。" : "当前筛选条件下没有命中的本地记录。"}</MirrorEmptyState>
         ) : (
           <ScrollArea className="mirror-page__conversation-scroll" data-testid="mirror-conversation-list">
             <div className="mirror-page__conversation-days">
@@ -126,6 +181,13 @@ function MirrorHistoryDetail({
                             {record.status === "failed" ? "失败" : record.agent_text ? "已回应" : "等待回应"}
                           </StatusBadge>
                         </div>
+                        {record.task_id ? (
+                          <div className="mirror-page__conversation-actions">
+                            <button type="button" className="mirror-page__task-link" onClick={() => onOpenTaskDetail(record.task_id!)}>
+                              查看关联任务
+                            </button>
+                          </div>
+                        ) : null}
 
                         <div className="mirror-page__conversation-bubble mirror-page__conversation-bubble--user">
                           <p className="mirror-page__history-label">用户输入</p>
@@ -151,7 +213,12 @@ function MirrorHistoryDetail({
   );
 }
 
-function MirrorDailyDetail({ dailyDigest }: Pick<MirrorDetailContentProps, "dailyDigest">) {
+function MirrorDailyDetail({
+  dailyDigest,
+  onOpenTaskDetail,
+}: Pick<MirrorDetailContentProps, "dailyDigest"> & {
+  onOpenTaskDetail: (taskId: string) => void;
+}) {
   return (
     <Tabs className="mirror-page__detail-tabs" defaultValue="today">
       <TabsList className="mirror-page__detail-tab-list" variant="line">
@@ -214,7 +281,12 @@ function MirrorDailyDetail({ dailyDigest }: Pick<MirrorDetailContentProps, "dail
                         <p className="mirror-page__history-label">{task.title}</p>
                         <p className="mirror-page__summary-copy">{task.moment ? new Date(task.moment).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "等待时间戳"}</p>
                       </div>
-                      <StatusBadge tone={task.status}>{task.status}</StatusBadge>
+                      <div className="mirror-page__stage-task-actions">
+                        <StatusBadge tone={task.status}>{task.status}</StatusBadge>
+                        <button type="button" className="mirror-page__task-link" onClick={() => onOpenTaskDetail(task.task_id)}>
+                          打开任务
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -316,8 +388,12 @@ function MirrorMemoryDetail({
   overview,
   rpcContext,
   conversations,
-}: Pick<MirrorDetailContentProps, "overview" | "rpcContext" | "conversations">) {
+  onOpenTaskDetail,
+}: Pick<MirrorDetailContentProps, "overview" | "rpcContext" | "conversations"> & {
+  onOpenTaskDetail: (taskId: string) => void;
+}) {
   const conversationSummary = buildMirrorConversationSummary(conversations);
+  const latestTaskLinkedConversation = conversations.find((record) => record.task_id) ?? null;
 
   return (
     <Tabs className="mirror-page__detail-tabs" defaultValue="references">
@@ -390,6 +466,24 @@ function MirrorMemoryDetail({
             </div>
             <p className="mirror-page__summary-copy">{rpcContext.warnings.length > 0 ? rpcContext.warnings.join("；") : "当前没有额外 RPC warnings。"}</p>
           </article>
+
+          {latestTaskLinkedConversation?.task_id ? (
+            <article className="mirror-page__risk-card">
+              <div className="mirror-page__stage-card-top">
+                <div>
+                  <p className="mirror-page__micro-label">最近可回跳任务</p>
+                  <p className="mirror-page__stage-headline">{latestTaskLinkedConversation.task_id}</p>
+                </div>
+                <StatusBadge tone="processing">task</StatusBadge>
+              </div>
+              <p className="mirror-page__summary-copy">镜子里的本地连续记录会优先回跳到相关任务详情，而不是在镜子页内继续堆叠过程。</p>
+              <div className="mirror-page__conversation-actions">
+                <button type="button" className="mirror-page__task-link" onClick={() => onOpenTaskDetail(latestTaskLinkedConversation.task_id!)}>
+                  查看关联任务
+                </button>
+              </div>
+            </article>
+          ) : null}
         </div>
       </TabsContent>
     </Tabs>
@@ -397,17 +491,30 @@ function MirrorMemoryDetail({
 }
 
 export function MirrorDetailContent(props: MirrorDetailContentProps) {
+  const navigate = useNavigate();
+  const openTaskDetail = useMemo(
+    () => (taskId: string) => {
+      navigate(resolveDashboardModuleRoutePath("tasks"), {
+        state: {
+          focusTaskId: taskId,
+          openDetail: true,
+        },
+      });
+    },
+    [navigate],
+  );
+
   if (props.activeDetailKey === "history") {
-    return <MirrorHistoryDetail conversationSummary={props.conversationSummary} conversations={props.conversations} overview={props.overview} />;
+    return <MirrorHistoryDetail conversationSummary={props.conversationSummary} conversations={props.conversations} onOpenTaskDetail={openTaskDetail} overview={props.overview} />;
   }
 
   if (props.activeDetailKey === "dailyStage") {
-    return <MirrorDailyDetail dailyDigest={props.dailyDigest} />;
+    return <MirrorDailyDetail dailyDigest={props.dailyDigest} onOpenTaskDetail={openTaskDetail} />;
   }
 
   if (props.activeDetailKey === "profile") {
     return <MirrorProfileDetail profileView={props.profileView} />;
   }
 
-  return <MirrorMemoryDetail conversations={props.conversations} overview={props.overview} rpcContext={props.rpcContext} />;
+  return <MirrorMemoryDetail conversations={props.conversations} onOpenTaskDetail={openTaskDetail} overview={props.overview} rpcContext={props.rpcContext} />;
 }
