@@ -299,6 +299,23 @@ func TestNewServiceFromConfigReturnsSecretSourceError(t *testing.T) {
 	}
 }
 
+func TestNewServiceFromConfigReturnsSecretNotFound(t *testing.T) {
+	_, err := NewServiceFromConfig(ServiceConfig{
+		ModelConfig: config.ModelConfig{
+			Provider:            OpenAIResponsesProvider,
+			ModelID:             "gpt-5.4",
+			Endpoint:            "https://api.openai.com/v1/responses",
+			SingleTaskLimit:     10.0,
+			DailyLimit:          50.0,
+			BudgetAutoDowngrade: true,
+		},
+		SecretSource: stubSecretSource{err: ErrSecretNotFound},
+	})
+	if !errors.Is(err, ErrSecretSourceFailed) || !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("expected missing secret error chain, got %v", err)
+	}
+}
+
 func TestStaticSecretSourceUsesSecretStore(t *testing.T) {
 	source := NewStaticSecretSource(stubSecretStore{apiKey: "secret-store-key"})
 	apiKey, err := source.ResolveModelAPIKey(OpenAIResponsesProvider)

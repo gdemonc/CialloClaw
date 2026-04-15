@@ -2,13 +2,12 @@ package bootstrap
 
 import (
 	"context"
-	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/config"
-	"github.com/cialloclaw/cialloclaw/services/local-service/internal/model"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/platform"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
 )
@@ -108,15 +107,20 @@ func TestNewWiresStorageBackedMemoryService(t *testing.T) {
 	}
 }
 
-func TestNewFailsFastWhenModelServiceCannotBeConfigured(t *testing.T) {
+func TestNewAllowsFirstRunWithoutSeededSecret(t *testing.T) {
+	baseDir, err := os.MkdirTemp("", "stronghold-first-run-")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(baseDir) }()
 	cfg := config.Config{
 		RPC: config.RPCConfig{
 			Transport:        "named_pipe",
 			NamedPipeName:    `\\.\pipe\cialloclaw-rpc-test`,
 			DebugHTTPAddress: ":0",
 		},
-		WorkspaceRoot: filepath.Join(t.TempDir(), "workspace"),
-		DatabasePath:  filepath.Join(t.TempDir(), "data", "local.db"),
+		WorkspaceRoot: filepath.Join(baseDir, "workspace"),
+		DatabasePath:  filepath.Join(baseDir, "data", "local.db"),
 		Model: config.ModelConfig{
 			Provider:            "openai_responses",
 			ModelID:             "gpt-5.4",
@@ -126,9 +130,16 @@ func TestNewFailsFastWhenModelServiceCannotBeConfigured(t *testing.T) {
 			BudgetAutoDowngrade: true,
 		},
 	}
-
-	_, err := New(cfg)
-	if !errors.Is(err, model.ErrSecretSourceFailed) {
-		t.Fatalf("expected ErrSecretSourceFailed, got %v", err)
+	app, err := New(cfg)
+	if err != nil {
+		t.Fatalf("expected first run bootstrap to succeed, got %v", err)
+	}
+	defer func() {
+		if closeErr := app.Close(); closeErr != nil {
+			t.Fatalf("close app: %v", closeErr)
+		}
+	}()
+	if app.storage == nil || app.storage.SecretStore() == nil {
+		t.Fatal("expected secret store to remain wired on first run")
 	}
 }

@@ -157,6 +157,9 @@ func buildClient(cfg ServiceConfig) (Client, error) {
 	if apiKey == "" && cfg.SecretSource != nil {
 		resolvedKey, err := cfg.SecretSource.ResolveModelAPIKey(strings.TrimSpace(cfg.ModelConfig.Provider))
 		if err != nil {
+			if errors.Is(err, ErrSecretNotFound) {
+				return nil, errors.Join(ErrSecretSourceFailed, ErrSecretNotFound)
+			}
 			return nil, errors.Join(ErrSecretSourceFailed, err)
 		}
 		apiKey = strings.TrimSpace(resolvedKey)
