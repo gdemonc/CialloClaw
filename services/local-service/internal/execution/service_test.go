@@ -23,11 +23,12 @@ import (
 )
 
 type stubModelClient struct {
-	output string
-	err    error
+	output    string
+	err       error
+	toolCalls []model.ToolCallResult
 }
 
-func (s stubModelClient) GenerateText(_ context.Context, request model.GenerateTextRequest) (model.GenerateTextResponse, error) {
+func (s *stubModelClient) GenerateText(_ context.Context, request model.GenerateTextRequest) (model.GenerateTextResponse, error) {
 	if s.err != nil {
 		return model.GenerateTextResponse{}, s.err
 	}
@@ -40,6 +41,23 @@ func (s stubModelClient) GenerateText(_ context.Context, request model.GenerateT
 		ModelID:    "gpt-5.4",
 		OutputText: s.output,
 	}, nil
+}
+
+func (s *stubModelClient) GenerateToolCalls(_ context.Context, request model.ToolCallRequest) (model.ToolCallResult, error) {
+	if s.err != nil {
+		return model.ToolCallResult{}, s.err
+	}
+	if len(s.toolCalls) == 0 {
+		return model.ToolCallResult{
+			RequestID:  "req_tool_final",
+			Provider:   "openai_responses",
+			ModelID:    "gpt-5.4",
+			OutputText: request.Input,
+		}, nil
+	}
+	result := s.toolCalls[0]
+	s.toolCalls = s.toolCalls[1:]
+	return result, nil
 }
 
 func newTestExecutionService(t *testing.T, output string) (*Service, string) {
@@ -60,7 +78,35 @@ func newTestExecutionService(t *testing.T, output string) (*Service, string) {
 		platform.NewLocalFileSystemAdapter(pathPolicy),
 		stubExecutionCapability{result: tools.CommandExecutionResult{Stdout: "ok", ExitCode: 0}},
 		sidecarclient.NewNoopPlaywrightSidecarClient(),
-		model.NewService(serviceconfig.ModelConfig{}, stubModelClient{output: output}),
+		model.NewService(serviceconfig.ModelConfig{}, &stubModelClient{output: output}),
+		audit.NewService(),
+		checkpoint.NewService(),
+		delivery.NewService(),
+		toolRegistry,
+		toolExecutor,
+		plugin.NewService(),
+	), workspaceRoot
+}
+
+func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (*Service, string) {
+	t.Helper()
+
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	pathPolicy, err := platform.NewLocalPathPolicy(workspaceRoot)
+	if err != nil {
+		t.Fatalf("new local path policy: %v", err)
+	}
+	toolRegistry := tools.NewRegistry()
+	if err := builtin.RegisterBuiltinTools(toolRegistry); err != nil {
+		t.Fatalf("register builtin tools: %v", err)
+	}
+	toolExecutor := tools.NewToolExecutor(toolRegistry)
+
+	return NewService(
+		platform.NewLocalFileSystemAdapter(pathPolicy),
+		stubExecutionCapability{result: tools.CommandExecutionResult{Stdout: "ok", ExitCode: 0}},
+		sidecarclient.NewNoopPlaywrightSidecarClient(),
+		model.NewService(serviceconfig.ModelConfig{}, client),
 		audit.NewService(),
 		checkpoint.NewService(),
 		delivery.NewService(),
@@ -91,7 +137,7 @@ func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwrig
 		platform.NewLocalFileSystemAdapter(pathPolicy),
 		stubExecutionCapability{result: tools.CommandExecutionResult{Stdout: "ok", ExitCode: 0}},
 		playwright,
-		model.NewService(serviceconfig.ModelConfig{}, stubModelClient{output: output}),
+		model.NewService(serviceconfig.ModelConfig{}, &stubModelClient{output: output}),
 		audit.NewService(),
 		checkpoint.NewService(),
 		delivery.NewService(),
@@ -182,6 +228,64 @@ func TestExecuteWorkspaceDocumentWritesFile(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "第一点") {
 		t.Fatalf("expected written document to contain generated content, got %s", string(content))
+	}
+}
+
+func TestExecuteAgentLoopReadsFileBeforeReturningAnswer(t *testing.T) {
+	modelClient := &stubModelClient{
+		toolCalls: []model.ToolCallResult{
+			{
+				RequestID: "req_loop_1",
+				Provider:  "openai_responses",
+				ModelID:   "gpt-5.4",
+				ToolCalls: []model.ToolInvocation{
+					{
+						Name:      "read_file",
+						Arguments: map[string]any{"path": "notes/source.txt"},
+					},
+				},
+			},
+			{
+				RequestID:  "req_loop_2",
+				Provider:   "openai_responses",
+				ModelID:    "gpt-5.4",
+				OutputText: "I checked the file and extracted the key takeaway.",
+			},
+		},
+	}
+	service, workspaceRoot := newTestExecutionServiceWithModelClient(t, modelClient)
+	sourcePath := filepath.Join(workspaceRoot, "notes", "source.txt")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("mkdir notes: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("Important launch note"), 0o644); err != nil {
+		t.Fatalf("seed source file: %v", err)
+	}
+
+	result, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_loop",
+		RunID:        "run_loop",
+		Title:        "Loop test",
+		Intent:       map[string]any{"name": defaultAgentLoopIntentName, "arguments": map[string]any{}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "Please inspect the note and tell me the takeaway."},
+		DeliveryType: "bubble",
+		ResultTitle:  "Loop result",
+	})
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	if result.Content != "I checked the file and extracted the key takeaway." {
+		t.Fatalf("unexpected loop output: %s", result.Content)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected one executed tool call, got %+v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].ToolName != "read_file" {
+		t.Fatalf("expected read_file tool call, got %+v", result.ToolCalls[0])
+	}
+	if result.ModelInvocation["request_id"] != "req_loop_2" {
+		t.Fatalf("expected final planning turn metadata, got %+v", result.ModelInvocation)
 	}
 }
 
@@ -478,7 +582,7 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 		platform.NewLocalFileSystemAdapter(pathPolicy),
 		stubExecutionCapability{err: errors.New("provider unavailable")},
 		sidecarclient.NewNoopPlaywrightSidecarClient(),
-		model.NewService(serviceconfig.ModelConfig{}, stubModelClient{err: errors.New("provider unavailable")}),
+		model.NewService(serviceconfig.ModelConfig{}, &stubModelClient{err: errors.New("provider unavailable")}),
 		audit.NewService(),
 		checkpoint.NewService(),
 		delivery.NewService(),
