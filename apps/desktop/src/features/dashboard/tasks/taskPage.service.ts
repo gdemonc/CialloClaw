@@ -208,9 +208,12 @@ function recoverTaskDetailFromInvalidCollections(detail: AgentTaskDetailGetResul
         detailWarningMessage: warnings.join(" "),
       };
     } catch (nextError) {
+      const hasRecoveredArtifacts = Array.isArray(candidate.artifacts) && candidate.artifacts.length === 0;
+      const hasRecoveredMirrors = Array.isArray(candidate.mirror_references) && candidate.mirror_references.length === 0;
+
       if (
         nextError instanceof Error &&
-        ((/artifacts/i.test(nextError.message) && candidate.artifacts.length === 0) || (/mirror/i.test(nextError.message) && candidate.mirror_references.length === 0))
+        ((/artifacts/i.test(nextError.message) && hasRecoveredArtifacts) || (/mirror/i.test(nextError.message) && hasRecoveredMirrors))
       ) {
         throw nextError;
       }

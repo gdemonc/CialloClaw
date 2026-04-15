@@ -1051,6 +1051,18 @@ test("task detail normalization recovers invalid artifacts but still rejects bro
     assert.equal(recoveredMirror.detail.mirror_references.length, 0);
     assert.match(recoveredMirror.detailWarningMessage ?? "", /镜子命中信息暂时无法完整展示/);
 
+    const recoveredBoth = service.normalizeTaskDetailData(
+      createDetail({
+        artifacts: null as never,
+        mirror_references: null as never,
+      }),
+    );
+
+    assert.equal(recoveredBoth.detail.artifacts.length, 0);
+    assert.equal(recoveredBoth.detail.mirror_references.length, 0);
+    assert.match(recoveredBoth.detailWarningMessage ?? "", /成果信息暂时无法完整展示/);
+    assert.match(recoveredBoth.detailWarningMessage ?? "", /镜子命中信息暂时无法完整展示/);
+
     assert.throws(
       () =>
         service.normalizeTaskDetailResult(
