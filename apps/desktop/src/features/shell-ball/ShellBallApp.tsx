@@ -141,7 +141,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     handlePressCancel,
     handleSubmitText,
     handleAttachFile,
-    handleDroppedFiles,
+    handleDroppedFiles: handleAppendPendingFiles,
     handleRemovePendingFile,
     handleInputFocusChange,
     handleInputFocusRequest,
@@ -158,9 +158,11 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   const anchorRef = useRef<ShellBallWindowAnchor | null>(null);
   const dashboardTransitionPhaseRef = useRef<ShellBallDashboardTransitionPhase>("idle");
   const transitionQueueRef = useRef(Promise.resolve());
-  const dragDropHandlersRef = useRef({ handleDroppedFiles });
-
-  dragDropHandlersRef.current = { handleDroppedFiles };
+  const dragDropHandlersRef = useRef<{
+    handleDroppedFiles: (paths: string[]) => Promise<void> | void;
+  }>({
+    handleDroppedFiles: () => undefined,
+  });
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
@@ -321,8 +323,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
             return;
           }
 
-          dragDropHandlersRef.current.handleDroppedFiles(event.payload.paths);
-          void emitShellBallInputRequestFocus(Date.now());
+          void dragDropHandlersRef.current.handleDroppedFiles(event.payload.paths);
           return;
       }
     }).then((unlisten) => {
@@ -348,7 +349,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     void openOrFocusDesktopWindow("dashboard");
   }
 
-  useShellBallCoordinator({
+  const { handleDroppedFiles: handleCoordinatorDroppedFiles } = useShellBallCoordinator({
     visualState,
     helperWindowsVisible: dashboardTransitionPhase === "idle",
     inputValue,
@@ -356,7 +357,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     finalizedSpeechPayload,
     voicePreview,
     setInputValue,
-    onAppendPendingFiles: handleDroppedFiles,
+    onAppendPendingFiles: handleAppendPendingFiles,
     onRemovePendingFile: handleRemovePendingFile,
     onFinalizedSpeechHandled: acknowledgeFinalizedSpeechPayload,
     onRegionEnter: handleRegionEnter,
@@ -366,6 +367,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     onAttachFile: handleAttachFile,
     onPrimaryClick: handlePrimaryClick,
   });
+  dragDropHandlersRef.current = { handleDroppedFiles: handleCoordinatorDroppedFiles };
 
   return (
     <ShellBallSurface

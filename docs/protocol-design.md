@@ -504,11 +504,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ### 7.2 planned
 
-- `agent.security.audit.list`
 - `agent.mirror.memory.manage`
-- `agent.task.artifact.list`
-- `agent.task.artifact.open`
-- `agent.delivery.open`
 - `agent.plugin.list`
 - `agent.plugin.enable`
 - `agent.plugin.disable`
@@ -677,6 +673,33 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
   - 分析意图
   - 根据配置直接处理或进入意图确认
 - **入参**：会话信息、触发方式、任务输入对象、意图、交付偏好
+
+### 8.1.3 `agent.task.artifact.list`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：任务详情页、仪表盘结果区需要列出指定 `task_id` 的真实 artifact 时。
+- **系统处理**：按 `task_id` 查询真实 artifact store，并返回稳定分页结构。
+- **入参**：`task_id`、`limit`、`offset`
+- **出参**：`items` + `page`
+
+### 8.1.4 `agent.task.artifact.open`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：用户在任务详情或结果区点击某个 artifact，需要得到稳定打开动作时。
+- **系统处理**：根据 `task_id + artifact_id` 定位真实 artifact，并返回与之对齐的 `delivery_result`、`open_action`、`resolved_payload`。
+- **入参**：`task_id`、`artifact_id`
+- **出参**：`artifact`、`delivery_result`、`open_action`、`resolved_payload`
+
+### 8.1.5 `agent.delivery.open`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：前端需要统一打开最终交付对象时，无论入口来自任务主交付还是某个 artifact。
+- **系统处理**：
+  - 若携带 `artifact_id`，则优先基于真实 artifact 解析打开动作；
+  - 若未携带 `artifact_id`，则基于任务当前 `delivery_result` 解析打开动作；
+  - 返回统一的 `delivery_result`、`open_action`、`resolved_payload`，供前端直接执行打开。
+- **入参**：`task_id`，可选 `artifact_id`
+- **出参**：`delivery_result`、`open_action`、`resolved_payload`，按需附带 `artifact`
 - **出参**：任务对象、气泡消息、交付结果（如已完成）
 
 ### agent.task.start 入参说明
@@ -2373,7 +2396,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户打开设置面板时
-- **系统处理**：返回当前设置快照
+- **系统处理**：返回当前设置快照；若 Stronghold 读取敏感配置状态失败，返回统一错误 `STRONGHOLD_ACCESS_FAILED`
 - **入参**：查询范围
 - **出参**：设置快照
 
@@ -2408,7 +2431,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.settings.floating_ball`   | 悬浮球设置       |
 | `data.settings.memory`          | 记忆设置         |
 | `data.settings.task_automation` | 任务与自动化设置 |
-| `data.settings.data_log`        | 数据与日志设置   |
+| `data.settings.data_log`        | 数据与日志设置（包含脱敏机密状态） |
 
 ### agent.settings.get 出参示例
 
@@ -2463,7 +2486,8 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
         },
         "data_log": {
           "provider": "openai",
-          "budget_auto_downgrade": true
+          "budget_auto_downgrade": true,
+          "provider_api_key_configured": true
         }
       }
     },
@@ -2481,7 +2505,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户修改设置并点击保存时
-- **系统处理**：写入设置并返回生效结果
+- **系统处理**：写入设置并返回生效结果；`data_log.api_key` 只用于当前请求写入 Stronghold，不会进入正式设置快照
 - **入参**：要更新的设置项
 - **出参**：已更新字段、生效设置、生效方式、是否需重启
 
@@ -2493,6 +2517,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `task_automation` | 任务自动化设置变更 |
 | `general`         | 通用设置变更       |
 | `floating_ball`   | 悬浮球设置变更     |
+| `data_log`        | 数据与日志设置变更；允许携带临时写入 Stronghold 的 `api_key` |
 
 ### agent.settings.update 入参示例
 
@@ -2516,6 +2541,11 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
         "value": 15
       },
       "inspect_on_file_change": true
+    },
+    "data_log": {
+      "provider": "openai",
+      "budget_auto_downgrade": true,
+      "api_key": "sk-example"
     }
   }
 }
@@ -2555,6 +2585,11 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
             "value": 15
           },
           "inspect_on_file_change": true
+        },
+        "data_log": {
+          "provider": "openai",
+          "budget_auto_downgrade": true,
+          "provider_api_key_configured": true
         }
       },
       "apply_mode": "immediate",

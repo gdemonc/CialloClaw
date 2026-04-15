@@ -18,6 +18,7 @@ export const shellBallWindowSyncEvents = Object.freeze({
   globalDragState: "desktop-shell-ball:global-drag-state",
   primaryAction: "desktop-shell-ball:primary-action",
   pendingFileAction: "desktop-shell-ball:pending-file-action",
+  intentDecision: "desktop-shell-ball:intent-decision",
   bubbleAction: "desktop-shell-ball:bubble-action",
 });
 
@@ -26,6 +27,8 @@ export type ShellBallHelperWindowRole = "bubble" | "input" | "pinned";
 export type ShellBallPrimaryAction = "attach_file" | "submit" | "primary_click";
 
 export type ShellBallPendingFileAction = "append" | "remove";
+
+export type ShellBallIntentDecision = "confirm" | "cancel";
 
 export type ShellBallBubbleAction = "pin" | "unpin" | "delete";
 
@@ -123,6 +126,12 @@ export type ShellBallPendingFileActionPayload =
       action: "remove";
       path: string;
     };
+
+export type ShellBallIntentDecisionPayload = {
+  source: ShellBallBubbleActionSource;
+  taskId: string;
+  decision: ShellBallIntentDecision;
+};
 
 export type ShellBallBubbleActionPayload = {
   source: ShellBallBubbleActionSource;
