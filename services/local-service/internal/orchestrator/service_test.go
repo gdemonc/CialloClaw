@@ -315,6 +315,72 @@ func TestServiceSubmitInputKeepsUnknownShortTextInIntentConfirmation(t *testing.
 	}
 }
 
+func TestServiceSubmitInputRoutesClearCommandToAgentLoopWithoutForcedConfirmation(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Translated note ready.")
+
+	result, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_clear_command",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Translate this note into English",
+		},
+	})
+	if err != nil {
+		t.Fatalf("submit input failed: %v", err)
+	}
+
+	task := result["task"].(map[string]any)
+	if task["status"] != "completed" {
+		t.Fatalf("expected clear command to execute directly, got %v", task["status"])
+	}
+	intentValue, ok := task["intent"].(map[string]any)
+	if !ok || intentValue["name"] != "agent_loop" {
+		t.Fatalf("expected clear command to route through agent_loop, got %+v", task["intent"])
+	}
+	deliveryResult, ok := result["delivery_result"].(map[string]any)
+	if !ok {
+		t.Fatal("expected direct command to return delivery_result")
+	}
+	if deliveryResult["type"] != "bubble" {
+		t.Fatalf("expected short command to prefer bubble delivery, got %v", deliveryResult["type"])
+	}
+}
+
+func TestServiceSubmitInputUsesSuggestedWorkspaceDeliveryForLongAgentLoopInput(t *testing.T) {
+	service, workspaceRoot := newTestServiceWithExecution(t, "Long-form result body.")
+
+	result, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_long_command",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Please review the following document notes and prepare a detailed deliverable:\nLine one explains the rollout plan.\nLine two adds implementation details.\nLine three adds follow-up tasks.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("submit input failed: %v", err)
+	}
+
+	deliveryResult, ok := result["delivery_result"].(map[string]any)
+	if !ok {
+		t.Fatal("expected long direct command to return delivery_result")
+	}
+	if deliveryResult["type"] != "workspace_document" {
+		t.Fatalf("expected long agent loop command to prefer workspace_document, got %v", deliveryResult["type"])
+	}
+	payload := deliveryResult["payload"].(map[string]any)
+	outputPath := payload["path"].(string)
+	if outputPath == "" {
+		t.Fatal("expected workspace delivery to carry a path")
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, strings.TrimPrefix(outputPath, "workspace/"))); err != nil {
+		t.Fatalf("expected workspace delivery file to exist, got %v", err)
+	}
+}
+
 func TestServiceConfirmTaskRejectsUnknownIntentWithoutCorrection(t *testing.T) {
 	service := newTestService()
 

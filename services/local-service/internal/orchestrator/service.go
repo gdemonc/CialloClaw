@@ -149,9 +149,12 @@ func (s *Service) Snapshot() map[string]any {
 func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 	snapshot := s.context.Capture(params)
 	options := mapValue(params, "options")
-	confirmRequired := boolValue(options, "confirm_required", true)
-	preferredDelivery, fallbackDelivery := deliveryPreferenceFromSubmit(params)
+	confirmRequired := boolValue(options, "confirm_required", false)
 	suggestion := s.intent.Suggest(snapshot, nil, confirmRequired)
+	preferredDelivery, fallbackDelivery := deliveryPreferenceFromSubmit(params)
+	if !suggestion.RequiresConfirm {
+		preferredDelivery, fallbackDelivery = mergeSuggestedDeliveryPreference(preferredDelivery, fallbackDelivery, suggestion.DirectDeliveryType)
+	}
 	if s.intent.AnalyzeSnapshot(snapshot) == "waiting_input" {
 		task := s.runEngine.CreateTask(runengine.CreateTaskInput{
 			SessionID:         stringValue(params, "session_id", ""),
@@ -231,8 +234,11 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 func (s *Service) StartTask(params map[string]any) (map[string]any, error) {
 	snapshot := s.context.Capture(params)
 	explicitIntent := mapValue(params, "intent")
-	preferredDelivery, fallbackDelivery := deliveryPreferenceFromStart(params)
 	suggestion := s.intent.Suggest(snapshot, explicitIntent, len(explicitIntent) == 0)
+	preferredDelivery, fallbackDelivery := deliveryPreferenceFromStart(params)
+	if len(explicitIntent) == 0 && !suggestion.RequiresConfirm {
+		preferredDelivery, fallbackDelivery = mergeSuggestedDeliveryPreference(preferredDelivery, fallbackDelivery, suggestion.DirectDeliveryType)
+	}
 
 	task := s.runEngine.CreateTask(runengine.CreateTaskInput{
 		SessionID:         stringValue(params, "session_id", ""),
@@ -2799,6 +2805,8 @@ func buildMemorySummary(snapshot contextsvc.TaskContextSnapshot, taskIntent map[
 // resultSpecFromIntent 根据 intent 返回默认结果标题、预览文案和结果气泡文案。
 func resultSpecFromIntent(taskIntent map[string]any) (string, string, string) {
 	switch stringValue(taskIntent, "name", "summarize") {
+	case "agent_loop":
+		return "处理结果", "结果已通过气泡返回", "结果已经生成，可直接查看。"
 	case "rewrite":
 		return "改写结果", "已为你写入文档并打开", "内容已经按要求改写完成，可直接查看。"
 	case "translate":
@@ -2821,7 +2829,7 @@ func resultSpecFromIntent(taskIntent map[string]any) (string, string, string) {
 // deliveryTypeFromIntent 根据意图类型返回默认交付方式。
 func deliveryTypeFromIntent(taskIntent map[string]any) string {
 	switch stringValue(taskIntent, "name", "summarize") {
-	case "translate", "explain", "page_read", "page_search":
+	case "agent_loop", "translate", "explain", "page_read", "page_search":
 		return "bubble"
 	default:
 		return "workspace_document"
@@ -2837,6 +2845,16 @@ func deliveryPreferenceFromSubmit(params map[string]any) (string, string) {
 func deliveryPreferenceFromStart(params map[string]any) (string, string) {
 	deliveryOptions := mapValue(params, "delivery")
 	return stringValue(deliveryOptions, "preferred", ""), stringValue(deliveryOptions, "fallback", "")
+}
+
+// mergeSuggestedDeliveryPreference preserves explicit caller preferences and only
+// falls back to the intent layer's suggested delivery when the caller left the
+// preferred delivery unset.
+func mergeSuggestedDeliveryPreference(preferredDelivery, fallbackDelivery, suggestedDelivery string) (string, string) {
+	if strings.TrimSpace(preferredDelivery) == "" && strings.TrimSpace(suggestedDelivery) != "" {
+		preferredDelivery = suggestedDelivery
+	}
+	return preferredDelivery, fallbackDelivery
 }
 
 // buildPendingExecution 生成等待授权任务在恢复执行时需要的交付计划。
