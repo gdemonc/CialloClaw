@@ -20,7 +20,7 @@ import {
   type DashboardSettingsPatch,
 } from "@/features/dashboard/shared/dashboardSettingsMutation";
 import { loadMirrorOverviewData, type MirrorOverviewData, type MirrorOverviewSource } from "./mirrorService";
-import { MirrorDetailContent } from "./MirrorDetailContent";
+import { MirrorDetailContent, type MirrorHistoryDetailView } from "./MirrorDetailContent";
 import { loadMirrorFloatingPositions, saveMirrorFloatingPositions } from "./mirrorLayoutStorage";
 import { MirrorDecorativeBirds } from "./MirrorDecorativeBirds";
 import {
@@ -575,6 +575,7 @@ export function MirrorApp() {
   const [draggingKey, setDraggingKey] = useState<FloatingMirrorDirectionKey | null>(null);
   const [activeDetailKey, setActiveDetailKey] = useState<MirrorDirectionKey | null>(null);
   const [focusedMemoryId, setFocusedMemoryId] = useState<string | null>(null);
+  const [historyDetailView, setHistoryDetailView] = useState<MirrorHistoryDetailView>("conversation");
   const [boardReady, setBoardReady] = useState(false);
   const [lastMirrorUpdate, setLastMirrorUpdate] = useState<MirrorOverviewUpdatedNotification | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -618,6 +619,14 @@ export function MirrorApp() {
     });
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, location.state, navigate, openDetail]);
+
+  useEffect(() => {
+    if (!mirrorData || mirrorData.conversations.length > 0 || historyDetailView === "summary") {
+      return;
+    }
+
+    setHistoryDetailView("summary");
+  }, [historyDetailView, mirrorData]);
 
   const refreshMirrorData = useCallback(() => {
     if (dataMode === "mock") {
@@ -1024,6 +1033,31 @@ export function MirrorApp() {
     }
 
     const detailBadge = getDetailBadge(activeDetailKey);
+    const detailTitleAccessory =
+      activeDetailKey === "history" ? (
+        <div className="mirror-page__detail-tab-list mirror-page__detail-tab-list--title" role="tablist" aria-label="历史详情视图" data-testid="mirror-history-tabs">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={historyDetailView === "summary"}
+            className="mirror-page__detail-tab-trigger"
+            data-active={historyDetailView === "summary" ? "" : undefined}
+            onClick={() => setHistoryDetailView("summary")}
+          >
+            历史概要
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={historyDetailView === "conversation"}
+            className="mirror-page__detail-tab-trigger"
+            data-active={historyDetailView === "conversation" ? "" : undefined}
+            onClick={() => setHistoryDetailView("conversation")}
+          >
+            最近 100 条本地对话
+          </button>
+        </div>
+      ) : null;
 
     return (
       <div className="mirror-page__detail-layer" onClick={closeDetail}>
@@ -1035,7 +1069,11 @@ export function MirrorApp() {
           data-testid={`mirror-detail-${activeDetailKey}`}
           onClick={(event) => event.stopPropagation()}
         >
-          <PanelSurface title={getDirectionTitle(activeDetailKey)} eyebrow={getDirectionEyebrow(activeDetailKey)}>
+          <PanelSurface
+            title={getDirectionTitle(activeDetailKey)}
+            eyebrow={getDirectionEyebrow(activeDetailKey)}
+            titleAccessory={detailTitleAccessory}
+          >
             <div className="mirror-page__detail-topbar">
               <div className="mirror-page__detail-meta">
                 <StatusBadge tone={detailBadge.tone}>{detailBadge.label}</StatusBadge>
@@ -1051,6 +1089,7 @@ export function MirrorApp() {
                 conversations={mirrorData.conversations}
                 dailyDigest={mirrorData.dailyDigest}
                 focusMemoryId={focusedMemoryId}
+                historyDetailView={historyDetailView}
                 latestRestorePoint={mirrorData.latestRestorePoint}
                 overview={overview}
                 onUpdateSettings={handleSettingsUpdate}

@@ -52,8 +52,11 @@ type MirrorDetailContentProps = {
   conversationSummary: MirrorConversationSummary;
   dailyDigest: MirrorDailyDigest;
   focusMemoryId: string | null;
+  historyDetailView: MirrorHistoryDetailView;
   profileView: MirrorProfileView;
 };
+
+export type MirrorHistoryDetailView = "summary" | "conversation";
 
 function MirrorEmptyState({ children }: { children: string }) {
   return <p className="mirror-page__empty-state">{children}</p>;
@@ -63,8 +66,10 @@ function MirrorHistoryDetail({
   overview,
   conversations,
   conversationSummary,
+  historyDetailView,
   onOpenTaskDetail,
 }: Pick<MirrorDetailContentProps, "overview" | "conversations" | "conversationSummary"> & {
+  historyDetailView: MirrorHistoryDetailView;
   onOpenTaskDetail: (taskId: string) => void;
 }) {
   const [conversationScopeFilter, setConversationScopeFilter] = useState<MirrorConversationScopeFilter>("all");
@@ -107,20 +112,9 @@ function MirrorHistoryDetail({
   }, [conversationDateFilter, conversationDateOptions, newestConversationDateKey]);
 
   return (
-    <Tabs className="mirror-page__detail-tabs" defaultValue={conversations.length > 0 ? "conversation" : "summary"}>
-      <div className="mirror-page__detail-tab-header">
-        <TabsList className="mirror-page__detail-tab-list" variant="line" data-testid="mirror-history-tabs">
-          <TabsTrigger className="mirror-page__detail-tab-trigger" value="summary">
-            历史概要
-          </TabsTrigger>
-          <TabsTrigger className="mirror-page__detail-tab-trigger" value="conversation">
-            最近 100 条本地对话
-          </TabsTrigger>
-        </TabsList>
-        <div className="mirror-page__detail-pill">{conversationSummary.total_records} 条对话</div>
-      </div>
-
-      <TabsContent className="mirror-page__detail-tab-panel" value="summary">
+    <div className="mirror-page__detail-tabs">
+      {historyDetailView === "summary" ? (
+        <>
         <div className="mirror-page__history-summary-grid">
           <article className="mirror-page__continuity-card">
             <p className="mirror-page__micro-label">本地完整记录</p>
@@ -161,9 +155,9 @@ function MirrorHistoryDetail({
         ) : (
           <MirrorEmptyState>暂无历史概要。</MirrorEmptyState>
         )}
-      </TabsContent>
-
-      <TabsContent className="mirror-page__detail-tab-panel" value="conversation">
+        </>
+      ) : (
+        <>
         <div className="mirror-page__conversation-filter-shell">
           <div className="mirror-page__conversation-filter-bar">
             <button
@@ -365,8 +359,9 @@ function MirrorHistoryDetail({
             </div>
           </ScrollArea>
         )}
-      </TabsContent>
-    </Tabs>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -901,7 +896,15 @@ export function MirrorDetailContent(props: MirrorDetailContentProps) {
   );
 
   if (props.activeDetailKey === "history") {
-    return <MirrorHistoryDetail conversationSummary={props.conversationSummary} conversations={props.conversations} onOpenTaskDetail={openTaskDetail} overview={props.overview} />;
+    return (
+      <MirrorHistoryDetail
+        conversationSummary={props.conversationSummary}
+        conversations={props.conversations}
+        historyDetailView={props.historyDetailView}
+        onOpenTaskDetail={openTaskDetail}
+        overview={props.overview}
+      />
+    );
   }
 
   if (props.activeDetailKey === "dailyStage") {
