@@ -47,7 +47,7 @@ function createFallbackExperience(task: Task): TaskExperience {
     outputs: [
       { id: `${task.task_id}_draft`, label: "当前草稿", content: "等待更多任务上下文后补齐。", tone: "draft" },
       { id: `${task.task_id}_result`, label: "已生成结果", content: "结果区会优先展示当前任务已经返回的产出与交付入口。", tone: "result" },
-      { id: `${task.task_id}_editable`, label: "可继续编辑", content: "当前可先结合时间线、成果区与文件舱门继续查看已有上下文。", tone: "editable" },
+      { id: `${task.task_id}_editable`, label: "可继续编辑", content: "当前可先结合时间线与成果区继续查看已有上下文。", tone: "editable" },
     ],
     phase: `当前步骤：${task.current_step}`,
     priority: task.risk_level === "red" ? "critical" : task.risk_level === "yellow" ? "high" : "steady",

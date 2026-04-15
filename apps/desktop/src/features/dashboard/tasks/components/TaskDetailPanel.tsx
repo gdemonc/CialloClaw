@@ -13,6 +13,9 @@ import { TaskProgressTimeline } from "./TaskProgressTimeline";
 
 type TaskDetailPanelProps = {
   artifactActionPendingId: string | null;
+  artifactErrorMessage: string | null;
+  artifactItems: TaskDetailData["detail"]["artifacts"];
+  artifactLoading: boolean;
   artifactWarningMessage: string | null;
   detailData: TaskDetailData;
   detailErrorMessage: string | null;
@@ -22,13 +25,15 @@ type TaskDetailPanelProps = {
   onAction: (action: "pause" | "resume" | "cancel" | "restart" | "open-safety") => void;
   onClose: () => void;
   onOpenArtifact: (artifactId: string) => void;
-  onOpenFiles: () => void;
   onOpenLatestDelivery: () => void;
   onRetryDetail: (() => void) | null;
 };
 
 export function TaskDetailPanel({
   artifactActionPendingId,
+  artifactErrorMessage,
+  artifactItems,
+  artifactLoading,
   artifactWarningMessage,
   detailData,
   detailErrorMessage,
@@ -38,7 +43,6 @@ export function TaskDetailPanel({
   onAction,
   onClose,
   onOpenArtifact,
-  onOpenFiles,
   onOpenLatestDelivery,
   onRetryDetail,
 }: TaskDetailPanelProps) {
@@ -172,21 +176,17 @@ export function TaskDetailPanel({
                     <p className="task-detail-card__eyebrow">成果区</p>
                     <h3 className="task-detail-card__title">已生成的文件与草稿</h3>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button className="task-detail-card__action" onClick={onOpenFiles} type="button">
-                      <FolderOutput className="h-4 w-4" />
-                      文件舱门
-                    </button>
-                    <button className="task-detail-card__action" disabled={deliveryActionPending} onClick={onOpenLatestDelivery} type="button">
-                      <ArrowUpRight className="h-4 w-4" />
-                      {deliveryActionPending ? "打开中..." : "打开最新结果"}
-                    </button>
-                  </div>
+                  <button className="task-detail-card__action" disabled={deliveryActionPending} onClick={onOpenLatestDelivery} type="button">
+                    <ArrowUpRight className="h-4 w-4" />
+                    {deliveryActionPending ? "打开中..." : "打开最新结果"}
+                  </button>
                 </div>
                 <div className="task-detail-output-list">
                   {artifactWarningMessage ? <p className="task-detail-card__hint">{artifactWarningMessage}</p> : null}
-                  {detail.artifacts.length > 0 ? (
-                    detail.artifacts.map((artifact) => (
+                  {artifactErrorMessage ? <p className="task-detail-card__hint">{artifactErrorMessage}</p> : null}
+                  {artifactLoading && artifactItems.length === 0 ? <p className="task-detail-card__empty">正在同步成果列表...</p> : null}
+                  {artifactItems.length > 0 ? (
+                    artifactItems.map((artifact) => (
                       <article key={artifact.artifact_id} className="task-detail-output-item">
                         <FolderOutput className="h-4 w-4" />
                         <div>
@@ -204,9 +204,9 @@ export function TaskDetailPanel({
                         </button>
                       </article>
                     ))
-                  ) : (
+                  ) : !artifactLoading ? (
                     <p className="task-detail-card__empty">无</p>
-                  )}
+                  ) : null}
                 </div>
               </section>
 
@@ -284,15 +284,17 @@ export function TaskDetailPanel({
                     <p className="task-detail-card__eyebrow">产出内容</p>
                     <h3 className="task-detail-card__title">已生成的结果</h3>
                   </div>
-                  <button className="task-detail-card__action" onClick={onOpenFiles} type="button">
-                    <FolderOutput className="h-4 w-4" />
-                    文件舱门
+                  <button className="task-detail-card__action" disabled={deliveryActionPending} onClick={onOpenLatestDelivery} type="button">
+                    <ArrowUpRight className="h-4 w-4" />
+                    {deliveryActionPending ? "打开中..." : "打开结果"}
                   </button>
                 </div>
                 <div className="task-detail-output-list">
                   {artifactWarningMessage ? <p className="task-detail-card__hint">{artifactWarningMessage}</p> : null}
-                  {detail.artifacts.length > 0 ? (
-                    detail.artifacts.map((artifact) => (
+                  {artifactErrorMessage ? <p className="task-detail-card__hint">{artifactErrorMessage}</p> : null}
+                  {artifactLoading && artifactItems.length === 0 ? <p className="task-detail-card__empty">正在同步成果列表...</p> : null}
+                  {artifactItems.length > 0 ? (
+                    artifactItems.map((artifact) => (
                       <article key={artifact.artifact_id} className="task-detail-output-item">
                         <FolderOutput className="h-4 w-4" />
                         <div>
@@ -310,9 +312,9 @@ export function TaskDetailPanel({
                         </button>
                       </article>
                     ))
-                  ) : (
+                  ) : !artifactLoading ? (
                     <p className="task-detail-card__empty">无</p>
-                  )}
+                  ) : null}
                 </div>
               </section>
             </>

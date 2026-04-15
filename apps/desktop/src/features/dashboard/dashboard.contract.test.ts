@@ -931,26 +931,24 @@ test("task output service exposes artifact list and open flows in mock mode", as
       },
       "task_done_001",
     ),
-    "当前任务没有独立可打开结果，请先查看成果区或文件舱门。",
+    "当前任务没有独立可打开结果，请先查看成果区。",
   );
 });
 
-test("task page adopts rpc output helpers instead of placeholder artifact copy", () => {
+test("task page adopts rpc output helpers directly in the task detail panel", () => {
   const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
   const taskDetailSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
-  const filesSheetSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskFilesSheet.tsx"), "utf8");
 
   assert.match(taskPageSource, /loadTaskArtifactPage/);
   assert.match(taskPageSource, /openTaskArtifactForTask/);
   assert.match(taskPageSource, /openTaskDeliveryForTask/);
-  assert.match(taskPageSource, /TaskFilesSheet/);
+  assert.doesNotMatch(taskPageSource, /TaskFilesSheet/);
 
   assert.doesNotMatch(taskDetailSource, /当前协议尚未提供稳定的 artifact\.open 能力/);
   assert.match(taskDetailSource, /onOpenArtifact/);
   assert.match(taskDetailSource, /onOpenLatestDelivery/);
-
-  assert.match(filesSheetSource, /onOpenArtifact/);
-  assert.match(filesSheetSource, /artifactItems/);
+  assert.doesNotMatch(taskDetailSource, /文件舱门/);
+  assert.match(taskDetailSource, /artifactItems/);
 });
 
 test("task fallback copy no longer claims backend output actions are missing", () => {
