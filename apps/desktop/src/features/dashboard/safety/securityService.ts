@@ -51,6 +51,13 @@ export type SecurityModuleData = {
   source: SecurityModuleSource;
 };
 
+export type SecurityPendingListData = {
+  items: ApprovalRequest[];
+  page: JsonRpcPage;
+  rpcContext: SecurityRpcContext;
+  source: SecurityModuleSource;
+};
+
 export type SecurityRespondOutcome = {
   response: AgentSecurityRespondResult;
   rpcContext: SecurityRpcContext;
@@ -181,6 +188,77 @@ export async function respondToApproval(
     if (isRpcChannelUnavailable(error)) {
       logRpcMockFallback("security approval response blocked", error);
       throw new Error("JSON-RPC 当前不可用，安全审批未提交。请恢复连接后重试。");
+    }
+
+    throw error;
+  }
+}
+
+export async function loadSecurityPendingApprovals(
+  source: SecurityModuleSource,
+  options?: {
+    limit?: number;
+    offset?: number;
+  },
+): Promise<SecurityPendingListData> {
+  const limit = options?.limit ?? 20;
+  const offset = options?.offset ?? 0;
+
+  if (source === "mock") {
+    const pagedItems = securityPendingMock.items.slice(offset, offset + limit);
+
+    return {
+      items: pagedItems,
+      page: {
+        has_more: offset + pagedItems.length < securityPendingMock.items.length,
+        limit,
+        offset,
+        total: securityPendingMock.items.length,
+      },
+      rpcContext: {
+        serverTime: null,
+        warnings: [],
+      },
+      source: "mock",
+    };
+  }
+
+  try {
+    const params: AgentSecurityPendingListParams = {
+      request_meta: createRequestMeta(),
+      limit,
+      offset,
+    };
+    const response = await listSecurityPendingDetailed(params);
+
+    return {
+      items: response.data.items,
+      page: response.data.page,
+      rpcContext: {
+        serverTime: response.meta?.server_time ?? null,
+        warnings: response.warnings,
+      },
+      source: "rpc",
+    };
+  } catch (error) {
+    if (isRpcChannelUnavailable(error)) {
+      logRpcMockFallback("security pending list", error);
+      const pagedItems = securityPendingMock.items.slice(offset, offset + limit);
+
+      return {
+        items: pagedItems,
+        page: {
+          has_more: offset + pagedItems.length < securityPendingMock.items.length,
+          limit,
+          offset,
+          total: securityPendingMock.items.length,
+        },
+        rpcContext: {
+          serverTime: null,
+          warnings: [],
+        },
+        source: "mock",
+      };
     }
 
     throw error;

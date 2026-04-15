@@ -44,6 +44,7 @@ import {
 } from "@/features/dashboard/shared/dashboardSafetyNavigation";
 import {
   getInitialSecurityModuleData,
+  loadSecurityPendingApprovals,
   applySecurityRestorePoint,
   loadSecurityAuditRecords,
   loadSecurityModuleData,
@@ -52,6 +53,7 @@ import {
   respondToApproval,
   type SecurityAuditRecordListData,
   type SecurityModuleData,
+  type SecurityPendingListData,
   type SecurityRestoreApplyOutcome,
   type SecurityRestorePointListData,
   type SecurityRespondOutcome,
@@ -641,6 +643,10 @@ export function SecurityApp() {
   const [lastResolvedApproval, setLastResolvedApproval] = useState<SecurityRespondOutcome | null>(null);
   const [lastRestoreApply, setLastRestoreApply] = useState<SecurityRestoreApplyOutcome | null>(null);
   const [rememberRuleByApprovalId, setRememberRuleByApprovalId] = useState<Record<string, boolean>>({});
+  const [pendingListData, setPendingListData] = useState<SecurityPendingListData | null>(null);
+  const [pendingListError, setPendingListError] = useState<string | null>(null);
+  const [pendingListLoading, setPendingListLoading] = useState(false);
+  const [pendingOffset, setPendingOffset] = useState(0);
   const [restorePointsData, setRestorePointsData] = useState<SecurityRestorePointListData | null>(null);
   const [restorePointsError, setRestorePointsError] = useState<string | null>(null);
   const [restorePointsLoading, setRestorePointsLoading] = useState(false);
@@ -857,6 +863,12 @@ export function SecurityApp() {
   }, [activeDetailKey, activeSnapshotState.approvalSnapshot, cardKeys]);
 
   useEffect(() => {
+    if (activeDetailKey === "status") {
+      setPendingOffset(0);
+    }
+  }, [activeDetailKey]);
+
+  useEffect(() => {
     if (!focusedTaskId && restoreScope === "focused_task") {
       setRestoreScope("all");
     }
@@ -946,6 +958,41 @@ export function SecurityApp() {
       queueRpcRefresh();
     });
   }, [dataMode, queueRpcRefresh, subscribedTaskId]);
+
+  useEffect(() => {
+    if (!moduleData || activeDetailKey !== "status") {
+      return;
+    }
+
+    let disposed = false;
+    setPendingListLoading(true);
+    setPendingListError(null);
+
+    void loadSecurityPendingApprovals(moduleData.source, {
+      limit: SECURITY_DETAIL_PAGE_SIZE,
+      offset: pendingOffset,
+    })
+      .then((nextData) => {
+        if (!disposed) {
+          setPendingListData(nextData);
+          setPendingListError(null);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) {
+          setPendingListError(formatRpcError(error));
+        }
+      })
+      .finally(() => {
+        if (!disposed) {
+          setPendingListLoading(false);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeDetailKey, moduleData, pendingOffset]);
 
   useEffect(() => {
     if (!moduleData || (activeDetailKey !== "restore" && activeDetailKey !== "governance")) {
@@ -1125,6 +1172,23 @@ export function SecurityApp() {
       });
     },
     [navigate],
+  );
+
+  const openPendingApprovalDetail = useCallback(
+    (approval: ApprovalRequest) => {
+      const approvalKey = `approval:${approval.approval_id}` as SecurityCardKey;
+
+      setApprovalSnapshot(approval);
+      setRestorePointSnapshot(null);
+      setRouteDrivenDetailKey(approvalKey);
+      setSubscribedTaskId(approval.task_id);
+      setActiveDetailKey(approvalKey);
+
+      if (cardKeys.includes(approvalKey)) {
+        bringCardToFront(approvalKey);
+      }
+    },
+    [bringCardToFront, cardKeys],
   );
 
   if (!moduleData) {
@@ -1362,8 +1426,69 @@ export function SecurityApp() {
         approval.pending 推送仍先合并到前端状态，再走顺序保护的 RPC 刷新，避免旧响应覆盖较新的安全视图。
       </div>
 
+      <div className="security-page__detail-section">
+        <div className="security-page__detail-toolbar">
+          <div>
+            <p className="security-page__detail-label">待确认授权列表</p>
+            <p className="security-page__detail-copy">点击任一授权可进入该条审批详情，再继续执行允许/拒绝或打开关联 task。</p>
+          </div>
+          {pendingListData ? (
+            <p className="security-page__detail-copy">当前页 {formatPageWindow(pendingListData.page, pendingListData.items.length)}</p>
+          ) : null}
+        </div>
+
+        {pendingListLoading ? <div className="security-page__detail-note">正在同步待确认授权列表…</div> : null}
+        {pendingListError ? <div className="security-page__detail-callout">待确认授权同步失败：{pendingListError}</div> : null}
+        {!pendingListLoading && !pendingListError && (pendingListData?.items.length ?? 0) === 0 ? (
+          <p className="security-page__empty-state">当前没有待确认授权。</p>
+        ) : null}
+
+        {(pendingListData?.items.length ?? 0) > 0 ? (
+          <div className="security-page__detail-selection-list">
+            {pendingListData!.items.map((approval) => (
+              <button
+                key={approval.approval_id}
+                type="button"
+                className="security-page__detail-selection-item"
+                onClick={() => openPendingApprovalDetail(approval)}
+              >
+                <span className="security-page__detail-label">{formatDateTime(approval.created_at)}</span>
+                <strong className="security-page__detail-selection-title">{approval.operation_name}</strong>
+                <span className="security-page__detail-copy">
+                  risk {approval.risk_level} · task {approval.task_id} · {approval.target_object}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {pendingListData ? (
+          <div className="security-page__detail-pagination">
+            <p className="security-page__detail-copy">当前页用于独立浏览待确认授权，不依赖画布里已经铺开的卡片数量。</p>
+            <div className="security-page__detail-pagination-actions">
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={pendingListLoading || pendingListData.page.offset <= 0}
+                onClick={() => setPendingOffset((current) => Math.max(0, current - pendingListData.page.limit))}
+              >
+                上一页
+              </Button>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={pendingListLoading || !pendingListData.page.has_more}
+                onClick={() => setPendingOffset((current) => current + pendingListData.page.limit)}
+              >
+                下一页
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       <div className="security-page__detail-note">
-        当前分页：limit {moduleData.pendingPage.limit} · offset {moduleData.pendingPage.offset} · total {moduleData.pendingPage.total} · has_more {String(moduleData.pendingPage.has_more)}
+        当前摘要分页：limit {moduleData.pendingPage.limit} · offset {moduleData.pendingPage.offset} · total {moduleData.pendingPage.total} · has_more {String(moduleData.pendingPage.has_more)}
       </div>
     </div>
   );
