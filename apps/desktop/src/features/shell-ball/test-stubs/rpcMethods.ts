@@ -1,3 +1,5 @@
+import { loadSettings } from "@/services/settingsService";
+
 function createDetailedResponse<T>(data: T) {
   return {
     data,
@@ -115,5 +117,20 @@ export async function openDelivery(_params?: unknown) {
     },
     open_action: "task_detail" as const,
     resolved_payload: { path: null, task_id: "task_stub", url: null },
+export async function getSettingsDetailed(_params?: unknown) {
+  // Dashboard contract tests only need a deterministic snapshot payload.
+  return createDetailedResponse(loadSettings());
+}
+
+export async function updateSettings(_params?: unknown) {
+  // The test stub mirrors the stable settings.update shape without simulating
+  // backend-side policy changes, which is enough for mock-mode contract tests.
+  const current = loadSettings();
+
+  return {
+    apply_mode: "immediate" as const,
+    effective_settings: current.settings,
+    need_restart: false,
+    updated_keys: [],
   };
 }
