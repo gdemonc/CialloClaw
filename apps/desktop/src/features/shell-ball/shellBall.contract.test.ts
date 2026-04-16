@@ -23,6 +23,7 @@ import {
   SHELL_BALL_LEAVE_GRACE_MS,
   SHELL_BALL_LOCK_DELTA_PX,
   SHELL_BALL_LONG_PRESS_MS,
+  SHELL_BALL_PRESS_DRIFT_TOLERANCE_PX,
   SHELL_BALL_PROCESSING_MS,
   SHELL_BALL_VERTICAL_PRIORITY_RATIO,
   SHELL_BALL_WAITING_AUTH_MS,
@@ -38,7 +39,7 @@ import { ShellBallMascot } from "./components/ShellBallMascot";
 import { ShellBallBubbleZone } from "./components/ShellBallBubbleZone";
 import { getShellBallMascotHotspotGestureAction } from "./components/ShellBallMascot";
 import { getShellBallMascotPointerPhaseAction } from "./components/ShellBallMascot";
-import { shouldStartShellBallMascotWindowDrag } from "./components/ShellBallMascot";
+import { shouldSuppressShellBallMascotHotspotGestures } from "./components/ShellBallMascot";
 import { extractShellBallDroppedText, resolveShellBallTextDropEffect, ShellBallSurface, shouldAcceptShellBallTextDrop } from "./ShellBallSurface";
 import { shouldShowShellBallDemoSwitcher } from "./shellBall.dev";
 import { shellBallWindowLabels, shellBallWindowPermissions } from "../../platform/shellBallWindowController";
@@ -1667,30 +1668,31 @@ test("shell-ball window metrics compute safe frames and helper anchors", () => {
     "utf8",
   );
   const appSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallApp.tsx"), "utf8");
-  const controllerSource = readFileSync(
-    resolve(desktopRoot, "src/platform/shellBallWindowController.ts"),
-    "utf8",
-  );
-  const tauriSource = readFileSync(resolve(desktopRoot, "src-tauri/src/main.rs"), "utf8");
-  const cargoSource = readFileSync(resolve(desktopRoot, "src-tauri/Cargo.toml"), "utf8");
+  const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");
+  const mascotSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/components/ShellBallMascot.tsx"), "utf8");
+  const surfaceSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallSurface.tsx"), "utf8");
 
-  assert.match(metricsSource, /SHELL_BALL_DRAG_RELEASE_POLL_MS = 24/);
-  assert.match(metricsSource, /ballDragReleasePollTimerRef = useRef<number \| null>\(null\)/);
-  assert.match(metricsSource, /const clearBallWindowDragReleasePoll = useCallback\(\(\) => \{/);
-  assert.match(metricsSource, /const armBallWindowBoundsSnapOnRelease = useCallback\(\(\) => \{/);
-  assert.match(metricsSource, /const primaryMouseButtonPressed = await isShellBallPrimaryMouseButtonPressed\(\);/);
-  assert.match(metricsSource, /window\.setTimeout\(\(\) => \{\s*void poll\(\);\s*\}, SHELL_BALL_DRAG_RELEASE_POLL_MS\)/);
+  assert.match(metricsSource, /const beginBallWindowPointerDrag = useCallback\(\(pointerStart: ShellBallPointerPosition\) => \{/);
+  assert.match(metricsSource, /const updateBallWindowPointerDrag = useCallback\(\(pointer: ShellBallPointerPosition\) => \{/);
+  assert.match(metricsSource, /const endBallWindowPointerDrag = useCallback\(async \(pointer\?: ShellBallPointerPosition\) => \{/);
+  assert.match(metricsSource, /ballDragMoveAnimationFrameRef = useRef<number \| null>\(null\)/);
+  assert.match(metricsSource, /window\.requestAnimationFrame\(\(\) => \{/);
+  assert.match(metricsSource, /await queueBallWindowDragPosition\(finalFrame\);/);
   assert.match(metricsSource, /await publishBallGeometry\(\{ snapToBounds: true \}\);/);
-  assert.doesNotMatch(metricsSource, /SHELL_BALL_EDGE_SNAP_AFTER_DRAG_MS/);
-  assert.doesNotMatch(metricsSource, /ballBoundsSnapDeadlineRef/);
-  assert.match(appSource, /armBallWindowBoundsSnapOnRelease\(\);\s*void startShellBallWindowDragging\(\);/);
-  assert.doesNotMatch(appSource, /await startShellBallWindowDragging\(\);/);
-  assert.doesNotMatch(appSource, /await snapBallWindowToBounds\(\);/);
-  assert.match(controllerSource, /shell_ball_is_primary_mouse_button_pressed/);
-  assert.match(tauriSource, /fn shell_ball_is_primary_mouse_button_pressed\(\) -> bool/);
-  assert.match(tauriSource, /GetAsyncKeyState/);
-  assert.match(tauriSource, /SM_SWAPBUTTON/);
-  assert.match(cargoSource, /"Win32_UI_Input_KeyboardAndMouse"/);
+  assert.doesNotMatch(metricsSource, /SHELL_BALL_DRAG_RELEASE_POLL_MS/);
+  assert.doesNotMatch(metricsSource, /armBallWindowBoundsSnapOnRelease/);
+  assert.match(appSource, /beginBallWindowPointerDrag\(\{\s*x: event\.screenX,\s*y: event\.screenY,\s*\}\);/);
+  assert.match(appSource, /updateBallWindowPointerDrag\(\{\s*x: event\.screenX,\s*y: event\.screenY,\s*\}\);/);
+  assert.match(appSource, /void endBallWindowPointerDrag\(\{\s*x: event\.screenX,\s*y: event\.screenY,\s*\}\);/);
+  assert.doesNotMatch(appSource, /startShellBallWindowDragging/);
+  assert.match(interactionSource, /pressStartXRef\.current = event\.screenX;/);
+  assert.match(interactionSource, /pressStartYRef\.current = event\.screenY;/);
+  assert.match(interactionSource, /const driftDistance = Math\.hypot\(event\.screenX - pressStartXRef\.current, event\.screenY - pressStartYRef\.current\);/);
+  assert.match(interactionSource, /driftDistance > SHELL_BALL_PRESS_DRIFT_TOLERANCE_PX/);
+  assert.match(mascotSource, /shouldSuppressShellBallMascotHotspotGestures/);
+  assert.match(surfaceSource, /onDragMove: \(event: PointerEvent<HTMLButtonElement>\) => void;/);
+  assert.match(surfaceSource, /onHotspotDragMove=\{onDragMove\}/);
+  assert.match(surfaceSource, /onHotspotDragEnd=\{onDragEnd\}/);
 });
 
 test("shell-ball interaction contract auto-advances text submission into processing", () => {
@@ -2425,8 +2427,8 @@ test("shell-ball release preview recomputes from the final pointer position", ()
       hintMode: "lock",
       startX: 100,
       startY: 100,
-      clientX: 100,
-      clientY: 52,
+      pointerX: 100,
+      pointerY: 52,
       fallbackPreview: null,
     }),
     "lock",
@@ -2437,8 +2439,8 @@ test("shell-ball release preview recomputes from the final pointer position", ()
       hintMode: "cancel",
       startX: 100,
       startY: 100,
-      clientX: 100,
-      clientY: 148,
+      pointerX: 100,
+      pointerY: 148,
       fallbackPreview: null,
     }),
     "cancel",
@@ -3855,6 +3857,9 @@ test("shell-ball surface renders the mascot-only floating structure without the 
       onRegionEnter: () => {},
       onRegionLeave: () => {},
       onDragStart: () => {},
+      onDragMove: () => {},
+      onDragEnd: () => {},
+      onDragCancel: () => {},
       onPressStart: () => {},
       onPressMove: () => {},
       onPressEnd: () => false,
@@ -3881,6 +3886,9 @@ test("shell-ball surface keeps drag and click on the mascot hotspot only", () =>
       onRegionEnter: () => {},
       onRegionLeave: () => {},
       onDragStart: () => {},
+      onDragMove: () => {},
+      onDragEnd: () => {},
+      onDragCancel: () => {},
       onPressStart: () => {},
       onPressMove: () => {},
       onPressEnd: () => false,
@@ -4028,36 +4036,33 @@ test("shell-ball mascot pointer policy keeps cancellation separate from successf
   );
 });
 
-test("shell-ball mascot drag policy lets the full hotspot start window dragging after movement", () => {
+test("shell-ball mascot drag policy suppresses click gestures only after meaningful pointer drift", () => {
   assert.equal(
-    shouldStartShellBallMascotWindowDrag({
-      visualState: "hover_input",
+    shouldSuppressShellBallMascotHotspotGestures({
       startX: 100,
       startY: 100,
-      clientX: 104,
-      clientY: 103,
+      pointerX: 100 + Math.floor(SHELL_BALL_PRESS_DRIFT_TOLERANCE_PX / 2),
+      pointerY: 103,
     }),
     false,
   );
 
   assert.equal(
-    shouldStartShellBallMascotWindowDrag({
-      visualState: "idle",
+    shouldSuppressShellBallMascotHotspotGestures({
       startX: 100,
       startY: 100,
-      clientX: 134,
-      clientY: 124,
+      pointerX: 100 + SHELL_BALL_PRESS_DRIFT_TOLERANCE_PX + 1,
+      pointerY: 100,
     }),
     true,
   );
 
   assert.equal(
-    shouldStartShellBallMascotWindowDrag({
-      visualState: "voice_listening",
-      startX: 100,
-      startY: 100,
-      clientX: 118,
-      clientY: 114,
+    shouldSuppressShellBallMascotHotspotGestures({
+      startX: null,
+      startY: null,
+      pointerX: 118,
+      pointerY: 114,
     }),
     false,
   );
@@ -4069,8 +4074,8 @@ test("shell-ball voice swipe contract keeps upward lock and downward cancel expl
       hintMode: "lock",
       startX: 100,
       startY: 100,
-      clientX: 100,
-      clientY: 100 - SHELL_BALL_LOCK_DELTA_PX,
+      pointerX: 100,
+      pointerY: 100 - SHELL_BALL_LOCK_DELTA_PX,
       fallbackPreview: null,
     }),
     "lock",
@@ -4081,8 +4086,8 @@ test("shell-ball voice swipe contract keeps upward lock and downward cancel expl
       hintMode: "cancel",
       startX: 100,
       startY: 100,
-      clientX: 100,
-      clientY: 100 + SHELL_BALL_CANCEL_DELTA_PX,
+      pointerX: 100,
+      pointerY: 100 + SHELL_BALL_CANCEL_DELTA_PX,
       fallbackPreview: null,
     }),
     "cancel",
@@ -4126,6 +4131,9 @@ test("shell-ball surface passes mascot double-click and drag wiring through the 
   assert.match(surfaceSource, /onDoubleClick: \(\) => void;/);
   assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onDoubleClick=\{onDoubleClick\}/);
   assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onHotspotDragStart=\{onDragStart\}/);
+  assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onHotspotDragMove=\{onDragMove\}/);
+  assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onHotspotDragEnd=\{onDragEnd\}/);
+  assert.match(surfaceSource, /<ShellBallMascot[\s\S]*onHotspotDragCancel=\{onDragCancel\}/);
   assert.doesNotMatch(surfaceSource, /data-shell-ball-zone="host-drag"/);
   assert.match(surfaceSource, /data-shell-ball-zone="interaction"/);
 });
@@ -4275,6 +4283,7 @@ test("shell-ball interaction timing constants stay frozen", () => {
   assert.equal(SHELL_BALL_HOVER_INTENT_MS, 360);
   assert.equal(SHELL_BALL_LEAVE_GRACE_MS, 180);
   assert.equal(SHELL_BALL_LONG_PRESS_MS, 1000);
+  assert.equal(SHELL_BALL_PRESS_DRIFT_TOLERANCE_PX, 12);
   assert.equal(SHELL_BALL_LOCKED_CANCEL_HOLD_MS, 200);
   assert.equal(SHELL_BALL_LOCK_DELTA_PX, 48);
   assert.equal(SHELL_BALL_CANCEL_DELTA_PX, 48);

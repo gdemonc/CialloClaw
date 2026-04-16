@@ -22,10 +22,7 @@ use std::collections::HashSet;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{PtInRect, ScreenToClient},
-    UI::{
-        Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON},
-        WindowsAndMessaging::*,
-    },
+    UI::WindowsAndMessaging::*,
 };
 
 type JsonChannel = Channel<Value>;
@@ -828,26 +825,6 @@ fn shell_ball_get_mouse_position() -> Option<CursorPosition> {
     None
 }
 
-#[cfg(windows)]
-#[tauri::command]
-fn shell_ball_is_primary_mouse_button_pressed() -> bool {
-    let virtual_key = unsafe {
-        if GetSystemMetrics(SM_SWAPBUTTON) != 0 {
-            i32::from(VK_RBUTTON.0)
-        } else {
-            i32::from(VK_LBUTTON.0)
-        }
-    };
-
-    unsafe { (GetAsyncKeyState(virtual_key) as u16 & 0x8000) != 0 }
-}
-
-#[cfg(not(windows))]
-#[tauri::command]
-fn shell_ball_is_primary_mouse_button_pressed() -> bool {
-    false
-}
-
 #[tauri::command]
 fn pick_shell_ball_files(window: tauri::Window) -> Result<Vec<String>, String> {
     if window.label() != SHELL_BALL_INPUT_WINDOW_LABEL {
@@ -880,7 +857,6 @@ fn main() {
             named_pipe_unsubscribe,
             shell_ball_set_ignore_cursor_events,
             shell_ball_get_mouse_position,
-            shell_ball_is_primary_mouse_button_pressed,
             pick_shell_ball_files
         ])
         .run(tauri::generate_context!())
