@@ -417,6 +417,8 @@ export interface AgentNotepadConvertToTaskParams {
 // AgentNotepadConvertToTaskResult 定义当前模块的接口约束。
 export interface AgentNotepadConvertToTaskResult {
   task: Task;
+  notepad_item: TodoItem;
+  refresh_groups: TodoBucket[];
 }
 
 // AgentDashboardOverviewGetParams 定义当前模块的接口约束。

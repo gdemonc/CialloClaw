@@ -244,6 +244,16 @@ export interface Artifact {
   mime_type: string;
 }
 
+// TodoResource 定义 notes 详情里相关资料的最小稳定结构。
+export interface TodoResource {
+  resource_id: string;
+  label: string;
+  path: string;
+  resource_type: string;
+  open_action?: DeliveryType | null;
+  open_payload?: DeliveryPayload | null;
+}
+
 // TodoItem 定义当前模块的接口约束。
 export interface TodoItem {
   item_id: string;
@@ -253,6 +263,15 @@ export interface TodoItem {
   type: string;
   due_at: string | null;
   agent_suggestion: string | null;
+  note_text?: string | null;
+  prerequisite?: string | null;
+  repeat_rule?: string | null;
+  next_occurrence_at?: string | null;
+  recent_instance_status?: string | null;
+  effective_scope?: string | null;
+  ended_at?: string | null;
+  related_resources?: TodoResource[];
+  linked_task_id?: string | null;
 }
 
 // RecurringRule 定义当前模块的接口约束。
