@@ -576,16 +576,24 @@ func TestTaskInspectorRunAggregatesRuntimeState(t *testing.T) {
 	if summary["parsed_files"] != 1 {
 		t.Fatalf("expected parsed_files to reflect workspace scan, got %+v", summary)
 	}
-	if summary["identified_items"] == nil || summary["identified_items"].(int) < 3 {
-		t.Fatalf("expected identified_items to include file and notepad items, got %+v", summary)
+	if summary["identified_items"] != 1 {
+		t.Fatalf("expected identified_items to reflect source-backed open notes, got %+v", summary)
 	}
-	if summary["due_today"] != 1 {
-		t.Fatalf("expected due_today to reflect runtime notepad state, got %+v", summary)
+	if summary["due_today"] != 0 {
+		t.Fatalf("expected source-backed notes to replace runtime due buckets after scan, got %+v", summary)
 	}
 
 	suggestions, ok := result["suggestions"].([]string)
 	if !ok || len(suggestions) == 0 {
 		t.Fatalf("expected runtime suggestions, got %+v", result["suggestions"])
+	}
+
+	items, total := service.runEngine.NotepadItems("", 10, 0)
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("expected inspector run to sync parsed notes into runtime, total=%d len=%d", total, len(items))
+	}
+	if items[0]["item_id"] == "todo_today" && items[1]["item_id"] == "todo_today" {
+		t.Fatalf("expected source-backed notes to replace prior runtime sample, got %+v", items)
 	}
 }
 
