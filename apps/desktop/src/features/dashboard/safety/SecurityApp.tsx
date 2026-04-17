@@ -1152,12 +1152,12 @@ export function SecurityApp() {
         delete nextState[approval.approval_id];
         return nextState;
       });
-      if (routeDrivenDetailKey === approvalRouteKey) {
-        setApprovalSnapshot(null);
-        setRouteDrivenDetailKey(null);
-      }
       setSubscribedTaskId(result.response.task.task_id);
       if (isSecurityRestoreRespondResult(result.response)) {
+        if (routeDrivenDetailKey === approvalRouteKey) {
+          setApprovalSnapshot(null);
+          setRouteDrivenDetailKey(null);
+        }
         setRestorePointSnapshot(result.response.recovery_point);
         setApprovalSnapshot(null);
         setRouteDrivenDetailKey("restore");
