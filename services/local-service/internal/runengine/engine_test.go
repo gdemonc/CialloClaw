@@ -448,6 +448,33 @@ func TestEngineEscalateHumanLoopBlocksTaskWithStructuredPayload(t *testing.T) {
 	}
 }
 
+func TestEngineControlTaskResumeSupportsHumanLoopBlockedTasks(t *testing.T) {
+	engine := NewEngine()
+	task := engine.CreateTask(CreateTaskInput{
+		SessionID:   "sess_hitl_resume",
+		Title:       "trace escalation",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "agent_loop"},
+		CurrentStep: "agent_loop",
+		RiskLevel:   "yellow",
+	})
+	if _, ok := engine.EscalateHumanLoop(task.TaskID, map[string]any{"reason": "doom_loop", "status": "pending"}, map[string]any{"task_id": task.TaskID, "type": "status", "text": "需要人工介入"}); !ok {
+		t.Fatal("expected human escalation to succeed")
+	}
+
+	resumed, err := engine.ControlTask(task.TaskID, "resume", map[string]any{"task_id": task.TaskID, "type": "status", "text": "人工复核完成"})
+	if err != nil {
+		t.Fatalf("expected resume from human_in_loop to succeed, got %v", err)
+	}
+	if resumed.Status != "processing" || resumed.CurrentStep != "agent_loop" {
+		t.Fatalf("expected human loop resume to restore processing/agent_loop, got %+v", resumed)
+	}
+	if resumed.PendingExecution != nil {
+		t.Fatalf("expected human loop resume to clear pending execution, got %+v", resumed.PendingExecution)
+	}
+}
+
 func TestEngineResolveAuthorizationClearsPendingPlanAndKeepsRestorePoint(t *testing.T) {
 	engine := NewEngine()
 	now := time.Date(2026, 4, 11, 9, 0, 0, 0, time.UTC)

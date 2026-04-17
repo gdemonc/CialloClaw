@@ -3,6 +3,7 @@ package traceeval
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -173,6 +174,37 @@ func TestTraceEvalHelpersCoverErrorAndFilePriorityBranches(t *testing.T) {
 	if err := service.Record(context.Background(), result); err != nil {
 		t.Fatalf("record with nil stores should be no-op, got %v", err)
 	}
+}
+
+func TestServiceRecordReturnsEvalWriteErrorAfterTraceWrite(t *testing.T) {
+	traceStore := storage.NewService(nil).TraceStore()
+	service := NewService(traceStore, failingEvalStore{err: fmt.Errorf("eval write failed")})
+	service.now = func() time.Time { return time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC) }
+
+	result, err := service.Capture(CaptureInput{TaskID: "task_trace_eval_error", RunID: "run_trace_eval_error", IntentName: "summarize"})
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+	err = service.Record(context.Background(), result)
+	if err == nil || !strings.Contains(err.Error(), "eval write failed") {
+		t.Fatalf("expected eval write failure to surface, got %v", err)
+	}
+	items, total, err := traceStore.ListTraceRecords(context.Background(), "task_trace_eval_error", 10, 0)
+	if err != nil || total != 1 || len(items) != 1 {
+		t.Fatalf("expected trace record to be written before eval failure, total=%d len=%d err=%v", total, len(items), err)
+	}
+}
+
+type failingEvalStore struct {
+	err error
+}
+
+func (s failingEvalStore) WriteEvalSnapshot(context.Context, storage.EvalSnapshotRecord) error {
+	return s.err
+}
+
+func (s failingEvalStore) ListEvalSnapshots(context.Context, string, int, int) ([]storage.EvalSnapshotRecord, int, error) {
+	return nil, 0, s.err
 }
 
 func intPtr(value int) *int {

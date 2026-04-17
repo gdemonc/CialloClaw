@@ -765,6 +765,14 @@ func (s *Service) TaskControl(params map[string]any) (map[string]any, error) {
 			return nil, err
 		}
 	}
+	if action == "resume" && updatedTask.Status == "processing" {
+		if traceResumedTask, traceBubble, _, resumed, resumeErr := s.resumeHumanLoopTask(updatedTask); resumeErr != nil {
+			return nil, resumeErr
+		} else if resumed {
+			updatedTask = traceResumedTask
+			bubble = traceBubble
+		}
+	}
 	if taskIsTerminal(updatedTask.Status) {
 		if queueErr := s.drainSessionQueue(updatedTask.SessionID); queueErr != nil {
 			return nil, queueErr
@@ -4029,11 +4037,15 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		artifacts := delivery.EnsureArtifactIdentifiers(processingTask.TaskID, s.delivery.BuildArtifact(processingTask.TaskID, resultTitle, deliveryResult))
 		resultBubble := s.delivery.BuildBubbleMessage(processingTask.TaskID, "result", resultBubbleText, processingTask.UpdatedAt.Format(dateTimeLayout))
 		processingTask = s.appendAuditData(processingTask, compactAuditRecords(s.audit.BuildDeliveryAudit(processingTask.TaskID, processingTask.RunID, deliveryResult)), nil)
-		traceCapture := s.captureExecutionTrace(processingTask, snapshot, taskIntent, execution.Result{
+		traceCapture, traceErr := s.captureExecutionTrace(processingTask, snapshot, taskIntent, execution.Result{
 			Content:        previewTextForDeliveryType(deliveryType),
 			DeliveryResult: deliveryResult,
 			Artifacts:      artifacts,
 		}, nil)
+		if traceErr != nil {
+			failedTask, failureBubble := s.failExecutionTask(processingTask, taskIntent, execution.Result{}, traceErr)
+			return failedTask, failureBubble, nil, nil, nil
+		}
 		if escalatedTask, escalatedBubble, ok := s.maybeEscalateHumanLoop(processingTask, traceCapture); ok {
 			return escalatedTask, escalatedBubble, nil, nil, nil
 		}
@@ -4065,7 +4077,11 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 	}
 	executionAuditRecords, executionTokenUsage := s.buildExecutionAudit(processingTask, executionResult.ToolCalls, auditDeliveryResult)
 	processingTask = s.appendAuditData(processingTask, executionAuditRecords, executionTokenUsage)
-	traceCapture := s.captureExecutionTrace(processingTask, snapshot, taskIntent, executionResult, err)
+	traceCapture, traceErr := s.captureExecutionTrace(processingTask, snapshot, taskIntent, executionResult, err)
+	if traceErr != nil {
+		failedTask, failureBubble := s.failExecutionTask(processingTask, taskIntent, executionResult, traceErr)
+		return failedTask, failureBubble, nil, nil, nil
+	}
 	if escalatedTask, escalatedBubble, ok := s.maybeEscalateHumanLoop(processingTask, traceCapture); ok {
 		return escalatedTask, escalatedBubble, nil, nil, nil
 	}
@@ -4089,9 +4105,9 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 	return updatedTask, resultBubble, executionResult.DeliveryResult, executionArtifacts, nil
 }
 
-func (s *Service) captureExecutionTrace(task runengine.TaskRecord, snapshot contextsvc.TaskContextSnapshot, taskIntent map[string]any, result execution.Result, executionErr error) traceeval.CaptureResult {
+func (s *Service) captureExecutionTrace(task runengine.TaskRecord, snapshot contextsvc.TaskContextSnapshot, taskIntent map[string]any, result execution.Result, executionErr error) (traceeval.CaptureResult, error) {
 	if s.traceEval == nil {
-		return traceeval.CaptureResult{}
+		return traceeval.CaptureResult{}, nil
 	}
 	capture, err := s.traceEval.Capture(traceeval.CaptureInput{
 		TaskID:          task.TaskID,
@@ -4108,10 +4124,27 @@ func (s *Service) captureExecutionTrace(task runengine.TaskRecord, snapshot cont
 		ExecutionError:  executionErr,
 	})
 	if err != nil {
-		return traceeval.CaptureResult{}
+		return traceeval.CaptureResult{}, err
 	}
-	_ = s.traceEval.Record(context.Background(), capture)
-	return capture
+	if err := s.traceEval.Record(context.Background(), capture); err != nil {
+		return traceeval.CaptureResult{}, err
+	}
+	return capture, nil
+}
+
+func (s *Service) resumeHumanLoopTask(task runengine.TaskRecord) (runengine.TaskRecord, map[string]any, map[string]any, bool, error) {
+	if task.Status != "processing" || task.CurrentStep != executionStepName(task.Intent) {
+		return runengine.TaskRecord{}, nil, nil, false, nil
+	}
+	resultBubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "人工复核完成，任务继续执行。", task.UpdatedAt.Format(dateTimeLayout))
+	updatedTask, bubble, deliveryResult, _, err := s.executeTask(task, snapshotFromTask(task), task.Intent)
+	if err != nil {
+		return runengine.TaskRecord{}, nil, nil, false, err
+	}
+	if bubble == nil {
+		bubble = resultBubble
+	}
+	return updatedTask, bubble, deliveryResult, true, nil
 }
 
 func (s *Service) maybeEscalateHumanLoop(task runengine.TaskRecord, capture traceeval.CaptureResult) (runengine.TaskRecord, map[string]any, bool) {

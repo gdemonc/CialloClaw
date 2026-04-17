@@ -772,10 +772,12 @@ func (e *Engine) ControlTask(taskID, action string, bubbleMessage map[string]any
 		if record.isFinished() {
 			return TaskRecord{}, ErrTaskAlreadyFinished
 		}
-		if record.Status != "paused" {
+		if record.Status != "paused" && !record.isBlockedHumanLoop() {
 			return TaskRecord{}, ErrTaskStatusInvalid
 		}
 		record.Status = "processing"
+		record.CurrentStep = firstNonEmpty(resumeStepForTask(record), record.CurrentStep)
+		record.PendingExecution = nil
 	case "cancel":
 		if record.isFinished() {
 			return TaskRecord{}, ErrTaskAlreadyFinished
@@ -814,6 +816,11 @@ func (e *Engine) ControlTask(taskID, action string, bubbleMessage map[string]any
 
 	record.UpdatedAt = now
 	record.BubbleMessage = cloneMap(bubbleMessage)
+	if action == "resume" && record.isBlockedHumanLoop() {
+		record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "running", "人工介入后恢复执行")
+	} else if action == "resume" {
+		record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "running", "任务已恢复执行")
+	}
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
 	record.queueNotification("task.updated", map[string]any{
@@ -1056,6 +1063,23 @@ func (e *Engine) EscalateHumanLoop(taskID string, escalation map[string]any, bub
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
+}
+
+func (r TaskRecord) isBlockedHumanLoop() bool {
+	if r.Status != "blocked" || r.CurrentStep != "human_in_loop" {
+		return false
+	}
+	return stringValue(r.PendingExecution, "kind", "") == "human_in_loop"
+}
+
+func resumeStepForTask(record *TaskRecord) string {
+	if record == nil {
+		return "generate_output"
+	}
+	if stringValue(record.Intent, "name", "") == "agent_loop" {
+		return "agent_loop"
+	}
+	return "generate_output"
 }
 
 // NextQueuedTaskForSession returns the earliest queued task that is waiting for

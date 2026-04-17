@@ -188,6 +188,18 @@ type failingTodoStore struct {
 	replaceErr error
 }
 
+type failingEvalSnapshotStore struct {
+	err error
+}
+
+func (s failingEvalSnapshotStore) WriteEvalSnapshot(context.Context, storage.EvalSnapshotRecord) error {
+	return s.err
+}
+
+func (s failingEvalSnapshotStore) ListEvalSnapshots(context.Context, string, int, int) ([]storage.EvalSnapshotRecord, int, error) {
+	return nil, 0, s.err
+}
+
 func (s failingTodoStore) ReplaceTodoState(ctx context.Context, items []storage.TodoItemRecord, rules []storage.RecurringRuleRecord) error {
 	if s.replaceErr != nil {
 		return s.replaceErr
@@ -1626,6 +1638,63 @@ func TestMaybeEscalateHumanLoopBlocksTask(t *testing.T) {
 	}
 	if bubble == nil || !strings.Contains(bubble["text"].(string), "Doom Loop") {
 		t.Fatalf("expected escalation bubble to mention doom loop, got %+v", bubble)
+	}
+}
+
+func TestServiceTaskControlResumeExecutesHumanLoopTask(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Recovered after review.")
+	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_hitl_resume",
+		Title:       "总结：Please summarize this after review",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		CurrentStep: "generate_output",
+		RiskLevel:   "green",
+		Snapshot: contextsvc.TaskContextSnapshot{
+			Text:      "Please summarize this after review",
+			InputType: "text",
+			Trigger:   "hover_text_input",
+		},
+	})
+	taskID := task.TaskID
+	if _, ok := service.runEngine.EscalateHumanLoop(taskID, map[string]any{"reason": "doom_loop", "status": "pending"}, map[string]any{"task_id": taskID, "type": "status", "text": "需要人工介入"}); !ok {
+		t.Fatal("expected human escalation to succeed")
+	}
+
+	result, err := service.TaskControl(map[string]any{"task_id": taskID, "action": "resume"})
+	if err != nil {
+		t.Fatalf("task control resume failed: %v", err)
+	}
+	updatedTask := result["task"].(map[string]any)
+	if updatedTask["status"] != "completed" {
+		t.Fatalf("expected human loop resume to finish task, got %+v", updatedTask)
+	}
+	bubble := result["bubble_message"].(map[string]any)
+	if bubble["type"] != "result" || !strings.Contains(bubble["text"].(string), "workspace/") {
+		t.Fatalf("expected resumed execution to return result bubble, got %+v", bubble)
+	}
+	record, ok := service.runEngine.GetTask(taskID)
+	if !ok || record.PendingExecution != nil {
+		t.Fatalf("expected resumed task to clear pending execution, got %+v", record)
+	}
+}
+
+func TestCaptureExecutionTraceSurfacesRecordFailure(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "unused")
+	service.traceEval = traceeval.NewService(storage.NewService(nil).TraceStore(), failingEvalSnapshotStore{err: errors.New("eval persistence failed")})
+	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_trace_fail",
+		Title:       "trace persistence failure",
+		SourceType:  "floating_ball",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize"},
+		CurrentStep: "generate_output",
+		RiskLevel:   "green",
+	})
+	_, err := service.captureExecutionTrace(task, contextsvc.TaskContextSnapshot{Text: "capture me"}, task.Intent, execution.Result{Content: "done"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "eval persistence failed") {
+		t.Fatalf("expected trace persistence failure to surface, got %v", err)
 	}
 }
 
