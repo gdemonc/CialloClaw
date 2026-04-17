@@ -1,6 +1,5 @@
 use super::types::{SelectionPageContextPayload, SelectionSnapshotPayload};
 use once_cell::sync::Lazy;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::core::PWSTR;
@@ -34,7 +33,6 @@ const SHELL_BALL_WINDOW_LABELS: [&str; 4] = [
 ];
 const SHELL_BALL_PINNED_WINDOW_PREFIX: &str = "shell-ball-bubble-pinned-";
 
-static SELECTION_ACTIVITY_DIRTY: AtomicBool = AtomicBool::new(false);
 static SHELL_BALL_SELECTION_APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> =
     Lazy::new(|| Mutex::new(None));
 static SHELL_BALL_SELECTION_MOUSE_HOOK: Lazy<Mutex<Option<isize>>> = Lazy::new(|| Mutex::new(None));
@@ -81,7 +79,6 @@ impl Drop for ComGuard {
 pub fn read_selection_snapshot(
     app: &AppHandle,
 ) -> Result<Option<SelectionSnapshotPayload>, String> {
-    SELECTION_ACTIVITY_DIRTY.store(false, Ordering::SeqCst);
     let _com_guard = ComGuard::initialize()?;
     let foreground_window = unsafe { GetForegroundWindow() };
 
@@ -158,10 +155,6 @@ fn mark_selection_activity(source: &str) {
     else {
         return;
     };
-
-    if SELECTION_ACTIVITY_DIRTY.swap(true, Ordering::SeqCst) {
-        return;
-    }
 
     let _ = app.emit_to(
         "shell-ball",

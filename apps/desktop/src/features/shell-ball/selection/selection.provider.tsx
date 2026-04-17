@@ -77,6 +77,7 @@ export function ShellBallSelectionProvider({ visualState }: { visualState: Shell
   const pollEnabled = currentWindow !== null && shouldPollShellBallNativeSelection(windowLabel);
   const sensingEnabled = pollEnabled && shouldTrackShellBallSelectionInState(visualState);
   const lastSnapshotRef = useRef<ShellBallSelectionSnapshot | null>(null);
+  const readInFlightRef = useRef(false);
   const [selectionDirty, setSelectionDirty] = useState(false);
 
   const emitSelectionSnapshot = useCallback(async (snapshot: ShellBallSelectionSnapshot | null) => {
@@ -89,19 +90,25 @@ export function ShellBallSelectionProvider({ visualState }: { visualState: Shell
   }, [currentWindow]);
 
   const publishLatestSelection = useCallback(async () => {
-    if (!sensingEnabled) {
+    if (!sensingEnabled || readInFlightRef.current) {
       return;
     }
 
-    const snapshot = await readShellBallSelectionSnapshot();
-    setSelectionDirty(false);
+    readInFlightRef.current = true;
 
-    if (areShellBallSelectionSnapshotsEqual(lastSnapshotRef.current, snapshot)) {
-      return;
+    try {
+      const snapshot = await readShellBallSelectionSnapshot();
+      setSelectionDirty(false);
+
+      if (areShellBallSelectionSnapshotsEqual(lastSnapshotRef.current, snapshot)) {
+        return;
+      }
+
+      lastSnapshotRef.current = snapshot;
+      await emitSelectionSnapshot(snapshot);
+    } finally {
+      readInFlightRef.current = false;
     }
-
-    lastSnapshotRef.current = snapshot;
-    await emitSelectionSnapshot(snapshot);
   }, [emitSelectionSnapshot, sensingEnabled]);
 
   useEffect(() => {
@@ -119,6 +126,7 @@ export function ShellBallSelectionProvider({ visualState }: { visualState: Shell
         }
 
         setSelectionDirty(true);
+        void publishLatestSelection();
       })
       .then((unlisten) => {
         if (disposed) {
@@ -133,17 +141,19 @@ export function ShellBallSelectionProvider({ visualState }: { visualState: Shell
       disposed = true;
       cleanup?.();
     };
-  }, [currentWindow, pollEnabled, visualState]);
+  }, [currentWindow, pollEnabled, publishLatestSelection, visualState]);
 
   useEffect(() => {
-    if (sensingEnabled) {
+    if (!sensingEnabled) {
+      setSelectionDirty(false);
+      lastSnapshotRef.current = null;
+      void emitSelectionSnapshot(null);
       return;
     }
 
-    setSelectionDirty(false);
-    lastSnapshotRef.current = null;
-    void emitSelectionSnapshot(null);
-  }, [emitSelectionSnapshot, sensingEnabled]);
+    setSelectionDirty(true);
+    void publishLatestSelection();
+  }, [emitSelectionSnapshot, publishLatestSelection, sensingEnabled]);
 
   useInterval(() => {
     void publishLatestSelection();
