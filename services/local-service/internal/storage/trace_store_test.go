@@ -102,11 +102,8 @@ func TestSQLiteTraceAndEvalStoresPersistAndList(t *testing.T) {
 		t.Fatalf("expected deleted sqlite trace record to disappear, total=%d len=%d err=%v", total, len(traces), err)
 	}
 	evals, total, err := evalStore.ListEvalSnapshots(context.Background(), "task_sql_001", 10, 0)
-	if err != nil || total != 1 || len(evals) != 1 {
-		t.Fatalf("expected one sqlite eval snapshot, total=%d len=%d err=%v", total, len(evals), err)
-	}
-	if evals[0].Status != "human_review_required" {
-		t.Fatalf("expected eval status to round-trip, got %+v", evals[0])
+	if err != nil || total != 0 || len(evals) != 0 {
+		t.Fatalf("expected linked eval snapshots to be deleted with trace rollback, total=%d len=%d err=%v", total, len(evals), err)
 	}
 }
 

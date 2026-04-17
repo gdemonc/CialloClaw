@@ -578,6 +578,7 @@ type stubTraceStoreWithClose struct {
 }
 
 func (s *stubTraceStoreWithClose) WriteTraceRecord(context.Context, TraceRecord) error { return nil }
+func (s *stubTraceStoreWithClose) DeleteTraceRecord(context.Context, string) error     { return nil }
 func (s *stubTraceStoreWithClose) ListTraceRecords(context.Context, string, int, int) ([]TraceRecord, int, error) {
 	return nil, 0, nil
 }

@@ -119,9 +119,19 @@ func (s *SQLiteTraceStore) WriteTraceRecord(ctx context.Context, record TraceRec
 }
 
 func (s *SQLiteTraceStore) DeleteTraceRecord(ctx context.Context, traceID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM trace_records WHERE trace_id = ?`, traceID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin delete trace record transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM eval_snapshots WHERE trace_id = ?`, traceID); err != nil {
+		return fmt.Errorf("delete eval snapshots for trace rollback: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM trace_records WHERE trace_id = ?`, traceID); err != nil {
 		return fmt.Errorf("delete trace record: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete trace record transaction: %w", err)
 	}
 	return nil
 }
