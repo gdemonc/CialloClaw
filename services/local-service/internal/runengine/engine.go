@@ -678,6 +678,8 @@ func (e *Engine) CompleteTask(taskID string, deliveryResult map[string]any, bubb
 	record.DeliveryResult = cloneMap(deliveryResult)
 	record.BubbleMessage = cloneMap(bubbleMessage)
 	record.Artifacts = cloneMapSlice(artifacts)
+	record.PendingExecution = nil
+	record.ApprovalRequest = nil
 	record.Timeline = advanceTimeline(record.Timeline, "return_result", "completed", "结果已正式交付")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	restorePoint := buildRecoveryPoint(record.TaskID, now)
@@ -759,6 +761,7 @@ func (e *Engine) ControlTask(taskID, action string, bubbleMessage map[string]any
 	}
 
 	now := e.now()
+	wasHumanLoop := record.isBlockedHumanLoop()
 	switch action {
 	case "pause":
 		if record.isFinished() {
@@ -777,7 +780,9 @@ func (e *Engine) ControlTask(taskID, action string, bubbleMessage map[string]any
 		}
 		record.Status = "processing"
 		record.CurrentStep = firstNonEmpty(resumeStepForTask(record), record.CurrentStep)
-		record.PendingExecution = nil
+		if !wasHumanLoop {
+			record.PendingExecution = nil
+		}
 	case "cancel":
 		if record.isFinished() {
 			return TaskRecord{}, ErrTaskAlreadyFinished
@@ -816,7 +821,7 @@ func (e *Engine) ControlTask(taskID, action string, bubbleMessage map[string]any
 
 	record.UpdatedAt = now
 	record.BubbleMessage = cloneMap(bubbleMessage)
-	if action == "resume" && record.isBlockedHumanLoop() {
+	if action == "resume" && wasHumanLoop {
 		record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "running", "人工介入后恢复执行")
 	} else if action == "resume" {
 		record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "running", "任务已恢复执行")

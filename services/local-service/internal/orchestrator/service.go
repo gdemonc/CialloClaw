@@ -4167,6 +4167,18 @@ func (s *Service) resumeHumanLoopTask(task runengine.TaskRecord) (runengine.Task
 	if !resumedFromHumanLoop(task) {
 		return runengine.TaskRecord{}, nil, nil, false, nil
 	}
+	pendingExecution, ok := s.runEngine.PendingExecutionPlan(task.TaskID)
+	if !ok {
+		return runengine.TaskRecord{}, nil, nil, false, nil
+	}
+	escalation := mapValue(pendingExecution, "escalation")
+	if len(escalation) == 0 {
+		return runengine.TaskRecord{}, nil, nil, false, nil
+	}
+	suggestedAction := firstNonEmptyString(stringValue(escalation, "suggested_action", ""), "review_and_replan")
+	if suggestedAction != "review_and_replan" {
+		return runengine.TaskRecord{}, nil, nil, false, nil
+	}
 	resultBubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "人工复核完成，任务继续执行。", task.UpdatedAt.Format(dateTimeLayout))
 	updatedTask, bubble, deliveryResult, _, err := s.executeTask(task, snapshotFromTask(task), task.Intent)
 	if err != nil {
@@ -4221,12 +4233,21 @@ func executionAttemptHasSideEffects(result execution.Result) bool {
 		return false
 	}
 	for _, toolCall := range result.ToolCalls {
-		if toolCall.ToolName == "" {
+		if !isMutatingToolCall(toolCall.ToolName) {
 			continue
 		}
 		return true
 	}
 	return false
+}
+
+func isMutatingToolCall(toolName string) bool {
+	switch strings.TrimSpace(toolName) {
+	case "write_file", "exec_command", "page_interact", "transcode_media", "normalize_recording", "extract_frames":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) recordExecutionToolCalls(task runengine.TaskRecord, toolCalls []tools.ToolCallRecord) runengine.TaskRecord {

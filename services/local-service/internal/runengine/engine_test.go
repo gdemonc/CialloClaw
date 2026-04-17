@@ -470,8 +470,34 @@ func TestEngineControlTaskResumeSupportsHumanLoopBlockedTasks(t *testing.T) {
 	if resumed.Status != "processing" || resumed.CurrentStep != "agent_loop" {
 		t.Fatalf("expected human loop resume to restore processing/agent_loop, got %+v", resumed)
 	}
-	if resumed.PendingExecution != nil {
-		t.Fatalf("expected human loop resume to clear pending execution, got %+v", resumed.PendingExecution)
+	if resumed.PendingExecution == nil || resumed.PendingExecution["kind"] != "human_in_loop" {
+		t.Fatalf("expected human loop resume to preserve pending escalation payload until orchestrator consumes it, got %+v", resumed.PendingExecution)
+	}
+}
+
+func TestEngineCompleteTaskClearsPendingHumanLoopPayload(t *testing.T) {
+	engine := NewEngine()
+	task := engine.CreateTask(CreateTaskInput{
+		SessionID:   "sess_hitl_complete",
+		Title:       "trace escalation",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize"},
+		CurrentStep: "generate_output",
+		RiskLevel:   "yellow",
+	})
+	if _, ok := engine.EscalateHumanLoop(task.TaskID, map[string]any{"reason": "doom_loop", "status": "pending", "suggested_action": "review_and_replan"}, map[string]any{"task_id": task.TaskID, "type": "status", "text": "需要人工介入"}); !ok {
+		t.Fatal("expected human escalation to succeed")
+	}
+	if _, err := engine.ControlTask(task.TaskID, "resume", map[string]any{"task_id": task.TaskID, "type": "status", "text": "人工复核完成"}); err != nil {
+		t.Fatalf("expected resume from human loop to succeed, got %v", err)
+	}
+	completed, ok := engine.CompleteTask(task.TaskID, map[string]any{"type": "workspace_document"}, map[string]any{"task_id": task.TaskID, "type": "result", "text": "完成"}, nil)
+	if !ok {
+		t.Fatal("expected complete task to succeed")
+	}
+	if completed.PendingExecution != nil || completed.ApprovalRequest != nil {
+		t.Fatalf("expected completion to clear pending human loop payload, got %+v", completed)
 	}
 }
 

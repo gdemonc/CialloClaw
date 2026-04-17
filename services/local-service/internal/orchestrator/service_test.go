@@ -1714,6 +1714,45 @@ func TestServiceTaskControlResumeExecutesHumanLoopTask(t *testing.T) {
 	}
 }
 
+func TestServiceTaskControlResumeConsumesHumanLoopPendingPayload(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Recovered after review.")
+	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_hitl_payload",
+		Title:       "总结：Please summarize this after review",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		CurrentStep: "generate_output",
+		RiskLevel:   "green",
+		Snapshot: contextsvc.TaskContextSnapshot{
+			Text:      "Please summarize this after review",
+			InputType: "text",
+			Trigger:   "hover_text_input",
+		},
+	})
+	if _, ok := service.runEngine.EscalateHumanLoop(task.TaskID, map[string]any{
+		"reason":           "doom_loop",
+		"status":           "pending",
+		"suggested_action": "review_and_replan",
+	}, map[string]any{"task_id": task.TaskID, "type": "status", "text": "需要人工介入"}); !ok {
+		t.Fatal("expected human escalation to succeed")
+	}
+	result, err := service.TaskControl(map[string]any{"task_id": task.TaskID, "action": "resume"})
+	if err != nil {
+		t.Fatalf("resume task failed: %v", err)
+	}
+	if result["task"].(map[string]any)["status"] != "completed" {
+		t.Fatalf("expected resumed task to complete after consuming escalation payload, got %+v", result)
+	}
+	record, ok := service.runEngine.GetTask(task.TaskID)
+	if !ok {
+		t.Fatal("expected resumed task in runtime")
+	}
+	if record.PendingExecution != nil {
+		t.Fatalf("expected orchestrator resume path to consume pending escalation payload, got %+v", record.PendingExecution)
+	}
+}
+
 func TestServiceTaskControlResumePausedTaskDoesNotReexecute(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "Should not rerun.")
 	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
@@ -1788,6 +1827,45 @@ func TestMaybeEscalateHumanLoopSkipsSideEffectingExecutionAttempt(t *testing.T) 
 	}
 	if record.Status != "processing" || record.CurrentStep != "generate_output" {
 		t.Fatalf("expected side-effecting skip not to mutate runtime task, got %+v", record)
+	}
+}
+
+func TestMaybeEscalateHumanLoopAllowsReadOnlyToolLoops(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "unused")
+	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_hitl_read_only",
+		Title:       "doom loop read task",
+		SourceType:  "floating_ball",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "agent_loop"},
+		CurrentStep: "agent_loop",
+		RiskLevel:   "yellow",
+	})
+	capture, err := service.traceEval.Capture(traceeval.CaptureInput{
+		TaskID:     task.TaskID,
+		RunID:      task.RunID,
+		IntentName: "agent_loop",
+		Snapshot:   contextsvc.TaskContextSnapshot{Text: "keep reading"},
+		ToolCalls: []tools.ToolCallRecord{
+			{ToolName: "read_file", Input: map[string]any{"path": "workspace/a.md"}, Status: tools.ToolCallStatusFailed, ErrorCode: intPtr(1001)},
+			{ToolName: "read_file", Input: map[string]any{"path": "workspace/a.md"}, Status: tools.ToolCallStatusFailed, ErrorCode: intPtr(1001)},
+			{ToolName: "read_file", Input: map[string]any{"path": "workspace/a.md"}, Status: tools.ToolCallStatusFailed, ErrorCode: intPtr(1001)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("trace capture failed: %v", err)
+	}
+	escalated, bubble, ok := service.maybeEscalateHumanLoop(task, capture, execution.Result{
+		ToolCalls: []tools.ToolCallRecord{{ToolName: "read_file", Input: map[string]any{"path": "workspace/a.md"}, Status: tools.ToolCallStatusFailed, ErrorCode: intPtr(1001)}},
+	})
+	if !ok {
+		t.Fatal("expected read-only doom-loop attempt to keep human-loop escalation")
+	}
+	if escalated.Status != "blocked" || bubble == nil {
+		t.Fatalf("expected blocked task with escalation bubble, got task=%+v bubble=%+v", escalated, bubble)
+	}
+	if plan, ok := service.runEngine.PendingExecutionPlan(task.TaskID); !ok || stringValue(plan, "kind", "") != "human_in_loop" {
+		t.Fatalf("expected pending escalation plan for read-only loop, got %+v ok=%v", plan, ok)
 	}
 }
 
