@@ -170,9 +170,7 @@ func (e *Engine) WithTodoStore(todoStore storage.TodoStore) error {
 		return err
 	}
 	loaded := restoreNotepadItemsFromStore(items, rules)
-	if len(loaded) > 0 {
-		e.notepadItems = loaded
-	}
+	e.notepadItems = loaded
 	return nil
 }
 
@@ -1217,7 +1215,11 @@ func (e *Engine) CompleteNotepadItem(itemID string) (map[string]any, bool) {
 	}
 
 	closeNotepadItem(updated, "completed", e.now())
-	e.notepadItems[index] = updated
+	items := cloneMapSlice(e.notepadItems)
+	items[index] = updated
+	if err := e.replaceNotepadItemsLocked(items); err != nil {
+		return nil, false
+	}
 	return normalizeNotepadItem(updated, e.now()), true
 }
 

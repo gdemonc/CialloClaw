@@ -221,3 +221,132 @@ func TestEngineTodoStorePersistsAndReloadsNotepadState(t *testing.T) {
 		t.Fatalf("expected related resources to reload, got %+v", detail["related_resources"])
 	}
 }
+
+func TestEngineWithTodoStoreStartsEmptyWhenStoreHasNoNotes(t *testing.T) {
+	engine := NewEngine()
+	items, total := engine.NotepadItems("", 20, 0)
+	if total == 0 || len(items) == 0 {
+		t.Fatal("expected default engine to start with demo notes before todo store attaches")
+	}
+	if err := engine.WithTodoStore(storage.NewInMemoryTodoStore()); err != nil {
+		t.Fatalf("attach empty todo store failed: %v", err)
+	}
+	items, total = engine.NotepadItems("", 20, 0)
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("expected empty todo store to override demo seed data, total=%d len=%d items=%+v", total, len(items), items)
+	}
+}
+
+func TestEngineCompleteNotepadItemPersistsThroughTodoStore(t *testing.T) {
+	todoStore := storage.NewInMemoryTodoStore()
+	engine, err := NewEngineWithStore(storage.NewInMemoryTaskRunStore())
+	if err != nil {
+		t.Fatalf("new engine with store failed: %v", err)
+	}
+	now := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	engine.now = func() time.Time { return now }
+	if err := engine.WithTodoStore(todoStore); err != nil {
+		t.Fatalf("attach todo store failed: %v", err)
+	}
+	if err := engine.SyncNotepadItems([]map[string]any{{
+		"item_id":     "todo_complete_persist",
+		"title":       "persist completion",
+		"bucket":      notepadBucketUpcoming,
+		"status":      "normal",
+		"type":        "one_time",
+		"planned_at":  now.Add(4 * time.Hour).Format(time.RFC3339),
+		"due_at":      now.Add(4 * time.Hour).Format(time.RFC3339),
+		"created_at":  now.Format(time.RFC3339),
+		"updated_at":  now.Format(time.RFC3339),
+		"note_text":   "persist me",
+		"source_path": "workspace/todos/inbox.md",
+	}}); err != nil {
+		t.Fatalf("sync notepad items failed: %v", err)
+	}
+	completed, ok := engine.CompleteNotepadItem("todo_complete_persist")
+	if !ok || completed["bucket"] != notepadBucketClosed {
+		t.Fatalf("expected completion to succeed and close note, got %+v ok=%v", completed, ok)
+	}
+	reloaded, err := NewEngineWithStore(storage.NewInMemoryTaskRunStore())
+	if err != nil {
+		t.Fatalf("new reload engine failed: %v", err)
+	}
+	reloaded.now = func() time.Time { return now }
+	if err := reloaded.WithTodoStore(todoStore); err != nil {
+		t.Fatalf("attach todo store on reload failed: %v", err)
+	}
+	detail, ok := reloaded.NotepadItem("todo_complete_persist")
+	if !ok || detail["bucket"] != notepadBucketClosed || detail["status"] != "completed" {
+		t.Fatalf("expected completed note to persist across reload, got %+v ok=%v", detail, ok)
+	}
+}
+
+func TestNotepadHelperFunctionsCoverRecurringAndEncodingPaths(t *testing.T) {
+	now := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	if recurringRuleTextFromSpec(recurringRuleSpec{ruleType: "cron", cronExpr: "0 9 * * 1"}) != "cron: 0 9 * * 1" {
+		t.Fatal("expected cron spec to render explicit rule text")
+	}
+	if recurringRuleTextFromSpec(recurringRuleSpec{ruleType: "interval", intervalValue: 1, intervalUnit: "day"}) != "每天一次" {
+		t.Fatal("expected daily interval rule text")
+	}
+	if recurringRuleTextFromSpec(recurringRuleSpec{ruleType: "interval", intervalValue: 2, intervalUnit: "week"}) != "每2周一次" {
+		t.Fatal("expected biweekly interval rule text")
+	}
+	if recurringIntervalText("month") != "月" {
+		t.Fatal("expected month interval text")
+	}
+	item := map[string]any{"planned_at": now.Format(time.RFC3339)}
+	if recurringNextOccurrenceFromSpec(item, recurringRuleSpec{ruleType: "interval", intervalValue: 1, intervalUnit: "month"}) != now.AddDate(0, 1, 0).Format(time.RFC3339) {
+		t.Fatal("expected monthly next occurrence")
+	}
+	if recurringNextOccurrenceFromSpec(item, recurringRuleSpec{ruleType: "interval", intervalValue: 0, intervalUnit: "week"}) != now.AddDate(0, 0, 7).Format(time.RFC3339) {
+		t.Fatal("expected zero interval to normalize to one week")
+	}
+	if maxRecurringInterval(0) != 1 {
+		t.Fatal("expected maxRecurringInterval to normalize zero")
+	}
+	if deriveNotepadEndedAt(map[string]any{"status": "completed", "bucket": notepadBucketClosed, "due_at": now.Format(time.RFC3339)}) != now.Format(time.RFC3339) {
+		t.Fatal("expected ended_at fallback to use due_at for closed completed notes")
+	}
+	resources := cloneResourceList([]any{map[string]any{"id": "res_001", "path": "workspace/todos/inbox.md"}})
+	if len(resources) != 1 || resources[0]["id"] != "res_001" {
+		t.Fatalf("expected cloneResourceList to accept []any values, got %+v", resources)
+	}
+	tagsJSON, err := marshalStringSlice([]any{"weekly", "notes"})
+	if err != nil || tagsJSON == "" {
+		t.Fatalf("expected marshalStringSlice to encode []any tags, got %q err=%v", tagsJSON, err)
+	}
+	if decoded := decodeTags(tagsJSON); len(decoded) != 2 || decoded[1] != "notes" {
+		t.Fatalf("expected decodeTags to restore encoded tags, got %+v", decoded)
+	}
+	if _, err := marshalStringSlice([]any{"weekly", 123}); err != nil {
+		t.Fatalf("expected non-string tag entries to be ignored rather than failing, got %v", err)
+	}
+	if itemIntValue(map[string]any{"count": int64(2)}, "count", 0) != 2 {
+		t.Fatal("expected itemIntValue to read int64 values")
+	}
+	if firstNonEmptyString("", "  value  ") != "value" {
+		t.Fatal("expected firstNonEmptyString to trim and return first value")
+	}
+	if spec := parseRecurringRuleSpec("daily", "", 0, ""); spec.intervalUnit != "day" || spec.intervalValue != 1 {
+		t.Fatalf("expected daily rule text to parse as one-day interval, got %+v", spec)
+	}
+	if spec := parseRecurringRuleSpec("cron: 0 9 * * 1", "", 0, ""); spec.ruleType != "cron" || spec.cronExpr != "0 9 * * 1" {
+		t.Fatalf("expected cron rule text to parse as cron, got %+v", spec)
+	}
+	restoredRecurring := map[string]any{"source_bucket": notepadBucketRecurringRule, "recurring_enabled": true, "next_occurrence_at": now.Add(24 * time.Hour).Format(time.RFC3339)}
+	restoreNotepadItem(restoredRecurring, now)
+	if restoredRecurring["due_at"] != now.Add(24*time.Hour).Format(time.RFC3339) {
+		t.Fatalf("expected recurring restore to restore due_at from next occurrence, got %+v", restoredRecurring)
+	}
+	if deriveRecurringRecentStatus(map[string]any{"status": "cancelled"}) != "cancelled" {
+		t.Fatal("expected recurring recent status to follow explicit cancelled status")
+	}
+	engine, err := NewEngineWithStore(storage.NewInMemoryTaskRunStore())
+	if err != nil {
+		t.Fatalf("new engine with store failed: %v", err)
+	}
+	if engine.CurrentState() != "processing" || engine.CurrentTaskStatus() != "confirming_intent" {
+		t.Fatalf("expected empty engine defaults for run/task state, got run=%s task=%s", engine.CurrentState(), engine.CurrentTaskStatus())
+	}
+}
