@@ -501,6 +501,46 @@ func TestEngineCompleteTaskClearsPendingHumanLoopPayload(t *testing.T) {
 	}
 }
 
+func TestEngineReopenIntentConfirmationResetsExecutionState(t *testing.T) {
+	engine := NewEngine()
+	task := engine.CreateTask(CreateTaskInput{
+		SessionID:   "sess_replan",
+		Title:       "old title",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize"},
+		CurrentStep: "generate_output",
+		RiskLevel:   "green",
+		DeliveryResult: map[string]any{
+			"type": "workspace_document",
+		},
+		Artifacts: []map[string]any{{"artifact_id": "art_001"}},
+	})
+	if _, ok := engine.EscalateHumanLoop(task.TaskID, map[string]any{"reason": "doom_loop", "status": "pending"}, map[string]any{"task_id": task.TaskID, "type": "status", "text": "需要人工介入"}); !ok {
+		t.Fatal("expected human escalation to succeed before reopen")
+	}
+	reopened, ok := engine.ReopenIntentConfirmation(task.TaskID, "new title", map[string]any{"name": "translate"}, map[string]any{"task_id": task.TaskID, "type": "status", "text": "需要重新确认"})
+	if !ok {
+		t.Fatal("expected reopen intent confirmation to succeed")
+	}
+	if reopened.Status != "confirming_intent" || reopened.CurrentStep != "confirming_intent" {
+		t.Fatalf("expected task to return to confirming_intent, got %+v", reopened)
+	}
+	if reopened.PendingExecution != nil || reopened.DeliveryResult != nil || len(reopened.Artifacts) != 0 {
+		t.Fatalf("expected reopen to clear execution outputs, got %+v", reopened)
+	}
+	if reopened.Title != "new title" || stringValue(reopened.Intent, "name", "") != "translate" {
+		t.Fatalf("expected reopen to persist updated title/intent, got %+v", reopened)
+	}
+}
+
+func TestEngineReopenIntentConfirmationReturnsFalseForMissingTask(t *testing.T) {
+	engine := NewEngine()
+	if reopened, ok := engine.ReopenIntentConfirmation("task_missing", "new title", map[string]any{"name": "translate"}, nil); ok || reopened.TaskID != "" {
+		t.Fatalf("expected reopen intent confirmation to fail for missing task, got %+v ok=%v", reopened, ok)
+	}
+}
+
 func TestEngineResolveAuthorizationClearsPendingPlanAndKeepsRestorePoint(t *testing.T) {
 	engine := NewEngine()
 	now := time.Date(2026, 4, 11, 9, 0, 0, 0, time.UTC)

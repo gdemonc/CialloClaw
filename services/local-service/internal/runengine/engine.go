@@ -505,6 +505,40 @@ func (e *Engine) UpdateIntent(taskID, title string, intent map[string]any) (Task
 	return record.clone(), true
 }
 
+// ReopenIntentConfirmation moves a reviewed task back to the intent
+// confirmation phase so a human-requested replan does not rerun the old plan.
+func (e *Engine) ReopenIntentConfirmation(taskID, title string, intent map[string]any, bubbleMessage map[string]any) (TaskRecord, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	record, ok := e.tasks[taskID]
+	if !ok {
+		return TaskRecord{}, false
+	}
+
+	record.Title = firstNonEmpty(title, record.Title)
+	record.Intent = cloneMap(intent)
+	record.Status = "confirming_intent"
+	record.CurrentStep = "confirming_intent"
+	record.UpdatedAt = e.now()
+	record.FinishedAt = nil
+	record.DeliveryResult = nil
+	record.Artifacts = nil
+	record.BubbleMessage = cloneMap(bubbleMessage)
+	record.PendingExecution = nil
+	record.ApprovalRequest = nil
+	record.Timeline = advanceTimeline(record.Timeline, "confirming_intent", "pending", "等待人工复核后的新方案确认")
+	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
+	record.LatestEvent = e.buildEvent(record, "task.updated")
+	record.queueNotification("task.updated", map[string]any{
+		"task_id": record.TaskID,
+		"status":  record.Status,
+	})
+	e.persistTaskLocked(record)
+
+	return record.clone(), true
+}
+
 // SetPresentation 设置Presentation。
 
 // SetPresentation 只更新任务的展示层信息，不改变主状态机结论。

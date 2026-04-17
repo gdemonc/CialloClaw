@@ -4198,9 +4198,25 @@ func (s *Service) resumeHumanLoopTask(task runengine.TaskRecord, reviewDecision 
 	if notes := strings.TrimSpace(stringValue(reviewDecision, "notes", "")); notes != "" {
 		escalation["review_notes"] = notes
 	}
+	if correctedIntent := mapValue(reviewDecision, "corrected_intent"); len(correctedIntent) > 0 {
+		escalation["corrected_intent"] = cloneMap(correctedIntent)
+	}
 	suggestedAction := firstNonEmptyString(stringValue(escalation, "suggested_action", ""), "review_and_replan")
 	if suggestedAction != "review_and_replan" {
 		return runengine.TaskRecord{}, nil, nil, false, nil
+	}
+	if decision == "replan" {
+		intentValue := cloneMap(task.Intent)
+		if correctedIntent := mapValue(escalation, "corrected_intent"); len(correctedIntent) > 0 {
+			intentValue = correctedIntent
+		}
+		updatedTitle := s.intent.Suggest(snapshotFromTask(task), intentValue, false).TaskTitle
+		replanBubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "人工复核要求重新规划，请确认新的处理意图。", task.UpdatedAt.Format(dateTimeLayout))
+		replannedTask, ok := s.runEngine.ReopenIntentConfirmation(task.TaskID, updatedTitle, intentValue, replanBubble)
+		if !ok {
+			return runengine.TaskRecord{}, nil, nil, false, ErrTaskNotFound
+		}
+		return replannedTask, replanBubble, nil, true, nil
 	}
 	resultBubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "人工复核完成，任务继续执行。", task.UpdatedAt.Format(dateTimeLayout))
 	updatedTask, bubble, deliveryResult, _, err := s.executeTask(task, snapshotFromTask(task), task.Intent)
@@ -4223,6 +4239,15 @@ func humanReviewDecisionFromParams(params map[string]any) (map[string]any, error
 	}
 	if strings.TrimSpace(stringValue(decision, "decision", "")) == "" {
 		return nil, fmt.Errorf("review.decision is required to resume a human review task")
+	}
+	decisionValue := strings.TrimSpace(stringValue(decision, "decision", ""))
+	if decisionValue != "approve" && decisionValue != "replan" {
+		return nil, fmt.Errorf("unsupported review decision: %s", decisionValue)
+	}
+	if decisionValue == "replan" {
+		if correctedIntent := mapValue(decision, "corrected_intent"); len(correctedIntent) == 0 {
+			return nil, fmt.Errorf("review.corrected_intent is required when decision is replan")
+		}
 	}
 	return cloneMap(decision), nil
 }

@@ -1749,9 +1749,9 @@ func TestServiceTaskControlResumeConsumesHumanLoopPendingPayload(t *testing.T) {
 		"task_id": task.TaskID,
 		"action":  "resume",
 		"review": map[string]any{
-			"decision":    "replan",
+			"decision":    "approve",
 			"reviewer_id": "reviewer_002",
-			"notes":       "replan then continue",
+			"notes":       "approved to continue",
 		},
 	})
 	if err != nil {
@@ -1766,6 +1766,62 @@ func TestServiceTaskControlResumeConsumesHumanLoopPendingPayload(t *testing.T) {
 	}
 	if record.PendingExecution != nil {
 		t.Fatalf("expected orchestrator resume path to consume pending escalation payload, got %+v", record.PendingExecution)
+	}
+}
+
+func TestServiceTaskControlResumeHumanLoopReplanReturnsToIntentConfirmation(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Recovered after review.")
+	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_hitl_replan",
+		Title:       "总结：Please summarize this after review",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		CurrentStep: "generate_output",
+		RiskLevel:   "green",
+		Snapshot: contextsvc.TaskContextSnapshot{
+			Text:      "Please summarize this after review",
+			InputType: "text",
+			Trigger:   "hover_text_input",
+		},
+	})
+	if _, ok := service.runEngine.EscalateHumanLoop(task.TaskID, map[string]any{
+		"reason":           "doom_loop",
+		"status":           "pending",
+		"suggested_action": "review_and_replan",
+	}, map[string]any{"task_id": task.TaskID, "type": "status", "text": "需要人工介入"}); !ok {
+		t.Fatal("expected human escalation to succeed")
+	}
+	result, err := service.TaskControl(map[string]any{
+		"task_id": task.TaskID,
+		"action":  "resume",
+		"review": map[string]any{
+			"decision":         "replan",
+			"reviewer_id":      "reviewer_003",
+			"notes":            "change the intent before continuing",
+			"corrected_intent": map[string]any{"name": "translate", "arguments": map[string]any{"target_language": "en"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("resume with replan failed: %v", err)
+	}
+	updatedTask := result["task"].(map[string]any)
+	if updatedTask["status"] != "confirming_intent" || updatedTask["current_step"] != "confirming_intent" {
+		t.Fatalf("expected replan decision to return task to confirming_intent, got %+v", updatedTask)
+	}
+	bubble := result["bubble_message"].(map[string]any)
+	if bubble["type"] != "status" || !strings.Contains(bubble["text"].(string), "重新规划") {
+		t.Fatalf("expected replan bubble to request new confirmation, got %+v", bubble)
+	}
+	record, ok := service.runEngine.GetTask(task.TaskID)
+	if !ok {
+		t.Fatal("expected replanned task in runtime")
+	}
+	if record.PendingExecution != nil {
+		t.Fatalf("expected replan path to clear pending escalation payload, got %+v", record.PendingExecution)
+	}
+	if stringValue(record.Intent, "name", "") != "translate" {
+		t.Fatalf("expected corrected intent to be stored for replan, got %+v", record.Intent)
 	}
 }
 
@@ -1794,6 +1850,37 @@ func TestServiceTaskControlResumeHumanLoopRequiresReviewDecision(t *testing.T) {
 	record, ok := service.runEngine.GetTask(task.TaskID)
 	if !ok || record.Status != "blocked" || record.CurrentStep != "human_in_loop" {
 		t.Fatalf("expected task to remain blocked in human review, got %+v", record)
+	}
+}
+
+func TestServiceTaskControlResumeHumanLoopReplanRequiresCorrectedIntent(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Recovered after review.")
+	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_hitl_missing_replan_intent",
+		Title:       "总结：Please summarize this after review",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		CurrentStep: "generate_output",
+		RiskLevel:   "green",
+	})
+	if _, ok := service.runEngine.EscalateHumanLoop(task.TaskID, map[string]any{
+		"reason":           "doom_loop",
+		"status":           "pending",
+		"suggested_action": "review_and_replan",
+	}, map[string]any{"task_id": task.TaskID, "type": "status", "text": "需要人工介入"}); !ok {
+		t.Fatal("expected human escalation to succeed")
+	}
+	_, err := service.TaskControl(map[string]any{
+		"task_id": task.TaskID,
+		"action":  "resume",
+		"review": map[string]any{
+			"decision":    "replan",
+			"reviewer_id": "reviewer_004",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "review.corrected_intent is required") {
+		t.Fatalf("expected missing corrected_intent to block replan resume, got %v", err)
 	}
 }
 
