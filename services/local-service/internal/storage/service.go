@@ -34,6 +34,14 @@ const memoryStoreBackendSQLite = "sqlite_wal"
 const memoryRetrievalBackendInMemory = "in_memory"
 const memoryRetrievalBackendSQLite = "sqlite_fts5+sqlite_vec"
 
+var newSQLiteTraceStoreForService = func(databasePath string) (TraceStore, error) {
+	return NewSQLiteTraceStore(databasePath)
+}
+
+var newSQLiteEvalStoreForService = func(databasePath string) (EvalStore, error) {
+	return NewSQLiteEvalStore(databasePath)
+}
+
 // Descriptor 定义当前模块的数据结构。
 type Descriptor struct {
 	Backend      string
@@ -138,21 +146,13 @@ func NewService(adapter platform.StorageAdapter) *Service {
 				fallbackActive = true
 			}
 
-			sqliteTraceStore, err := NewSQLiteTraceStore(databasePath)
+			sqliteTraceStore, sqliteEvalStore, err := initializeSQLiteTraceEvalStores(databasePath)
 			if err == nil {
 				traceStore = sqliteTraceStore
-			}
-			if err != nil {
-				storeInitErrors = append(storeInitErrors, fmt.Errorf("initialize sqlite trace store: %w", err))
-				fallbackActive = true
-			}
-
-			sqliteEvalStore, err := NewSQLiteEvalStore(databasePath)
-			if err == nil {
 				evalStore = sqliteEvalStore
 			}
 			if err != nil {
-				storeInitErrors = append(storeInitErrors, fmt.Errorf("initialize sqlite eval store: %w", err))
+				storeInitErrors = append(storeInitErrors, err)
 				fallbackActive = true
 			}
 
@@ -211,6 +211,21 @@ func NewService(adapter platform.StorageAdapter) *Service {
 		storeInitErr:       storeInitErr,
 		fallbackActive:     fallbackActive,
 	}
+}
+
+func initializeSQLiteTraceEvalStores(databasePath string) (TraceStore, EvalStore, error) {
+	traceStore, err := newSQLiteTraceStoreForService(databasePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize sqlite trace/eval stores: trace store: %w", err)
+	}
+	evalStore, err := newSQLiteEvalStoreForService(databasePath)
+	if err != nil {
+		if closer, ok := traceStore.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+		return nil, nil, fmt.Errorf("initialize sqlite trace/eval stores: eval store: %w", err)
+	}
+	return traceStore, evalStore, nil
 }
 
 // TraceStore returns the configured trace persistence store.

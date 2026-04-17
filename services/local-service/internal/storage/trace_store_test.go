@@ -150,3 +150,104 @@ func TestSQLiteEvalStoreEnforcesTraceForeignKey(t *testing.T) {
 		t.Fatal("expected eval_snapshots to keep foreign key back to trace_records")
 	}
 }
+
+func TestSQLiteEvalStoreMigratesLegacyRowsAndQuarantinesOrphans(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "trace-eval-migration.db")
+	db, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open sqlite db failed: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF;`); err != nil {
+		t.Fatalf("disable foreign keys failed: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE trace_records (
+			trace_id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			run_id TEXT,
+			loop_round INTEGER NOT NULL DEFAULT 0,
+			llm_input_summary TEXT NOT NULL,
+			llm_output_summary TEXT NOT NULL,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			cost REAL NOT NULL DEFAULT 0,
+			rule_hits_json TEXT,
+			review_result TEXT,
+			created_at TEXT NOT NULL
+		);
+	`); err != nil {
+		t.Fatalf("create legacy trace_records failed: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE eval_snapshots (
+			eval_snapshot_id TEXT PRIMARY KEY,
+			trace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			metrics_json TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+	`); err != nil {
+		t.Fatalf("create legacy eval_snapshots failed: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO trace_records (trace_id, task_id, run_id, loop_round, llm_input_summary, llm_output_summary, latency_ms, cost, rule_hits_json, review_result, created_at)
+		VALUES ('trace_live', 'task_live', 'run_live', 1, 'input', 'output', 10, 0, '[]', 'passed', '2026-04-17T10:00:00Z');
+	`); err != nil {
+		t.Fatalf("seed trace_records failed: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO eval_snapshots (eval_snapshot_id, trace_id, task_id, status, metrics_json, created_at)
+		VALUES
+			('eval_live', 'trace_live', 'task_live', 'passed', '{"latency_ms":10}', '2026-04-17T10:00:00Z'),
+			('eval_orphan', 'trace_missing', 'task_orphan', 'needs_attention', '{"latency_ms":20}', '2026-04-17T10:01:00Z');
+	`); err != nil {
+		t.Fatalf("seed eval_snapshots failed: %v", err)
+	}
+
+	store, err := NewSQLiteEvalStore(databasePath)
+	if err != nil {
+		t.Fatalf("new sqlite eval store failed: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	var keptCount int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM eval_snapshots`).Scan(&keptCount); err != nil {
+		t.Fatalf("count migrated eval snapshots failed: %v", err)
+	}
+	if keptCount != 1 {
+		t.Fatalf("expected only linked eval snapshots to survive migration, got %d", keptCount)
+	}
+	var orphanCount int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM eval_snapshots_orphaned`).Scan(&orphanCount); err != nil {
+		t.Fatalf("count quarantined eval snapshots failed: %v", err)
+	}
+	if orphanCount != 1 {
+		t.Fatalf("expected one orphaned eval snapshot to be quarantined, got %d", orphanCount)
+	}
+	var orphanID, orphanReason string
+	if err := db.QueryRow(`SELECT eval_snapshot_id, reason FROM eval_snapshots_orphaned`).Scan(&orphanID, &orphanReason); err != nil {
+		t.Fatalf("query quarantined eval snapshot failed: %v", err)
+	}
+	if orphanID != "eval_orphan" || orphanReason == "" {
+		t.Fatalf("expected orphan metadata to be preserved, got id=%q reason=%q", orphanID, orphanReason)
+	}
+}
+
+func TestTraceAndEvalPagingHelpersHandleOffsetsAndUnlimitedPages(t *testing.T) {
+	traceItems := []TraceRecord{{TraceID: "trace_1"}, {TraceID: "trace_2"}, {TraceID: "trace_3"}}
+	if got := pageTraceRecords(traceItems, 0, 1); len(got) != 2 || got[0].TraceID != "trace_2" {
+		t.Fatalf("expected unlimited trace page from offset, got %+v", got)
+	}
+	if got := pageTraceRecords(traceItems, 2, 5); len(got) != 0 {
+		t.Fatalf("expected empty trace page beyond range, got %+v", got)
+	}
+
+	evalItems := []EvalSnapshotRecord{{EvalSnapshotID: "eval_1"}, {EvalSnapshotID: "eval_2"}, {EvalSnapshotID: "eval_3"}}
+	if got := pageEvalSnapshots(evalItems, 2, 0); len(got) != 2 || got[1].EvalSnapshotID != "eval_2" {
+		t.Fatalf("expected bounded eval page, got %+v", got)
+	}
+	if got := pageEvalSnapshots(evalItems, 0, 2); len(got) != 1 || got[0].EvalSnapshotID != "eval_3" {
+		t.Fatalf("expected unlimited eval page from offset, got %+v", got)
+	}
+}

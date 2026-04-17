@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+const orphanedEvalSnapshotsTable = "eval_snapshots_orphaned"
+
 type inMemoryTraceStore struct {
 	mu      sync.Mutex
 	records []TraceRecord
@@ -351,12 +353,44 @@ func ensureEvalSnapshotForeignKey(ctx context.Context, db *sql.DB) error {
 	`); err != nil {
 		return fmt.Errorf("recreate eval_snapshots table with foreign key: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			eval_snapshot_id TEXT PRIMARY KEY,
+			trace_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			metrics_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			quarantined_at TEXT NOT NULL,
+			reason TEXT NOT NULL
+		);
+	`, orphanedEvalSnapshotsTable)); err != nil {
+		return fmt.Errorf("create orphaned eval_snapshots quarantine table: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO eval_snapshots (eval_snapshot_id, trace_id, task_id, status, metrics_json, created_at)
 		SELECT eval_snapshot_id, trace_id, task_id, status, metrics_json, created_at
 		FROM eval_snapshots_legacy;
 	`); err != nil {
-		return fmt.Errorf("copy eval_snapshots rows into migrated table: %w", err)
+		if _, quarantineErr := tx.ExecContext(ctx, fmt.Sprintf(`
+			INSERT OR REPLACE INTO %s (
+				eval_snapshot_id, trace_id, task_id, status, metrics_json, created_at, quarantined_at, reason
+			)
+			SELECT legacy.eval_snapshot_id, legacy.trace_id, legacy.task_id, legacy.status, legacy.metrics_json, legacy.created_at, CURRENT_TIMESTAMP, ?
+			FROM eval_snapshots_legacy legacy
+			LEFT JOIN trace_records traces ON traces.trace_id = legacy.trace_id
+			WHERE traces.trace_id IS NULL;
+		`, orphanedEvalSnapshotsTable), "missing trace_records parent during foreign key migration"); quarantineErr != nil {
+			return fmt.Errorf("quarantine orphaned eval_snapshots rows: %w", quarantineErr)
+		}
+		if _, copyErr := tx.ExecContext(ctx, `
+			INSERT INTO eval_snapshots (eval_snapshot_id, trace_id, task_id, status, metrics_json, created_at)
+			SELECT legacy.eval_snapshot_id, legacy.trace_id, legacy.task_id, legacy.status, legacy.metrics_json, legacy.created_at
+			FROM eval_snapshots_legacy legacy
+			INNER JOIN trace_records traces ON traces.trace_id = legacy.trace_id;
+		`); copyErr != nil {
+			return fmt.Errorf("copy compatible eval_snapshots rows into migrated table: %w", copyErr)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DROP TABLE eval_snapshots_legacy;`); err != nil {
 		return fmt.Errorf("drop legacy eval_snapshots table: %w", err)
