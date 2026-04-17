@@ -50,6 +50,15 @@ type DeliveryRecord struct {
 	CreatedAt        time.Time
 }
 
+// Hook allows loop callers to inspect and optionally adjust planning and tool
+// execution data without reaching into execution internals.
+type Hook interface {
+	BeforeRound(ctx context.Context, round PersistedRound, plannerInput string) (string, error)
+	AfterRound(ctx context.Context, round PersistedRound) error
+	BeforeTool(ctx context.Context, round PersistedRound, call model.ToolInvocation) (model.ToolInvocation, error)
+	AfterTool(ctx context.Context, round PersistedRound, record tools.ToolCallRecord, observation string) error
+}
+
 // PersistedRound describes one persisted loop step compatible with the
 // `steps` table planned in docs/data-design.md.
 type PersistedRound struct {
@@ -99,9 +108,11 @@ type Request struct {
 	ExecuteTool        func(context.Context, model.ToolInvocation, int) (string, tools.ToolCallRecord)
 	BuildAuditRecord   func(context.Context, *model.InvocationRecord) (map[string]any, error)
 	MaxTurns           int
+	Timeout            time.Duration
 	CompressChars      int
 	KeepRecent         int
 	RepeatedToolBudget int
+	Hook               Hook
 	Now                func() time.Time
 }
 
@@ -135,6 +146,11 @@ func (r *Runtime) Run(ctx context.Context, request Request) (Result, bool, error
 	if request.Now == nil {
 		request.Now = time.Now
 	}
+	if request.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, request.Timeout)
+		defer cancel()
+	}
 
 	history := []string{}
 	allToolCalls := []tools.ToolCallRecord{}
@@ -158,6 +174,15 @@ func (r *Runtime) Run(ctx context.Context, request Request) (Result, bool, error
 			PlannerInput:  plannerInput,
 			StopReason:    "",
 			PlannerOutput: "",
+		}
+		if request.Hook != nil {
+			updatedInput, err := request.Hook.BeforeRound(ctx, round, plannerInput)
+			if err != nil {
+				return Result{}, true, err
+			}
+			plannerInput = updatedInput
+			round.PlannerInput = plannerInput
+			round.InputSummary = truncateText(singleLineSummary(plannerInput), 160)
 		}
 		events = append(events, newEventForRound(round, "loop.round.started", map[string]any{"loop_round": round.LoopRound}))
 
@@ -234,6 +259,13 @@ func (r *Runtime) Run(ctx context.Context, request Request) (Result, bool, error
 
 		observations := make([]string, 0, len(plan.ToolCalls))
 		for _, call := range plan.ToolCalls {
+			if request.Hook != nil {
+				updatedCall, err := request.Hook.BeforeTool(ctx, round, call)
+				if err != nil {
+					return Result{}, true, err
+				}
+				call = updatedCall
+			}
 			toolName := strings.TrimSpace(call.Name)
 			if request.AllowedTool != nil && !request.AllowedTool(toolName) {
 				observation := fmt.Sprintf("Tool %s is not allowed in the current agent loop.", toolName)
@@ -256,6 +288,11 @@ func (r *Runtime) Run(ctx context.Context, request Request) (Result, bool, error
 				"tool_name":   round.ToolName,
 				"observation": round.Observation,
 			}))
+			if request.Hook != nil {
+				if err := request.Hook.AfterTool(ctx, round, record, observation); err != nil {
+					return Result{}, true, err
+				}
+			}
 		}
 
 		if round.ToolName != "" {
@@ -298,6 +335,11 @@ func (r *Runtime) Run(ctx context.Context, request Request) (Result, bool, error
 		round.OutputSummary = truncateText(singleLineSummary(strings.Join(observations, " | ")), 160)
 		rounds = append(rounds, round)
 		events = append(events, newEventForRound(round, "loop.round.completed", map[string]any{"loop_round": round.LoopRound, "stop_reason": string(StopReasonCompleted)}))
+		if request.Hook != nil {
+			if err := request.Hook.AfterRound(ctx, round); err != nil {
+				return Result{}, true, err
+			}
+		}
 	}
 
 	auditRecord, err := request.BuildAuditRecord(ctx, latestInvocation)

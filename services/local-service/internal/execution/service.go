@@ -26,6 +26,7 @@ import (
 
 const (
 	defaultAgentLoopIntentName = "agent_loop"
+	defaultAgentLoopTimeout    = 90 * time.Second
 )
 
 // Service 负责在当前仓库代码范围内完成一条可运行的最小执行链路。
@@ -918,9 +919,11 @@ func (s *Service) generateOutputWithAgentLoop(ctx context.Context, request Reque
 			return s.buildModelAuditRecord(auditCtx, request, invocation)
 		},
 		MaxTurns:           s.agentLoopMaxTurns(),
+		Timeout:            s.agentLoopTimeout(),
 		CompressChars:      s.agentLoopCompressionChars(),
 		KeepRecent:         s.agentLoopKeepRecent(),
 		RepeatedToolBudget: 2,
+		Hook:               noopAgentLoopHook{},
 		Now:                time.Now,
 	})
 	if err != nil || !ok {
@@ -1299,6 +1302,28 @@ func (s *Service) agentLoopKeepRecent() int {
 		return 4
 	}
 	return s.model.ContextKeepRecent()
+}
+
+func (s *Service) agentLoopTimeout() time.Duration {
+	return defaultAgentLoopTimeout
+}
+
+type noopAgentLoopHook struct{}
+
+func (noopAgentLoopHook) BeforeRound(_ context.Context, round agentloop.PersistedRound, plannerInput string) (string, error) {
+	return plannerInput, nil
+}
+
+func (noopAgentLoopHook) AfterRound(_ context.Context, _ agentloop.PersistedRound) error {
+	return nil
+}
+
+func (noopAgentLoopHook) BeforeTool(_ context.Context, _ agentloop.PersistedRound, call model.ToolInvocation) (model.ToolInvocation, error) {
+	return call, nil
+}
+
+func (noopAgentLoopHook) AfterTool(_ context.Context, _ agentloop.PersistedRound, _ tools.ToolCallRecord, _ string) error {
+	return nil
 }
 
 // isAgentLoopIntent reports whether the current task should execute through the
