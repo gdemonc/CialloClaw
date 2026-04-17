@@ -82,7 +82,7 @@ function getPreviewStatus(item: TodoItem) {
   }
 
   if (item.bucket === "recurring_rule") {
-    return "规则生效中";
+    return item.recurring_enabled === false ? "规则已暂停" : "规则生效中";
   }
 
   if (item.status === "overdue") {
@@ -102,7 +102,7 @@ function getDetailStatus(item: TodoItem) {
   }
 
   if (item.bucket === "recurring_rule") {
-    return "重复规则开启中";
+    return item.recurring_enabled === false ? "重复规则已暂停" : "重复规则开启中";
   }
 
   if (item.status === "overdue") {
@@ -237,7 +237,7 @@ function createFallbackExperience(item: TodoItem): NoteDetailExperience {
     detailStatusTone: item.status === "overdue" ? "overdue" : item.status === "completed" || item.status === "cancelled" ? "done" : "normal",
     effectiveScope: item.effective_scope ?? (item.bucket === "recurring_rule" ? "规则持续生效，直到手动暂停或取消。" : null),
     endedAt: item.ended_at ?? (item.status === "completed" || item.status === "cancelled" ? item.due_at : null),
-    isRecurringEnabled: item.bucket === "recurring_rule",
+    isRecurringEnabled: item.bucket === "recurring_rule" ? item.recurring_enabled !== false : false,
     nextOccurrenceAt: item.next_occurrence_at ?? (item.bucket === "recurring_rule" ? item.due_at : null),
     noteText: item.note_text ?? (item.agent_suggestion
       ? `${item.title}。当前已同步到便签页，建议先按提示整理上下文，再视情况转成正式任务。`
@@ -353,35 +353,16 @@ export function resolveNoteResourceOpenExecutionPlan(resource: NoteResource): No
     };
   }
 
-  if (resource.url) {
-    return {
-      feedback: `已打开 ${resource.label}。`,
-      mode: "open_url",
-      path: resource.path,
-      taskId: resource.taskId ?? null,
-      url: resource.url,
-    };
-  }
-
   return {
-    feedback: resource.path ? `当前环境暂不支持直接打开，已准备 ${resource.label} 的路径。` : `当前资源 ${resource.label} 缺少可打开地址。`,
+    feedback: resource.path || resource.url ? `当前环境暂不直接执行打开动作，已准备 ${resource.label} 的地址。` : `当前资源 ${resource.label} 缺少可打开地址。`,
     mode: "copy_path",
-    path: resource.path,
+    path: resource.path || resource.url || null,
     taskId: resource.taskId ?? null,
     url: resource.url ?? null,
   };
 }
 
 export async function performNoteResourceOpenExecution(plan: NoteResourceOpenExecutionPlan): Promise<string> {
-  if (plan.mode === "open_url" && plan.url) {
-    if (!isAllowedNoteOpenUrl(plan.url)) {
-      return "已拦截不受支持的资源链接。";
-    }
-
-    window.open(plan.url, "_blank", "noopener,noreferrer");
-    return plan.feedback;
-  }
-
   if (plan.mode === "copy_path" && plan.path) {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(plan.path);
