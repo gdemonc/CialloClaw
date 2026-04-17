@@ -97,7 +97,6 @@ import { useShellBallStore } from "../../stores/shellBallStore";
 import {
   areShellBallSelectionSnapshotsEqual,
   shouldPollShellBallNativeSelection,
-  shouldTrackShellBallSelectionInState,
 } from "./selection/selection.provider";
 
 const desktopRoot = process.cwd();
@@ -1224,7 +1223,6 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
     geometry: "desktop-shell-ball:geometry",
     helperReady: "desktop-shell-ball:helper-ready",
     textSelectionState: "desktop-shell-ball:text-selection-state",
-    selectionActivity: "desktop-shell-ball:selection-activity",
     selectionSnapshot: "desktop-shell-ball:selection-snapshot",
     pinnedWindowReady: "desktop-shell-ball:pinned-window-ready",
     pinnedWindowDetached: "desktop-shell-ball:pinned-window-detached",
@@ -3417,7 +3415,7 @@ test("shell-ball selected-text prompt stays below an existing intent bubble even
       onPrimaryClick: () => {},
     });
 
-    handleSelectedTextPrompt("Selected text");
+    handleSelectedTextPrompt();
 
     assert.deepEqual(
       bubbleItemsState.map((item) => ({
@@ -4245,19 +4243,12 @@ test("shell-ball app routes real selection snapshots into input focus and an ack
   assert.match(appSource, /handleInputFocusRequest\(\);\s*handleCoordinatorSelectedTextPrompt\(selectionPrompt\.text\);\s*void emitShellBallInputRequestFocus\(Date\.now\(\)\);/);
   assert.match(coordinatorSource, /const handleSelectedTextPrompt = useCallback\(\(text: string\) => \{/);
   assert.match(coordinatorSource, /createShellBallSelectedTextPreview\(text\)/);
-  assert.doesNotMatch(providersSource, /<ShellBallSelectionProvider \/>/);
-  assert.match(appSource, /<ShellBallSelectionProvider visualState=\{visualState\} \/>/);
-  assert.match(selectionProviderSource, /shellBallWindowSyncEvents\.selectionActivity/);
+  assert.match(providersSource, /<ShellBallSelectionProvider \/>/);
   assert.match(selectionProviderSource, /shellBallWindowSyncEvents\.selectionSnapshot/);
   assert.match(selectionProviderSource, /readShellBallSelectionSnapshot/);
-  assert.match(selectionProviderSource, /const SHELL_BALL_SELECTION_POLL_MS = 1000;/);
-  assert.match(selectionProviderSource, /setSelectionDirty\(true\);/);
-  assert.match(selectionProviderSource, /setSelectionDirty\(false\);/);
+  assert.match(selectionProviderSource, /useInterval\(/);
   assert.equal(shouldPollShellBallNativeSelection("shell-ball"), true);
   assert.equal(shouldPollShellBallNativeSelection("dashboard"), false);
-  assert.equal(shouldTrackShellBallSelectionInState("idle"), true);
-  assert.equal(shouldTrackShellBallSelectionInState("hover_input"), true);
-  assert.equal(shouldTrackShellBallSelectionInState("processing"), false);
   assert.equal(
     areShellBallSelectionSnapshotsEqual(
       {

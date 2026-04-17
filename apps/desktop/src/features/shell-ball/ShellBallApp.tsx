@@ -5,7 +5,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventListener } from "ahooks";
 import { getCurrentWindow, monitorFromPoint } from "@tauri-apps/api/window";
-import { ShellBallSelectionProvider } from "./selection/selection.provider";
 import { ShellBallSurface, shouldAcceptShellBallTextDrop } from "./ShellBallSurface";
 import type { ShellBallSelectionSnapshot } from "./selection/selection.types";
 import { useShellBallInteraction } from "./useShellBallInteraction";
@@ -36,6 +35,7 @@ type ShellBallWindowAnchor = {
 };
 
 const SHELL_BALL_DASHBOARD_TRANSITION_DURATION_MS = 260;
+const SHELL_BALL_SELECTION_PROMPT_CLEAR_DELAY_MS = 240;
 
 /**
  * Determines whether the file-drop overlay should be visible for the current
@@ -220,6 +220,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   const [selectionPrompt, setSelectionPrompt] = useState<ShellBallSelectionSnapshot | null>(null);
   const anchorRef = useRef<ShellBallWindowAnchor | null>(null);
   const dashboardTransitionPhaseRef = useRef<ShellBallDashboardTransitionPhase>("idle");
+  const selectionPromptClearTimeoutRef = useRef<number | null>(null);
   const transitionQueueRef = useRef(Promise.resolve());
   const dragDropHandlersRef = useRef<{
     handleDroppedFiles: (paths: string[]) => Promise<void> | void;
@@ -439,6 +440,10 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
   useEffect(() => {
     if (visualState !== "idle" && visualState !== "hover_input") {
+      if (selectionPromptClearTimeoutRef.current !== null) {
+        window.clearTimeout(selectionPromptClearTimeoutRef.current);
+        selectionPromptClearTimeoutRef.current = null;
+      }
       setSelectionPrompt(null);
     }
   }, [visualState]);
@@ -455,7 +460,24 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
     void currentWindow
       .listen<ShellBallSelectionSnapshotPayload>(shellBallWindowSyncEvents.selectionSnapshot, ({ payload }) => {
-        setSelectionPrompt(payload.snapshot);
+        if (payload.snapshot !== null) {
+          if (selectionPromptClearTimeoutRef.current !== null) {
+            window.clearTimeout(selectionPromptClearTimeoutRef.current);
+            selectionPromptClearTimeoutRef.current = null;
+          }
+
+          setSelectionPrompt(payload.snapshot);
+          return;
+        }
+
+        if (selectionPromptClearTimeoutRef.current !== null) {
+          window.clearTimeout(selectionPromptClearTimeoutRef.current);
+        }
+
+        selectionPromptClearTimeoutRef.current = window.setTimeout(() => {
+          selectionPromptClearTimeoutRef.current = null;
+          setSelectionPrompt(null);
+        }, SHELL_BALL_SELECTION_PROMPT_CLEAR_DELAY_MS);
       })
       .then((unlisten) => {
         if (disposed) {
@@ -468,6 +490,10 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
     return () => {
       disposed = true;
+      if (selectionPromptClearTimeoutRef.current !== null) {
+        window.clearTimeout(selectionPromptClearTimeoutRef.current);
+        selectionPromptClearTimeoutRef.current = null;
+      }
       cleanup?.();
     };
   }, []);
@@ -497,6 +523,11 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
   const handleMascotPrimaryAction = useCallback(() => {
     if (selectionPrompt !== null) {
+      if (selectionPromptClearTimeoutRef.current !== null) {
+        window.clearTimeout(selectionPromptClearTimeoutRef.current);
+        selectionPromptClearTimeoutRef.current = null;
+      }
+
       setSelectionPrompt(null);
       handleInputFocusRequest();
       handleCoordinatorSelectedTextPrompt(selectionPrompt.text);
@@ -508,66 +539,63 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   }, [handleCoordinatorSelectedTextPrompt, handleInputFocusRequest, handlePrimaryClick, selectionPrompt]);
 
   return (
-    <>
-      <ShellBallSelectionProvider visualState={visualState} />
-      <ShellBallSurface
-        containerRef={rootRef}
-        dashboardTransitionPhase={dashboardTransitionPhase}
-        fileDropActive={shouldShowShellBallFileDropOverlay({
-          fileDropActive,
-        })}
-        textDropActive={shouldArmShellBallTextDropTarget({
-          fileDropActive,
-          textDragActive,
-          visualState,
-        })}
-        visualState={visualState}
-        selectionIndicatorVisible={shouldShowShellBallSelectionIndicator({
-          selection: selectionPrompt,
-          visualState,
-        })}
-        voicePreview={voicePreview}
-        voiceHoldProgress={voiceHoldProgress}
-        motionConfig={motionConfig}
-        onDragStart={(event) => {
-          beginBallWindowPointerDrag({
-            x: event.screenX,
-            y: event.screenY,
-          });
-        }}
-        onDragMove={(event) => {
-          updateBallWindowPointerDrag({
-            x: event.screenX,
-            y: event.screenY,
-          });
-        }}
-        onDragEnd={(event) => {
-          void endBallWindowPointerDrag({
-            x: event.screenX,
-            y: event.screenY,
-          });
-        }}
-        onDragCancel={(event) => {
-          void endBallWindowPointerDrag({
-            x: event.screenX,
-            y: event.screenY,
-          });
-        }}
-        onPrimaryClick={handleMascotPrimaryAction}
-        onDoubleClick={handleDoubleClick}
-        onRegionEnter={handleRegionEnter}
-        onRegionLeave={handleRegionLeave}
-        onTextDrop={handleSurfaceTextDrop}
-        inputFocused={inputFocused}
-        onInputProxyClick={() => {
-          handleInputFocusRequest();
-          void emitShellBallInputRequestFocus(Date.now());
-        }}
-        onPressStart={handlePressStart}
-        onPressMove={handlePressMove}
-        onPressEnd={handlePressEnd}
-        onPressCancel={handlePressCancel}
-      />
-    </>
+    <ShellBallSurface
+      containerRef={rootRef}
+      dashboardTransitionPhase={dashboardTransitionPhase}
+      fileDropActive={shouldShowShellBallFileDropOverlay({
+        fileDropActive,
+      })}
+      textDropActive={shouldArmShellBallTextDropTarget({
+        fileDropActive,
+        textDragActive,
+        visualState,
+      })}
+      visualState={visualState}
+      selectionIndicatorVisible={shouldShowShellBallSelectionIndicator({
+        selection: selectionPrompt,
+        visualState,
+      })}
+      voicePreview={voicePreview}
+      voiceHoldProgress={voiceHoldProgress}
+      motionConfig={motionConfig}
+      onDragStart={(event) => {
+        beginBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
+      }}
+      onDragMove={(event) => {
+        updateBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
+      }}
+      onDragEnd={(event) => {
+        void endBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
+      }}
+      onDragCancel={(event) => {
+        void endBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
+      }}
+      onPrimaryClick={handleMascotPrimaryAction}
+      onDoubleClick={handleDoubleClick}
+      onRegionEnter={handleRegionEnter}
+      onRegionLeave={handleRegionLeave}
+      onTextDrop={handleSurfaceTextDrop}
+      inputFocused={inputFocused}
+      onInputProxyClick={() => {
+        handleInputFocusRequest();
+        void emitShellBallInputRequestFocus(Date.now());
+      }}
+      onPressStart={handlePressStart}
+      onPressMove={handlePressMove}
+      onPressEnd={handlePressEnd}
+      onPressCancel={handlePressCancel}
+    />
   );
 }

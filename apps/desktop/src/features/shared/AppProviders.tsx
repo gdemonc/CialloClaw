@@ -5,6 +5,7 @@
 import type { PropsWithChildren } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ShellBallSelectionProvider } from "@/features/shell-ball/selection/selection.provider";
 import { queryClient } from "@/queries/queryClient";
 import "@/platform/namedPipeBridge";
 import "@/styles/globals.css";
@@ -19,7 +20,10 @@ import "@/styles/globals.css";
 export function AppProviders({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>{children}</TooltipProvider>
+      <TooltipProvider>
+        <ShellBallSelectionProvider />
+        {children}
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
