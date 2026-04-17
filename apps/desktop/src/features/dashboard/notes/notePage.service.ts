@@ -9,7 +9,6 @@ import type {
   TodoBucket,
   TodoItem,
 } from "@cialloclaw/protocol";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import { convertNotepadToTask, listNotepad, updateNotepad } from "@/rpc/methods";
 import { getMockNoteBuckets, getMockNoteExperience, runMockConvertNoteToTask, runMockUpdateNote } from "./notePage.mock";
 import type { NoteConvertOutcome, NoteDetailExperience, NoteListItem, NoteResource, NoteUpdateOutcome } from "./notePage.types";
@@ -324,27 +323,18 @@ export async function loadNoteBucket(group: TodoBucket, source: NotePageDataMode
     return getMockNoteBucketPage(group);
   }
 
-  try {
-    const params: AgentNotepadListParams = {
-      group,
-      limit: group === "closed" ? 24 : 12,
-      offset: 0,
-      request_meta: createRequestMeta(`notepad_${group}`),
-    };
+  const params: AgentNotepadListParams = {
+    group,
+    limit: group === "closed" ? 24 : 12,
+    offset: 0,
+    request_meta: createRequestMeta(`notepad_${group}`),
+  };
 
-    const result = await withTimeout(listNotepad(params), `notepad bucket ${group}`);
-    return {
-      items: mapItems(result.items),
-      page: result.page,
-    };
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback(`notepad bucket ${group}`, error);
-      return getMockNoteBucketPage(group);
-    }
-
-    throw error;
-  }
+  const result = await withTimeout(listNotepad(params), `notepad bucket ${group}`);
+  return {
+    items: mapItems(result.items),
+    page: result.page,
+  };
 }
 
 export async function convertNoteToTask(itemId: string, source: NotePageDataMode = "rpc"): Promise<NoteConvertOutcome> {
@@ -358,20 +348,11 @@ export async function convertNoteToTask(itemId: string, source: NotePageDataMode
     request_meta: createRequestMeta(`notepad_convert_${itemId}`),
   };
 
-  try {
-    const result = await withTimeout(convertNotepadToTask(params), `convert note ${itemId} to task`);
-    return {
-      result,
-      source: "rpc",
-    };
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback(`convert note ${itemId} to task`, error);
-      return runMockConvertNoteToTask(itemId);
-    }
-
-    throw error;
-  }
+  const result = await withTimeout(convertNotepadToTask(params), `convert note ${itemId} to task`);
+  return {
+    result,
+    source: "rpc",
+  };
 }
 
 export async function updateNote(itemId: string, action: NotepadAction, source: NotePageDataMode = "rpc"): Promise<NoteUpdateOutcome> {
@@ -385,20 +366,11 @@ export async function updateNote(itemId: string, action: NotepadAction, source: 
     request_meta: createRequestMeta(`notepad_update_${action}_${itemId}`),
   };
 
-  try {
-    const result = await withTimeout(updateNotepad(params), `update note ${itemId} with ${action}`);
-    return {
-      result,
-      source: "rpc",
-    };
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback(`update note ${itemId} with ${action}`, error);
-      return runMockUpdateNote(itemId, action);
-    }
-
-    throw error;
-  }
+  const result = await withTimeout(updateNotepad(params), `update note ${itemId} with ${action}`);
+  return {
+    result,
+    source: "rpc",
+  };
 }
 
 export function resolveNoteResourceOpenExecutionPlan(resource: NoteResource): NoteResourceOpenExecutionPlan {

@@ -182,8 +182,14 @@ function loadSettingsServiceModule() {
 }
 
 function loadDashboardSettingsMutationModule(rpcMethods?: {
+  controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
+  convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
   updateSettings?: (params: unknown) => Promise<unknown>;
   getSettingsDetailed?: (params: unknown) => Promise<unknown>;
+  getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
+  listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
+  listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+  updateNotepad?: (params: AgentNotepadUpdateParams) => Promise<AgentNotepadUpdateResult>;
 }) {
   return withDesktopAliasRuntime((requireFn) => {
     const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/shared/dashboardSettingsMutation.js");
@@ -218,13 +224,38 @@ function loadDashboardSettingsMutationModule(rpcMethods?: {
   }, rpcMethods);
 }
 
+type DashboardContractRpcMethodOverrides = {
+  controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
+  convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
+  updateSettings?: (params: unknown) => Promise<unknown>;
+  getSettingsDetailed?: (params: unknown) => Promise<unknown>;
+  getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
+  listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
+  listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+  updateNotepad?: (params: AgentNotepadUpdateParams) => Promise<AgentNotepadUpdateResult>;
+};
+
+function withDesktopAliasRuntime<T>(
+  callback: (requireFn: NodeRequire) => Promise<T>,
+  rpcMethods?: DashboardContractRpcMethodOverrides,
+): Promise<T>;
 function withDesktopAliasRuntime<T>(
   callback: (requireFn: NodeRequire) => T,
+  rpcMethods?: DashboardContractRpcMethodOverrides,
+): T;
+function withDesktopAliasRuntime<T>(
+  callback: (requireFn: NodeRequire) => T | Promise<T>,
   rpcMethods?: {
+    controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
+    convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
     updateSettings?: (params: unknown) => Promise<unknown>;
     getSettingsDetailed?: (params: unknown) => Promise<unknown>;
+    getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
+    listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
+    listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+    updateNotepad?: (params: AgentNotepadUpdateParams) => Promise<AgentNotepadUpdateResult>;
   },
-): T {
+): T | Promise<T> {
   const NodeModule = require("node:module") as {
     _load: (request: string, parent: unknown, isMain: boolean) => unknown;
     _resolveFilename: (request: string, parent: unknown, isMain: boolean, options?: unknown) => string;
@@ -280,33 +311,45 @@ function withDesktopAliasRuntime<T>(
 
     if (request === "@/rpc/methods") {
       return {
-        controlTask() {
-          throw new Error("controlTask should not run in dashboard contract tests");
-        },
-        convertNotepadToTask() {
-          throw new Error("convertNotepadToTask should not run in dashboard contract tests");
-        },
-        getTaskDetail() {
-          throw new Error("getTaskDetail should not run in dashboard contract tests");
-        },
-        listNotepad() {
-          throw new Error("listNotepad should not run in dashboard contract tests");
-        },
+        controlTask:
+          rpcMethods?.controlTask ??
+          (() => {
+            throw new Error("controlTask should not run in dashboard contract tests");
+          }),
+        convertNotepadToTask:
+          rpcMethods?.convertNotepadToTask ??
+          (() => {
+            throw new Error("convertNotepadToTask should not run in dashboard contract tests");
+          }),
+        getTaskDetail:
+          rpcMethods?.getTaskDetail ??
+          (() => {
+            throw new Error("getTaskDetail should not run in dashboard contract tests");
+          }),
+        listNotepad:
+          rpcMethods?.listNotepad ??
+          (() => {
+            throw new Error("listNotepad should not run in dashboard contract tests");
+          }),
         listTaskArtifacts() {
           throw new Error("listTaskArtifacts should not run in dashboard contract tests");
         },
-        listTasks() {
-          throw new Error("listTasks should not run in dashboard contract tests");
-        },
+        listTasks:
+          rpcMethods?.listTasks ??
+          (() => {
+            throw new Error("listTasks should not run in dashboard contract tests");
+          }),
         openDelivery() {
           throw new Error("openDelivery should not run in dashboard contract tests");
         },
         openTaskArtifact() {
           throw new Error("openTaskArtifact should not run in dashboard contract tests");
         },
-        updateNotepad() {
-          throw new Error("updateNotepad should not run in dashboard contract tests");
-        },
+        updateNotepad:
+          rpcMethods?.updateNotepad ??
+          (() => {
+            throw new Error("updateNotepad should not run in dashboard contract tests");
+          }),
         getSettingsDetailed: rpcMethods?.getSettingsDetailed ?? (() => Promise.reject(new Error("getSettingsDetailed should not run in dashboard contract tests"))),
         updateSettings: rpcMethods?.updateSettings ?? (() => Promise.reject(new Error("updateSettings should not run in dashboard contract tests"))),
       };
@@ -315,9 +358,7 @@ function withDesktopAliasRuntime<T>(
     return originalLoad(request, parent, isMain);
   };
 
-  try {
-    return callback(require);
-  } finally {
+  const restoreRuntime = () => {
     if (originalTsLoader === undefined) {
       Reflect.deleteProperty(require.extensions, ".ts");
     } else {
@@ -325,6 +366,19 @@ function withDesktopAliasRuntime<T>(
     }
     NodeModule._load = originalLoad;
     NodeModule._resolveFilename = originalResolveFilename;
+  };
+
+  try {
+    const result = callback(require);
+    if (result && typeof (result as unknown as { then?: unknown }).then === "function") {
+      return (result as Promise<T>).finally(restoreRuntime);
+    }
+
+    restoreRuntime();
+    return result;
+  } catch (error) {
+    restoreRuntime();
+    throw error;
   }
 }
 
@@ -1655,6 +1709,58 @@ test("task detail normalization enforces approval and restore-point task invaria
       /active|pending|approval/i,
     );
   });
+});
+
+test("task rpc service keeps transport failures visible instead of switching to mock data", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        controlTaskByAction: (taskId: string, action: "pause" | "resume" | "cancel" | "restart", source?: "rpc" | "mock") => Promise<unknown>;
+        loadTaskBucketPage: (group: "unfinished" | "finished", options?: { limit?: number; offset?: number; source?: "rpc" | "mock" }) => Promise<unknown>;
+        loadTaskDetailData: (taskId: string, source?: "rpc" | "mock") => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadTaskBucketPage("unfinished", { source: "rpc" }), /transport is not wired/i);
+      await assert.rejects(() => service.loadTaskDetailData("task_dashboard_001", "rpc"), /transport is not wired/i);
+      await assert.rejects(() => service.controlTaskByAction("task_dashboard_001", "pause", "rpc"), /transport is not wired/i);
+    },
+    {
+      controlTask: () => Promise.reject(transportError),
+      getTaskDetail: () => Promise.reject(transportError),
+      listTasks: () => Promise.reject(transportError),
+    },
+  );
+});
+
+test("note rpc service keeps transport failures visible instead of switching to mock data", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/notes/notePage.service.js");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        convertNoteToTask: (itemId: string, source?: "rpc" | "mock") => Promise<unknown>;
+        loadNoteBucket: (group: "upcoming" | "later" | "recurring_rule" | "closed", source?: "rpc" | "mock") => Promise<unknown>;
+        updateNote: (itemId: string, action: "complete" | "cancel" | "move_upcoming" | "toggle_recurring" | "cancel_recurring" | "restore" | "delete", source?: "rpc" | "mock") => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadNoteBucket("upcoming", "rpc"), /transport is not wired/i);
+      await assert.rejects(() => service.convertNoteToTask("todo_001", "rpc"), /transport is not wired/i);
+      await assert.rejects(() => service.updateNote("todo_001", "complete", "rpc"), /transport is not wired/i);
+    },
+    {
+      convertNotepadToTask: () => Promise.reject(transportError),
+      listNotepad: () => Promise.reject(transportError),
+      updateNotepad: () => Promise.reject(transportError),
+    },
+  );
 });
 
 test("TaskDetailPanel defers the entire fallback security summary until formal detail arrives", () => {
