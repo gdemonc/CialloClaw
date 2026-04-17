@@ -4399,6 +4399,21 @@ test("shell-ball text drop populates and focuses the input instead of starting a
   assert.match(surfaceSource, /className="shell-ball-surface__text-drop-target"/);
 });
 
+test("shell-ball file drops queue pending attachments instead of starting a task immediately", () => {
+  const coordinatorSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"), "utf8");
+  const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");
+
+  assert.match(coordinatorSource, /const handleDroppedFiles = useCallback\(async \(paths: string\[\]\) => \{/);
+  assert.match(coordinatorSource, /handlersRef\.current\.onAppendPendingFiles\(normalizedPaths\);/);
+  assert.match(coordinatorSource, /await emitShellBallInputRequestFocus\(Date\.now\(\)\);/);
+  assert.match(coordinatorSource, /console\.warn\("shell-ball file drop focus request failed", error\);/);
+  assert.doesNotMatch(coordinatorSource, /startTaskFromFiles/);
+  assert.doesNotMatch(coordinatorSource, /issue #187/);
+  assert.match(interactionSource, /function handleDroppedFiles\(paths: string\[\]\) \{/);
+  assert.match(interactionSource, /setPendingFiles\(\(currentPaths\) => mergeShellBallPendingFiles\(currentPaths, normalizedPaths\)\);/);
+  assert.match(interactionSource, /controllerRef\.current\?\.forceState\("hover_input", \{/);
+});
+
 test("shell-ball selected-text prompt only surfaces in resting states", () => {
   assert.equal(
     shouldShowShellBallSelectionIndicator({
