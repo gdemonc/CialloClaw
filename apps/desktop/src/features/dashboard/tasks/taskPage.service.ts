@@ -1,5 +1,6 @@
 import type { AgentTaskDetailGetResult, AgentTaskControlParams, RequestMeta, Task, TaskControlAction, TaskListGroup } from "@cialloclaw/protocol";
 import { controlTask, getTaskDetail, listTasks } from "@/rpc/methods";
+import { isRpcChannelUnavailable } from "@/rpc/fallback";
 import { isActiveApprovalRequest, isApprovalRequest, isArtifact, isBinaryPendingAuthorizations, isMirrorReference, isRecoveryPoint, isTask, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@/rpc/protocolEnumerations";
 import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
@@ -12,6 +13,8 @@ const INITIAL_TASK_PAGE_LIMIT: Record<TaskListGroup, number> = {
   unfinished: 12,
 };
 const TASK_RPC_TIMEOUT_MS = 2_500;
+const TASK_RPC_RETRY_DELAY_MS = 800;
+const TASK_RPC_MAX_ATTEMPTS = 3;
 
 function createRequestMeta(scope: string): RequestMeta {
   return {
@@ -27,6 +30,29 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
       window.setTimeout(() => reject(new Error(`${label} request timed out`)), TASK_RPC_TIMEOUT_MS);
     }),
   ]);
+}
+
+async function retryUnavailableRpc<T>(label: string, run: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= TASK_RPC_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      lastError = error;
+      if (!isRpcChannelUnavailable(error) || attempt === TASK_RPC_MAX_ATTEMPTS) {
+        throw error;
+      }
+
+      // The packaged local service may still be booting its sidecar process on
+      // first launch, so retry a few times before surfacing an empty task view.
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, TASK_RPC_RETRY_DELAY_MS * attempt);
+      });
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`${label} request failed`);
 }
 
 function createFallbackExperience(task: Task): TaskExperience {
@@ -260,16 +286,18 @@ export async function loadTaskBucketPage(group: TaskListGroup, options?: { limit
 
   const limit = options?.limit ?? INITIAL_TASK_PAGE_LIMIT[group];
   const offset = options?.offset ?? 0;
-  const result = await withTimeout(
-    listTasks({
-      group,
-      limit,
-      offset,
-      request_meta: createRequestMeta(`task_list_${group}_${offset}_${limit}`),
-      sort_by: getTaskListSortBy(group),
-      sort_order: "desc",
-    }),
-    `task bucket ${group}`,
+  const result = await retryUnavailableRpc(`task bucket ${group}`, () =>
+    withTimeout(
+      listTasks({
+        group,
+        limit,
+        offset,
+        request_meta: createRequestMeta(`task_list_${group}_${offset}_${limit}`),
+        sort_by: getTaskListSortBy(group),
+        sort_order: "desc",
+      }),
+      `task bucket ${group}`,
+    ),
   );
 
   return {
@@ -298,12 +326,14 @@ export async function loadTaskDetailData(taskId: string, source: TaskPageDataMod
   }
 
   const normalized = normalizeTaskDetailData(
-    await withTimeout(
-      getTaskDetail({
-        request_meta: createRequestMeta(`task_detail_${taskId}`),
-        task_id: taskId,
-      }),
-      `task detail ${taskId}`,
+    await retryUnavailableRpc(`task detail ${taskId}`, () =>
+      withTimeout(
+        getTaskDetail({
+          request_meta: createRequestMeta(`task_detail_${taskId}`),
+          task_id: taskId,
+        }),
+        `task detail ${taskId}`,
+      ),
     ),
   );
 
@@ -328,7 +358,7 @@ export async function controlTaskByAction(taskId: string, action: TaskControlAct
   }
 
   return {
-    result: await withTimeout(controlTask(params), `task control ${action}`),
+    result: await retryUnavailableRpc(`task control ${action}`, () => withTimeout(controlTask(params), `task control ${action}`)),
     source: "rpc",
   };
 }

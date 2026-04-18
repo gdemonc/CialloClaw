@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -75,6 +76,12 @@ func (s *Server) Start(ctx context.Context) error {
 		go func() {
 			err := serveNamedPipe(ctx, s.namedPipeName, s.handleStreamConn)
 			if err != nil && !errors.Is(err, errNamedPipeUnsupported) && ctx.Err() == nil {
+				if s.debugHTTPServer != nil {
+					// Keep the beta local service alive over loopback HTTP even when the
+					// named-pipe transport cannot bind on a specific Windows machine.
+					log.Printf("rpc named pipe unavailable, continuing with debug HTTP transport: %v", err)
+					return
+				}
 				errCh <- err
 			}
 		}()
@@ -262,7 +269,7 @@ func setDebugCORSOrigin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	host := strings.ToLower(parsed.Hostname())
-	if host != "localhost" && host != "127.0.0.1" {
+	if host != "localhost" && host != "127.0.0.1" && host != "tauri.localhost" && !strings.HasSuffix(host, ".localhost") {
 		return
 	}
 

@@ -68,15 +68,50 @@ declare global {
 
 // NamedPipeJsonRpcTransport sends requests through the desktop named-pipe bridge.
 class NamedPipeJsonRpcTransport implements JsonRpcTransport {
+  private readonly httpFallback = new DebugHttpJsonRpcTransport(resolveDebugRpcEndpoint());
+
+  private useHttpFallback = false;
+
   async send<T>(payload: JsonRpcRequest): Promise<JsonRpcEnvelope<T>> {
+    if (this.useHttpFallback) {
+      return this.httpFallback.send<T>(payload);
+    }
+
     const bridge = window.__CIALLOCLAW_NAMED_PIPE__;
 
     if (!bridge) {
-      throw new Error("Named Pipe transport is not wired. Set VITE_CIALLOCLAW_RPC_TRANSPORT=http to use the debug HTTP fallback.");
+      this.useHttpFallback = true;
+      return this.httpFallback.send<T>(payload);
     }
 
-    return bridge.request<T>(payload);
+    try {
+      return await bridge.request<T>(payload);
+    } catch (error) {
+      if (!isDesktopTransportUnavailable(error)) {
+        throw error;
+      }
+
+      this.useHttpFallback = true;
+      return this.httpFallback.send<T>(payload);
+    }
   }
+}
+
+function isDesktopTransportUnavailable(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalizedMessage = error.message.toLowerCase();
+  return [
+    "transport is not wired",
+    "failed to open named pipe",
+    "named pipe",
+    "request timed out",
+    "timed out",
+    "network request failed",
+    "failed to fetch",
+  ].some((fragment) => normalizedMessage.includes(fragment));
 }
 
 // DebugHttpJsonRpcTransport keeps local browser-style development flows available.
