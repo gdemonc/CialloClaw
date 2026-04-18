@@ -4,7 +4,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CircleDashed, LayoutList, RefreshCcw } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { subscribeDeliveryReady, subscribeTask } from "@/rpc/subscriptions";
+import { subscribeDeliveryReady, subscribeTask, subscribeTaskRuntime } from "@/rpc/subscriptions";
 import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
 import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
 import { buildDashboardSafetyNavigationState } from "@/features/dashboard/shared/dashboardSafetyNavigation";
@@ -183,9 +183,16 @@ export function TaskPage() {
         })
       : () => {};
 
+    const clearRuntimeSubscription = selectedTaskId
+      ? subscribeTaskRuntime(selectedTaskId, () => {
+          invalidateTaskQueries(selectedTaskId);
+        })
+      : () => {};
+
     return () => {
       clearDeliverySubscription();
       clearTaskSubscription();
+      clearRuntimeSubscription();
     };
   }, [dataMode, queryClient, securityRefreshPlan, selectedTaskId]);
 
