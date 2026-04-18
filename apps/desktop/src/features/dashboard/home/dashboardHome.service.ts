@@ -14,13 +14,6 @@ import {
   getRecommendations,
   submitRecommendationFeedback,
 } from "@/rpc/methods";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
-import {
-  dashboardHomeStateGroups,
-  dashboardHomeStates,
-  dashboardSummonTemplates,
-  dashboardVoiceSequences,
-} from "./dashboardHome.mocks";
 import type {
   DashboardHomeContextItem,
   DashboardHomeEventStateKey,
@@ -62,6 +55,82 @@ const dashboardVoiceExecutionSteps: Record<DashboardHomeModuleKey, string[]> = {
   tasks: ["正在读取任务列表…", "定位当前焦点任务…", "准备切换到任务页…", "马上打开"],
 };
 
+const dashboardHomeFallbackStateKey = "task_error_missing_info" as const satisfies DashboardHomeEventStateKey;
+
+const dashboardHomeFallbackStateGroups: DashboardHomeStateGroup[] = [
+  {
+    key: "tasks",
+    label: "任务",
+    states: [dashboardHomeFallbackStateKey],
+  },
+];
+
+const dashboardHomeFallbackStateMap = {
+  [dashboardHomeFallbackStateKey]: {
+    key: dashboardHomeFallbackStateKey,
+    module: "tasks",
+    label: "等待连接",
+    orbColor: "#D8B48A",
+    orbGlow: "rgba(216, 180, 138, 0.2)",
+    accentColor: "#D8B48A",
+    tag: "offline",
+    tagTone: "warn",
+    headline: "本地服务暂未连通，首页只保留基础导航。",
+    subline: "请先启动 local-service，再继续查看任务、便签、镜子和安全摘要。",
+    context: [
+      {
+        iconKey: "alert",
+        text: "当前没有可确认的实时首页信号。",
+        type: "warn",
+      },
+    ],
+    insights: [
+      {
+        iconKey: "spark",
+        text: "双击中心球可继续进入模块页检查各自错误态。",
+      },
+    ],
+    notes: [
+      {
+        id: "dashboard-home-offline",
+        text: "启动本地服务后刷新首页。",
+        status: "pending",
+      },
+    ],
+    signals: [
+      {
+        iconKey: "network",
+        label: "连接状态",
+        value: "未连接",
+        level: "warn",
+      },
+    ],
+    breathSpeed: 1,
+  },
+} as Record<DashboardHomeEventStateKey, DashboardHomeStateData>;
+
+const dashboardHomeFallbackSummonTemplates: Array<Omit<DashboardHomeSummonEvent, "id">> = [
+  {
+    duration: 5000,
+    message: "本地服务尚未连接",
+    nextStep: "启动 local-service 后重新打开首页",
+    priority: "normal",
+    reason: "当前首页不再回填演示数据，只保留真实连接状态。",
+    stateKey: dashboardHomeFallbackStateKey,
+  },
+];
+
+const dashboardHomeFallbackVoiceSequences: DashboardVoiceSequence[] = [
+  {
+    module: "tasks",
+    suggestion: "启动本地服务后再提交语音任务",
+    echoPool: ["等服务连通后我再继续。"],
+    executingSteps: ["等待本地服务恢复…"],
+    fragments: ["local-service", "JSON-RPC"],
+    summary: "当前语音入口只保留真实错误反馈。",
+  },
+];
+
 export type DashboardHomeData = {
   focusLine: {
     headline: string;
@@ -72,6 +141,23 @@ export type DashboardHomeData = {
   summonTemplates: Array<Omit<DashboardHomeSummonEvent, "id">>;
   voiceSequences: DashboardVoiceSequence[];
 };
+
+const dashboardHomeStateKeys = [
+  "task_working",
+  "task_highlight",
+  "task_completing",
+  "task_done",
+  "task_error_permission",
+  "task_error_blocked",
+  "task_error_missing_info",
+  "notes_processing",
+  "notes_reminder",
+  "notes_scheduled",
+  "memory_summary",
+  "memory_habit",
+  "safety_alert",
+  "safety_guard",
+] as const satisfies readonly DashboardHomeEventStateKey[];
 
 function createRequestMeta(scope: string): RequestMeta {
   return {
@@ -92,6 +178,69 @@ function cloneStateData(state: DashboardHomeStateData): DashboardHomeStateData {
   };
 }
 
+function inferModuleFromStateKey(stateKey: DashboardHomeEventStateKey): DashboardHomeModuleKey {
+  if (stateKey.startsWith("task_")) {
+    return "tasks";
+  }
+
+  if (stateKey.startsWith("notes_")) {
+    return "notes";
+  }
+
+  if (stateKey.startsWith("memory_")) {
+    return "memory";
+  }
+
+  return "safety";
+}
+
+function createBaseStateData(stateKey: DashboardHomeEventStateKey): DashboardHomeStateData {
+  const module = inferModuleFromStateKey(stateKey);
+  const palette = module === "tasks"
+    ? { orbColor: "#9FB7D8", orbGlow: "rgba(159,183,216,0.28)", accentColor: "#7C9EC8" }
+    : module === "notes"
+      ? { orbColor: "#F4B183", orbGlow: "rgba(244,177,131,0.28)", accentColor: "#F6C5A1" }
+      : module === "memory"
+        ? { orbColor: "#A9C3B0", orbGlow: "rgba(169,195,176,0.24)", accentColor: "#A9C3B0" }
+        : { orbColor: "#E493A8", orbGlow: "rgba(228,147,168,0.26)", accentColor: "#E493A8" };
+
+  const label = stateKey.includes("error")
+    ? "待处理"
+    : stateKey.includes("done")
+      ? "已完成"
+      : stateKey.includes("highlight")
+        ? "值得关注"
+        : stateKey.includes("guard")
+          ? "边界正常"
+          : "处理中";
+  const tagTone = stateKey.includes("error")
+    ? "error"
+    : stateKey.includes("done")
+      ? "done"
+      : stateKey.includes("highlight")
+        ? "highlight"
+        : module === "memory"
+          ? "mirror"
+          : module === "safety"
+            ? "safety"
+            : "active";
+
+  return {
+    key: stateKey,
+    module,
+    label,
+    orbColor: palette.orbColor,
+    orbGlow: palette.orbGlow,
+    accentColor: palette.accentColor,
+    tag: label,
+    tagTone,
+    headline: `${dashboardModuleLabels[module]}模块已连接真实数据。`,
+    subline: "当服务返回实时状态后，这里会自动替换为当前主焦点。",
+    context: [],
+    breathSpeed: 1.4,
+  };
+}
+
 function cloneVoiceSequence(sequence: DashboardVoiceSequence): DashboardVoiceSequence {
   return {
     ...sequence,
@@ -107,20 +256,27 @@ function cloneSummonTemplate(template: Omit<DashboardHomeSummonEvent, "id">): Om
 
 function createBaseStateMap() {
   return Object.fromEntries(
-    Object.entries(dashboardHomeStates).map(([key, value]) => [key, cloneStateData(value)]),
+    dashboardHomeStateKeys.map((key) => [key, createBaseStateData(key)]),
   ) as Record<DashboardHomeEventStateKey, DashboardHomeStateData>;
 }
 
 export function getDashboardHomeFallbackData(): DashboardHomeData {
   return {
     focusLine: {
-      headline: "让中心球和 4 个入口球一起构成今天的任务轨道。",
-      reason: "长按中心球可以直接进入语音模式，四个入口球会始终保持最显眼的位置。",
+      headline: "本地服务暂未连通，首页只保留真实导航入口。",
+      reason: "双击中心球进入模块页排查连接问题，长按语音会直接返回真实错误。",
     },
-    stateGroups: dashboardHomeStateGroups.map((group) => ({ ...group, states: [...group.states] })),
-    stateMap: createBaseStateMap(),
-    summonTemplates: dashboardSummonTemplates.map(cloneSummonTemplate),
-    voiceSequences: dashboardVoiceSequences.map(cloneVoiceSequence),
+    stateGroups: dashboardHomeFallbackStateGroups.map((group) => ({ ...group, states: [...group.states] })),
+    stateMap: {
+      ...dashboardHomeFallbackStateMap,
+    },
+    summonTemplates: dashboardHomeFallbackSummonTemplates.map((item) => ({ ...item })),
+    voiceSequences: dashboardHomeFallbackVoiceSequences.map((item) => ({
+      ...item,
+      echoPool: [...item.echoPool],
+      executingSteps: [...item.executingSteps],
+      fragments: [...item.fragments],
+    })),
   };
 }
 
@@ -349,7 +505,7 @@ function buildTaskState(
   overview: AgentDashboardOverviewGetResult,
   taskModule: AgentDashboardModuleGetResult,
 ) {
-  const state = cloneStateData(dashboardHomeStates[stateKey]);
+  const state = cloneStateData(createBaseStateData(stateKey));
   const focusSummary = overview.overview.focus_summary;
 
   if (!focusSummary) {
@@ -420,7 +576,7 @@ function buildNotesState(
   notesModule: AgentDashboardModuleGetResult,
   recommendations: RecommendationItem[],
 ) {
-  const state = cloneStateData(dashboardHomeStates[stateKey]);
+  const state = cloneStateData(createBaseStateData(stateKey));
   const highlights = getModuleHighlights(notesModule);
   const noteItems = buildNotesItems(recommendations);
   const completedTasks = getModuleSummaryNumber(notesModule, "completed_tasks");
@@ -458,7 +614,7 @@ function buildMemoryInsights(memoryModule: AgentDashboardModuleGetResult): Dashb
   const highlights = getModuleHighlights(memoryModule);
 
   if (highlights.length === 0) {
-    return cloneStateData(dashboardHomeStates.memory_summary).insights ?? [];
+    return cloneStateData(createBaseStateData("memory_summary")).insights ?? [];
   }
 
   return highlights.slice(0, 4).map((text, index) => ({
@@ -469,7 +625,7 @@ function buildMemoryInsights(memoryModule: AgentDashboardModuleGetResult): Dashb
 }
 
 function buildMemoryState(stateKey: DashboardHomeEventStateKey, memoryModule: AgentDashboardModuleGetResult) {
-  const state = cloneStateData(dashboardHomeStates[stateKey]);
+  const state = cloneStateData(createBaseStateData(stateKey));
   const highlights = getModuleHighlights(memoryModule);
 
   state.headline = highlights[0] ?? state.headline;
@@ -485,7 +641,7 @@ function buildMemoryState(stateKey: DashboardHomeEventStateKey, memoryModule: Ag
 }
 
 function buildSafetyState(stateKey: DashboardHomeEventStateKey, overview: AgentDashboardOverviewGetResult, safetyModule: AgentDashboardModuleGetResult) {
-  const state = cloneStateData(dashboardHomeStates[stateKey]);
+  const state = cloneStateData(createBaseStateData(stateKey));
   const trustSummary = overview.overview.trust_summary;
   const highlights = getModuleHighlights(safetyModule);
   const riskLabel = formatRiskLabel(trustSummary.risk_level);
@@ -608,7 +764,7 @@ function buildRecommendationSummons(
     } satisfies Omit<DashboardHomeSummonEvent, "id">;
   });
 
-  return templates.length > 0 ? templates : dashboardSummonTemplates.map(cloneSummonTemplate);
+  return templates.length > 0 ? templates : dashboardHomeFallbackSummonTemplates.map(cloneSummonTemplate);
 }
 
 function buildVoiceSequences(
@@ -631,7 +787,7 @@ function buildVoiceSequences(
     } satisfies DashboardVoiceSequence;
   });
 
-  return sequences.length > 0 ? sequences : dashboardVoiceSequences.map(cloneVoiceSequence);
+  return sequences.length > 0 ? sequences : dashboardHomeFallbackVoiceSequences.map(cloneVoiceSequence);
 }
 
 function buildFocusLine(
@@ -732,12 +888,8 @@ export async function loadDashboardHomeData(): Promise<DashboardHomeData> {
       recommendations,
     });
   } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("dashboard home", error);
-      return getDashboardHomeFallbackData();
-    }
-
-    throw error;
+    console.warn("dashboard home load failed, using minimal fallback.", error);
+    return getDashboardHomeFallbackData();
   }
 }
 
@@ -749,11 +901,7 @@ export async function submitDashboardHomeRecommendationFeedback(recommendationId
       request_meta: createRequestMeta(`dashboard_recommendation_feedback_${recommendationId}`),
     });
   } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("dashboard recommendation feedback", error);
-      return { applied: false };
-    }
-
-    throw error;
+    console.warn("dashboard recommendation feedback failed", error);
+    return { applied: false };
   }
 }

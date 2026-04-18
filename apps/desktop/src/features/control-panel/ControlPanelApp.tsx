@@ -62,7 +62,7 @@ function getSourceCopy(source: ControlPanelData["source"]) {
   }
 
   return {
-    badge: "MOCK",
+    badge: "LOCAL",
     label: "本地快照",
     color: "amber" as const,
   };

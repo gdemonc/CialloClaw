@@ -24,6 +24,10 @@ export function isRpcChannelUnavailable(error: unknown) {
   return RPC_UNAVAILABLE_MESSAGE_PARTS.some((fragment) => normalizedMessage.includes(fragment));
 }
 
-export function logRpcMockFallback(scope: string, error: unknown) {
-  console.warn(`${scope} RPC unavailable, using mock fallback.`, error);
+export function isRpcTransportUnavailable(error: unknown) {
+  return isRpcChannelUnavailable(error);
+}
+
+export function logRpcFallbackNotice(scope: string, error: unknown) {
+  console.warn(`${scope} RPC unavailable.`, error);
 }

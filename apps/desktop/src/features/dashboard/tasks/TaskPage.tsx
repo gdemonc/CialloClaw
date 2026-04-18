@@ -5,8 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CircleDashed, LayoutList, RefreshCcw } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { subscribeDeliveryReady, subscribeTask } from "@/rpc/subscriptions";
-import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
-import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
 import { buildDashboardSafetyNavigationState } from "@/features/dashboard/shared/dashboardSafetyNavigation";
 import { resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { dashboardModules } from "@/features/dashboard/shared/dashboardRoutes";
@@ -38,7 +36,7 @@ export function TaskPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [showMoreFinished, setShowMoreFinished] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [dataMode, setDataMode] = useState<TaskPageDataMode>(() => loadDashboardDataMode("tasks") as TaskPageDataMode);
+  const dataMode: TaskPageDataMode = "rpc";
   const [unfinishedLimit, setUnfinishedLimit] = useState(INITIAL_UNFINISHED_LIMIT);
   const [finishedLimit, setFinishedLimit] = useState(INITIAL_FINISHED_LIMIT);
   const feedbackTimeoutRef = useRef<number | null>(null);
@@ -146,14 +144,6 @@ export function TaskPage() {
       : "先浏览任务，再点开查看完整进展与上下文。");
 
   useEffect(() => {
-    saveDashboardDataMode("tasks", dataMode);
-  }, [dataMode]);
-
-  useEffect(() => {
-    if (dataMode === "mock") {
-      return;
-    }
-
     function invalidateTaskQueries(deliveryTaskId?: string) {
       for (const queryKey of securityRefreshPlan.invalidatePrefixes) {
         void queryClient.invalidateQueries({ queryKey });
@@ -543,13 +533,6 @@ export function TaskPage() {
         ) : null}
       </AnimatePresence>
 
-      <DashboardMockToggle
-        enabled={dataMode === "mock"}
-        onToggle={() => {
-          setFeedback(null);
-          setDataMode((current) => (current === "rpc" ? "mock" : "rpc"));
-        }}
-      />
     </main>
   );
 }

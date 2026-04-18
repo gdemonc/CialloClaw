@@ -3,6 +3,7 @@ import { getCurrentWindow, monitorFromPoint, type Monitor } from "@tauri-apps/ap
 import {
   createShellBallLogicalPosition,
   createShellBallLogicalSize,
+  emitToShellBallWindowLabel,
   hideShellBallWindow,
   setShellBallWindowFocusable,
   setShellBallWindowIgnoreCursorEvents,
@@ -447,9 +448,9 @@ export function useShellBallWindowMetrics({ role, visible = true, clickThrough =
     }
 
     await Promise.all([
-      currentWindow.emitTo(shellBallWindowLabels.bubble, shellBallWindowSyncEvents.geometry, geometry),
-      currentWindow.emitTo(shellBallWindowLabels.input, shellBallWindowSyncEvents.geometry, geometry),
-      currentWindow.emitTo(shellBallWindowLabels.voice, shellBallWindowSyncEvents.geometry, geometry),
+      emitToShellBallWindowLabel(shellBallWindowLabels.bubble, shellBallWindowSyncEvents.geometry, geometry),
+      emitToShellBallWindowLabel(shellBallWindowLabels.input, shellBallWindowSyncEvents.geometry, geometry),
+      emitToShellBallWindowLabel(shellBallWindowLabels.voice, shellBallWindowSyncEvents.geometry, geometry),
     ]);
   }, [role, windowFrame]);
 

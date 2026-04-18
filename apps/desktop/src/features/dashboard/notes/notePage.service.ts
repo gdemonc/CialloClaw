@@ -10,12 +10,11 @@ import type {
   TodoItem,
 } from "@cialloclaw/protocol";
 import { convertNotepadToTask, listNotepad, updateNotepad } from "@/rpc/methods";
-import { getMockNoteBuckets, getMockNoteExperience, runMockConvertNoteToTask, runMockUpdateNote } from "./notePage.mock";
 import type { NoteConvertOutcome, NoteDetailExperience, NoteListItem, NoteResource, NoteUpdateOutcome } from "./notePage.types";
 
 const NOTEPAD_RPC_TIMEOUT_MS = 2_500;
 
-export type NotePageDataMode = "rpc" | "mock";
+export type NotePageDataMode = "rpc";
 
 export type NoteResourceOpenExecutionPlan = {
   mode: "task_detail" | "open_url" | "copy_path";
@@ -305,7 +304,7 @@ function createFallbackExperience(item: TodoItem): NoteDetailExperience {
 
 function mapItems(items: TodoItem[]): NoteListItem[] {
   return items.map((item) => ({
-    experience: getMockNoteExperience(item.item_id) ?? createFallbackExperience(item),
+    experience: createFallbackExperience(item),
     item,
   }));
 }
@@ -319,26 +318,7 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   ]);
 }
 
-function getMockNoteBucketPage(group: TodoBucket) {
-  const buckets = getMockNoteBuckets();
-  const items = buckets[group] ?? [];
-
-  return {
-    items,
-    page: {
-      has_more: false,
-      limit: items.length,
-      offset: 0,
-      total: items.length,
-    },
-  };
-}
-
 export async function loadNoteBucket(group: TodoBucket, source: NotePageDataMode = "rpc") {
-  if (source === "mock") {
-    return getMockNoteBucketPage(group);
-  }
-
   const params: AgentNotepadListParams = {
     group,
     limit: group === "closed" ? 24 : 12,
@@ -354,10 +334,6 @@ export async function loadNoteBucket(group: TodoBucket, source: NotePageDataMode
 }
 
 export async function convertNoteToTask(itemId: string, source: NotePageDataMode = "rpc"): Promise<NoteConvertOutcome> {
-  if (source === "mock") {
-    return runMockConvertNoteToTask(itemId);
-  }
-
   const params: AgentNotepadConvertToTaskParams = {
     confirmed: true,
     item_id: itemId,
@@ -372,10 +348,6 @@ export async function convertNoteToTask(itemId: string, source: NotePageDataMode
 }
 
 export async function updateNote(itemId: string, action: NotepadAction, source: NotePageDataMode = "rpc"): Promise<NoteUpdateOutcome> {
-  if (source === "mock") {
-    return runMockUpdateNote(itemId, action);
-  }
-
   const params: AgentNotepadUpdateParams = {
     action,
     item_id: itemId,

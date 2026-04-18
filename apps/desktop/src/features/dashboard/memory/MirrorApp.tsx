@@ -12,8 +12,6 @@ import { X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { PanelSurface, StatusBadge } from "@cialloclaw/ui";
 import { subscribeMirrorOverviewUpdated } from "@/rpc/subscriptions";
-import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
-import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
 import {
   formatDashboardSettingsMutationFeedback,
   updateDashboardSettings,
@@ -568,7 +566,7 @@ export function MirrorApp() {
   const storedFloatingPositionsRef = useRef(loadMirrorFloatingPositions());
   const hasStoredFloatingPositionsRef = useRef(storedFloatingPositionsRef.current !== null);
   const [mirrorData, setMirrorData] = useState<MirrorOverviewData | null>(null);
-  const [dataMode, setDataMode] = useState<MirrorOverviewSource>(() => loadDashboardDataMode("memory") as MirrorOverviewSource);
+  const dataMode: MirrorOverviewSource = "rpc";
   const [loadError, setLoadError] = useState<string | null>(null);
   const [modulePositions, setModulePositions] = useState<ModulePositions>(() => ({
     ...DEFAULT_MODULE_POSITIONS,
@@ -588,13 +586,10 @@ export function MirrorApp() {
   const modulePositionsRef = useRef<ModulePositions>(DEFAULT_MODULE_POSITIONS);
   const hasPlacedModulesRef = useRef(false);
   const isMountedRef = useRef(true);
-  const dataModeRef = useRef<MirrorOverviewSource>(dataMode);
   const fetchInFlightRef = useRef(false);
   const pendingRefreshRef = useRef(false);
   const refreshSequenceRef = useRef(0);
   const lastSavedFloatingPositionsRef = useRef<string | null>(null);
-
-  dataModeRef.current = dataMode;
 
   const openDetail = useCallback((key: MirrorDirectionKey, options?: { focusMemoryId?: string | null; historyDetailView?: MirrorHistoryDetailView | null }) => {
     setActiveDetailKey(key);
@@ -638,19 +633,6 @@ export function MirrorApp() {
   }, [historyDetailView, mirrorData]);
 
   const refreshMirrorData = useCallback(() => {
-    if (dataMode === "mock") {
-      const nextSequence = ++refreshSequenceRef.current;
-      pendingRefreshRef.current = false;
-      fetchInFlightRef.current = false;
-      setLoadError(null);
-      void loadMirrorOverviewData("mock").then((nextData) => {
-        if (isMountedRef.current && refreshSequenceRef.current === nextSequence) {
-          setMirrorData(nextData);
-        }
-      });
-      return;
-    }
-
     if (fetchInFlightRef.current) {
       pendingRefreshRef.current = true;
       return;
@@ -685,7 +667,7 @@ export function MirrorApp() {
       } finally {
         fetchInFlightRef.current = false;
 
-        if (pendingRefreshRef.current && isMountedRef.current && dataModeRef.current === "rpc") {
+        if (pendingRefreshRef.current && isMountedRef.current) {
           refreshMirrorData();
         }
       }
@@ -693,16 +675,6 @@ export function MirrorApp() {
   }, [dataMode]);
 
   useEffect(() => {
-    saveDashboardDataMode("memory", dataMode);
-  }, [dataMode]);
-
-  useEffect(() => {
-    if (dataMode === "mock") {
-      setLastMirrorUpdate(null);
-      refreshMirrorData();
-      return;
-    }
-
     setMirrorData(null);
 
     const unsubscribe = subscribeMirrorOverviewUpdated((notification) => {
@@ -869,7 +841,6 @@ export function MirrorApp() {
         <div className="mirror-page__canvas mirror-page__canvas--full mirror-page__canvas--loading">
           <p className="mirror-page__loading-copy">{loadError ? `镜子页同步失败：${loadError}` : "正在点亮检片台…"}</p>
         </div>
-        <DashboardMockToggle enabled={dataMode === "mock"} onToggle={() => setDataMode((current) => (current === "rpc" ? "mock" : "rpc"))} />
       </main>
     );
   }
@@ -880,7 +851,7 @@ export function MirrorApp() {
   const dataSourceDetails = [
     mirrorData.source === "rpc"
       ? "当前展示来自本地 JSON-RPC 服务。"
-      : "当前展示的是本地 mock 示例数据。",
+      : "当前展示的是本地快照与空白 fallback。",
   ];
 
   if (mirrorData.rpcContext.serverTime) {
@@ -906,7 +877,7 @@ export function MirrorApp() {
   const dataSourceBadge =
     mirrorData.source === "rpc"
       ? { label: "LIVE", tone: "green" as const, copy: dataSourceDetails.join(" · ") }
-      : { label: "MOCK", tone: "processing" as const, copy: dataSourceDetails.join(" · ") };
+      : { label: "LOCAL", tone: "processing" as const, copy: dataSourceDetails.join(" · ") };
   const latestMemoryReference = overview.memory_references[0] ?? null;
   const latestConversation = mirrorData.conversations[0] ?? null;
 
@@ -1280,7 +1251,6 @@ export function MirrorApp() {
         {moduleStack.map(renderDraggableModule)}
         {activeDetailKey ? <div data-testid="mirror-detail-overlay">{renderDetailOverlay()}</div> : null}
       </div>
-      <DashboardMockToggle enabled={dataMode === "mock"} onToggle={() => setDataMode((current) => (current === "rpc" ? "mock" : "rpc"))} />
     </main>
   );
 }

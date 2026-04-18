@@ -1,9 +1,8 @@
 import type { AgentSettingsGetParams, RequestMeta, SettingsSnapshot, TimeInterval } from "@cialloclaw/protocol";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import { getSettingsDetailed } from "@/rpc/methods";
 import { loadSettings } from "@/services/settingsService";
 
-export type DashboardSettingsSource = "rpc" | "mock";
+export type DashboardSettingsSource = "rpc" | "local";
 
 // Dashboard modules only need a read-only settings view, so this snapshot shape
 // normalizes RPC data and local fallback data into one stable contract.
@@ -43,7 +42,7 @@ function createRequestMeta(): RequestMeta {
 export function getInitialDashboardSettingsSnapshot(): DashboardSettingsSnapshotData {
   return {
     settings: loadSettings().settings,
-    source: "mock",
+    source: "local",
     rpcContext: {
       serverTime: null,
       warnings: [],
@@ -54,7 +53,7 @@ export function getInitialDashboardSettingsSnapshot(): DashboardSettingsSnapshot
 // Dashboard pages should not each reimplement their own settings fallback logic.
 // This helper keeps the "RPC when available, local snapshot otherwise" rule in one place.
 export async function loadDashboardSettingsSnapshot(source: DashboardSettingsSource = "rpc"): Promise<DashboardSettingsSnapshotData> {
-  if (source === "mock") {
+  if (source === "local") {
     return getInitialDashboardSettingsSnapshot();
   }
 
@@ -75,11 +74,7 @@ export async function loadDashboardSettingsSnapshot(source: DashboardSettingsSou
       },
     };
   } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("dashboard settings snapshot", error);
-    } else {
-      console.warn("Dashboard settings snapshot failed, using local settings fallback.", error);
-    }
+    console.warn("Dashboard settings snapshot failed, using local settings fallback.", error);
 
     return {
       ...getInitialDashboardSettingsSnapshot(),

@@ -8,8 +8,6 @@ import type {
   Task,
   TokenCostSummary,
 } from "@cialloclaw/protocol";
-import mirrorOverviewMock from "./mirrorOverview.json";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import { getMirrorOverviewDetailed as requestMirrorOverview } from "@/rpc/methods";
 import { loadMirrorConversationRecords, type MirrorConversationRecord } from "@/services/mirrorMemoryService";
 import { loadSecurityModuleData } from "@/features/dashboard/safety/securityService";
@@ -28,8 +26,7 @@ import {
   type MirrorProfileBaseItem,
 } from "./mirrorViewModel";
 
-type MirrorOverviewMock = typeof mirrorOverviewMock;
-export type MirrorOverviewSource = "rpc" | "mock";
+export type MirrorOverviewSource = "rpc" | "fallback";
 
 export type MirrorInsightPreview = {
   badge: string;
@@ -65,32 +62,12 @@ type MirrorSupportContext = {
   warnings: string[];
 };
 
-function adaptMirrorReference(reference: MirrorOverviewMock["memory_references"][number]): MirrorReference {
-  return {
-    memory_id: reference.memory_id,
-    reason: reference.reason,
-    summary: reference.summary ?? reference.reason,
-  };
-}
-
 function buildFallbackOverview(): AgentMirrorOverviewGetResult {
   return {
-    history_summary: mirrorOverviewMock.history_summary.map((item) => item),
-    daily_summary: mirrorOverviewMock.daily_summary
-      ? {
-          date: mirrorOverviewMock.daily_summary.date,
-          completed_tasks: mirrorOverviewMock.daily_summary.completed_tasks,
-          generated_outputs: mirrorOverviewMock.daily_summary.generated_outputs,
-        }
-      : null,
-    profile: mirrorOverviewMock.profile
-      ? {
-          work_style: mirrorOverviewMock.profile.work_style,
-          preferred_output: mirrorOverviewMock.profile.preferred_output,
-          active_hours: mirrorOverviewMock.profile.active_hours,
-        }
-      : null,
-    memory_references: mirrorOverviewMock.memory_references.map(adaptMirrorReference),
+    history_summary: [],
+    daily_summary: null,
+    profile: null,
+    memory_references: [],
   } satisfies AgentMirrorOverviewGetResult;
 }
 
@@ -115,9 +92,13 @@ function getEmptyMirrorSupportContext(): MirrorSupportContext {
 }
 
 async function loadMirrorSupportContext(source: MirrorOverviewSource): Promise<MirrorSupportContext> {
+  if (source === "fallback") {
+    return getEmptyMirrorSupportContext();
+  }
+
   const [taskBucketsResult, securityResult] = await Promise.allSettled([
-    loadTaskBuckets({ source }),
-    loadSecurityModuleData(source),
+    loadTaskBuckets({ source: "rpc" }),
+    loadSecurityModuleData("rpc"),
   ]);
   const warnings: string[] = [];
 
@@ -216,7 +197,7 @@ export function getInitialMirrorOverviewData(): MirrorOverviewData {
 
   return buildMirrorOverviewData(
     overview,
-    "mock",
+    "fallback",
     {
       serverTime: null,
       warnings: [],
@@ -227,23 +208,8 @@ export function getInitialMirrorOverviewData(): MirrorOverviewData {
 }
 
 export async function loadMirrorOverviewData(source: MirrorOverviewSource = "rpc"): Promise<MirrorOverviewData> {
-  if (source === "mock") {
-    const overview = buildFallbackOverview();
-    const [supportContext, settingsSnapshot] = await Promise.all([
-      loadMirrorSupportContext("mock"),
-      loadDashboardSettingsSnapshot("mock"),
-    ]);
-
-    return buildMirrorOverviewData(
-      overview,
-      "mock",
-      {
-        serverTime: null,
-        warnings: [],
-      },
-      supportContext,
-      settingsSnapshot,
-    );
+  if (source === "fallback") {
+    return getInitialMirrorOverviewData();
   }
 
   try {
@@ -272,26 +238,6 @@ export async function loadMirrorOverviewData(source: MirrorOverviewSource = "rpc
       settingsSnapshot,
     );
   } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("mirror overview", error);
-      const overview = buildFallbackOverview();
-      const [supportContext, settingsSnapshot] = await Promise.all([
-        loadMirrorSupportContext("mock"),
-        loadDashboardSettingsSnapshot("mock"),
-      ]);
-
-      return buildMirrorOverviewData(
-        overview,
-        "mock",
-        {
-          serverTime: null,
-          warnings: [],
-        },
-        supportContext,
-        settingsSnapshot,
-      );
-    }
-
     throw error;
   }
 }

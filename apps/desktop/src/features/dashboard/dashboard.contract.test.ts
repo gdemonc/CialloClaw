@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 import type {
+  AgentDeliveryOpenParams,
   AgentDeliveryOpenResult,
   AgentNotepadConvertToTaskParams,
   AgentNotepadConvertToTaskResult,
@@ -11,7 +12,9 @@ import type {
   AgentNotepadListResult,
   AgentNotepadUpdateParams,
   AgentNotepadUpdateResult,
+  AgentTaskArtifactListParams,
   AgentTaskArtifactListResult,
+  AgentTaskArtifactOpenParams,
   AgentTaskArtifactOpenResult,
   AgentTaskControlParams,
   AgentTaskControlResult,
@@ -28,8 +31,11 @@ declare module "@/rpc/methods" {
   export function convertNotepadToTask(params: AgentNotepadConvertToTaskParams): Promise<AgentNotepadConvertToTaskResult>;
   export function controlTask(params: AgentTaskControlParams): Promise<AgentTaskControlResult>;
   export function getTaskDetail(params: AgentTaskDetailGetParams): Promise<AgentTaskDetailGetResult>;
+  export function listTaskArtifacts(params: AgentTaskArtifactListParams): Promise<AgentTaskArtifactListResult>;
   export function listNotepad(params: AgentNotepadListParams): Promise<AgentNotepadListResult>;
   export function listTasks(params: AgentTaskListParams): Promise<AgentTaskListResult>;
+  export function openDelivery(params: AgentDeliveryOpenParams): Promise<AgentDeliveryOpenResult>;
+  export function openTaskArtifact(params: AgentTaskArtifactOpenParams): Promise<AgentTaskArtifactOpenResult>;
   export function updateNotepad(params: AgentNotepadUpdateParams): Promise<AgentNotepadUpdateResult>;
 }
 
@@ -81,11 +87,11 @@ function loadDashboardSafetyNavigationModule() {
 function loadTaskPageQueryModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.query.js")) as {
-      buildDashboardTaskArtifactQueryKey: (dataMode: "rpc" | "mock", taskId: string) => unknown;
-      buildDashboardTaskBucketQueryKey: (dataMode: "rpc" | "mock", group: "unfinished" | "finished", limit: number) => unknown;
-      buildDashboardTaskDetailQueryKey: (dataMode: "rpc" | "mock", taskId: string) => unknown;
-      getDashboardTaskSecurityRefreshPlan: (dataMode: "rpc" | "mock") => unknown;
-      resolveDashboardTaskSafetyOpenPlan: (detailSource: "rpc" | "mock" | "fallback") => unknown;
+      buildDashboardTaskArtifactQueryKey: (dataMode: "rpc", taskId: string) => unknown;
+      buildDashboardTaskBucketQueryKey: (dataMode: "rpc", group: "unfinished" | "finished", limit: number) => unknown;
+      buildDashboardTaskDetailQueryKey: (dataMode: "rpc", taskId: string) => unknown;
+      getDashboardTaskSecurityRefreshPlan: (dataMode: "rpc") => unknown;
+      resolveDashboardTaskSafetyOpenPlan: (detailSource: "rpc" | "fallback") => unknown;
       shouldEnableDashboardTaskDetailQuery: (selectedTaskId: string | null, detailOpen: boolean) => boolean;
       dashboardTaskArtifactQueryPrefix: unknown;
       dashboardTaskBucketQueryPrefix: unknown;
@@ -97,9 +103,9 @@ function loadTaskPageQueryModule() {
 function loadNotePageQueryModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/notes/notePage.query.js")) as {
-      buildDashboardNoteBucketInvalidateKeys: (dataMode: "rpc" | "mock", groups: ReadonlyArray<"upcoming" | "later" | "recurring_rule" | "closed">) => unknown;
-      buildDashboardNoteBucketQueryKey: (dataMode: "rpc" | "mock", group: "upcoming" | "later" | "recurring_rule" | "closed") => unknown;
-      getDashboardNoteRefreshPlan: (dataMode: "rpc" | "mock") => unknown;
+      buildDashboardNoteBucketInvalidateKeys: (dataMode: "rpc", groups: ReadonlyArray<"upcoming" | "later" | "recurring_rule" | "closed">) => unknown;
+      buildDashboardNoteBucketQueryKey: (dataMode: "rpc", group: "upcoming" | "later" | "recurring_rule" | "closed") => unknown;
+      getDashboardNoteRefreshPlan: (dataMode: "rpc") => unknown;
       dashboardNoteBucketGroups: unknown;
       dashboardNoteBucketQueryPrefix: unknown;
     },
@@ -134,9 +140,9 @@ function loadTaskOutputServiceModule() {
     requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskOutput.service.js")) as {
       describeTaskOpenResultForCurrentTask: (plan: { mode: string; taskId: string | null }, currentTaskId: string | null) => string | null;
       isAllowedTaskOpenUrl: (url: string) => boolean;
-      loadTaskArtifactPage: (taskId: string, source: "rpc" | "mock") => Promise<AgentTaskArtifactListResult>;
-      openTaskArtifactForTask: (taskId: string, artifactId: string, source: "rpc" | "mock") => Promise<AgentTaskArtifactOpenResult>;
-      openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source: "rpc" | "mock") => Promise<AgentDeliveryOpenResult>;
+      loadTaskArtifactPage: (taskId: string, source: "rpc") => Promise<AgentTaskArtifactListResult>;
+      openTaskArtifactForTask: (taskId: string, artifactId: string, source: "rpc") => Promise<AgentTaskArtifactOpenResult>;
+      openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source: "rpc") => Promise<AgentDeliveryOpenResult>;
       resolveTaskOpenExecutionPlan: (result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult) => {
         mode: "task_detail" | "open_url" | "copy_path";
         taskId: string | null;
@@ -197,7 +203,7 @@ function loadDashboardSettingsMutationModule(rpcMethods?: {
     delete requireFn.cache[modulePath];
 
     return requireFn(modulePath) as {
-      updateDashboardSettings: (patch: Record<string, unknown>, source?: "rpc" | "mock") => Promise<{
+      updateDashboardSettings: (patch: Record<string, unknown>, source?: "rpc" | "local") => Promise<{
         applyMode: string;
         needRestart: boolean;
         persisted: boolean;
@@ -230,8 +236,11 @@ type DashboardContractRpcMethodOverrides = {
   updateSettings?: (params: unknown) => Promise<unknown>;
   getSettingsDetailed?: (params: unknown) => Promise<unknown>;
   getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
+  listTaskArtifacts?: (params: unknown) => Promise<AgentTaskArtifactListResult>;
   listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
   listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+  openDelivery?: (params: unknown) => Promise<AgentDeliveryOpenResult>;
+  openTaskArtifact?: (params: unknown) => Promise<AgentTaskArtifactOpenResult>;
   updateNotepad?: (params: AgentNotepadUpdateParams) => Promise<AgentNotepadUpdateResult>;
 };
 
@@ -251,8 +260,11 @@ function withDesktopAliasRuntime<T>(
     updateSettings?: (params: unknown) => Promise<unknown>;
     getSettingsDetailed?: (params: unknown) => Promise<unknown>;
     getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
+    listTaskArtifacts?: (params: unknown) => Promise<AgentTaskArtifactListResult>;
     listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
     listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+    openDelivery?: (params: unknown) => Promise<AgentDeliveryOpenResult>;
+    openTaskArtifact?: (params: unknown) => Promise<AgentTaskArtifactOpenResult>;
     updateNotepad?: (params: AgentNotepadUpdateParams) => Promise<AgentNotepadUpdateResult>;
   },
 ): T | Promise<T> {
@@ -331,20 +343,26 @@ function withDesktopAliasRuntime<T>(
           (() => {
             throw new Error("listNotepad should not run in dashboard contract tests");
           }),
-        listTaskArtifacts() {
-          throw new Error("listTaskArtifacts should not run in dashboard contract tests");
-        },
+        listTaskArtifacts:
+          rpcMethods?.listTaskArtifacts ??
+          (() => {
+            throw new Error("listTaskArtifacts should not run in dashboard contract tests");
+          }),
         listTasks:
           rpcMethods?.listTasks ??
           (() => {
             throw new Error("listTasks should not run in dashboard contract tests");
           }),
-        openDelivery() {
-          throw new Error("openDelivery should not run in dashboard contract tests");
-        },
-        openTaskArtifact() {
-          throw new Error("openTaskArtifact should not run in dashboard contract tests");
-        },
+        openDelivery:
+          rpcMethods?.openDelivery ??
+          (() => {
+            throw new Error("openDelivery should not run in dashboard contract tests");
+          }),
+        openTaskArtifact:
+          rpcMethods?.openTaskArtifact ??
+          (() => {
+            throw new Error("openTaskArtifact should not run in dashboard contract tests");
+          }),
         updateNotepad:
           rpcMethods?.updateNotepad ??
           (() => {
@@ -735,7 +753,7 @@ test("task page query helpers expose stable prefixes and keys", () => {
   assert.deepEqual(dashboardTaskDetailQueryPrefix, ["dashboard", "tasks", "detail"]);
   assert.deepEqual(buildDashboardTaskArtifactQueryKey("rpc", "task_dashboard_001"), ["dashboard", "tasks", "artifacts", "rpc", "task_dashboard_001"]);
   assert.deepEqual(buildDashboardTaskBucketQueryKey("rpc", "unfinished", 12), ["dashboard", "tasks", "bucket", "rpc", "unfinished", 12]);
-  assert.deepEqual(buildDashboardTaskDetailQueryKey("mock", "task_dashboard_001"), ["dashboard", "tasks", "detail", "mock", "task_dashboard_001"]);
+  assert.deepEqual(buildDashboardTaskDetailQueryKey("rpc", "task_dashboard_001"), ["dashboard", "tasks", "detail", "rpc", "task_dashboard_001"]);
   assert.deepEqual(getDashboardTaskSecurityRefreshPlan("rpc"), {
     invalidatePrefixes: [
       ["dashboard", "tasks", "bucket"],
@@ -743,12 +761,12 @@ test("task page query helpers expose stable prefixes and keys", () => {
     ],
     refetchOnMount: true,
   });
-  assert.deepEqual(getDashboardTaskSecurityRefreshPlan("mock"), {
+  assert.deepEqual(getDashboardTaskSecurityRefreshPlan("rpc"), {
     invalidatePrefixes: [
       ["dashboard", "tasks", "bucket"],
       ["dashboard", "tasks", "detail"],
     ],
-    refetchOnMount: false,
+    refetchOnMount: true,
   });
 });
 
@@ -764,17 +782,17 @@ test("note page query helpers expose stable prefixes, bucket order, and refresh-
   assert.deepEqual(dashboardNoteBucketQueryPrefix, ["dashboard", "notes", "bucket"]);
   assert.deepEqual(dashboardNoteBucketGroups, ["upcoming", "later", "recurring_rule", "closed"]);
   assert.deepEqual(buildDashboardNoteBucketQueryKey("rpc", "upcoming"), ["dashboard", "notes", "bucket", "rpc", "upcoming"]);
-  assert.deepEqual(buildDashboardNoteBucketInvalidateKeys("mock", ["upcoming", "closed", "upcoming"]), [
-    ["dashboard", "notes", "bucket", "mock", "upcoming"],
-    ["dashboard", "notes", "bucket", "mock", "closed"],
+  assert.deepEqual(buildDashboardNoteBucketInvalidateKeys("rpc", ["upcoming", "closed", "upcoming"]), [
+    ["dashboard", "notes", "bucket", "rpc", "upcoming"],
+    ["dashboard", "notes", "bucket", "rpc", "closed"],
   ]);
   assert.deepEqual(getDashboardNoteRefreshPlan("rpc"), {
     invalidatePrefixes: [["dashboard", "notes", "bucket"]],
     refetchOnMount: true,
   });
-  assert.deepEqual(getDashboardNoteRefreshPlan("mock"), {
+  assert.deepEqual(getDashboardNoteRefreshPlan("rpc"), {
     invalidatePrefixes: [["dashboard", "notes", "bucket"]],
-    refetchOnMount: false,
+    refetchOnMount: true,
   });
 });
 
@@ -970,7 +988,7 @@ test("settings service normalizes legacy stored snapshots before returning and s
   }
 });
 
-test("dashboard settings mutation updates the local snapshot in mock mode", async () => {
+test("dashboard settings mutation updates the local snapshot in local mode", async () => {
   const { loadSettings } = loadSettingsServiceModule();
   const { updateDashboardSettings } = loadDashboardSettingsMutationModule();
   const originalWindow = globalThis.window;
@@ -1009,10 +1027,10 @@ test("dashboard settings mutation updates the local snapshot in mock mode", asyn
           lifecycle: "session",
         },
       },
-      "mock",
+      "local",
     );
 
-    assert.equal(result.source, "mock");
+    assert.equal(result.source, "local");
     assert.equal(result.applyMode, "immediate");
     assert.equal(result.needRestart, false);
     assert.equal(result.persisted, true);
@@ -1074,7 +1092,7 @@ test("dashboard settings mutation keeps fallback snapshots read-only when the RP
     });
     const after = loadSettings();
 
-    assert.equal(result.source, "mock");
+    assert.equal(result.source, "local");
     assert.equal(result.persisted, false);
     assert.deepEqual(result.updatedKeys, []);
     assert.equal(result.snapshot.settings.memory.enabled, before.settings.memory.enabled);
@@ -1368,34 +1386,102 @@ test("task output helpers normalize open actions from existing rpc contracts", a
   );
 });
 
-test("task output service exposes artifact list and open flows in mock mode", async () => {
-  const outputService = loadTaskOutputServiceModule();
+test("task output service exposes artifact list and open flows through rpc helpers", async () => {
+  await withDesktopAliasRuntime(async (requireFn) => {
+    const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskOutput.service.js");
+    delete requireFn.cache[modulePath];
 
-  const artifactPage = await outputService.loadTaskArtifactPage("task_done_001", "mock");
-  assert.ok(artifactPage.items.length > 0);
-  assert.equal(artifactPage.page.offset, 0);
+    const outputService = requireFn(modulePath) as ReturnType<typeof loadTaskOutputServiceModule>;
 
-  const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003", "mock");
-  assert.equal(artifactOpen.open_action, "reveal_in_folder");
+    const artifactPage = await outputService.loadTaskArtifactPage("task_done_001", "rpc");
+    assert.equal(artifactPage.items.length, 1);
+    assert.equal(artifactPage.page.offset, 0);
 
-  const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001", undefined, "mock");
-  assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+    const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003", "rpc");
+    assert.equal(artifactOpen.open_action, "reveal_in_folder");
 
-  assert.equal(
-    outputService.describeTaskOpenResultForCurrentTask(
-      {
-        mode: "task_detail",
-        taskId: "task_done_001",
+    const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001", undefined, "rpc");
+    assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+
+    assert.equal(
+      outputService.describeTaskOpenResultForCurrentTask(
+        {
+          mode: "task_detail",
+          taskId: "task_done_001",
+        },
+        "task_done_001",
+      ),
+      "当前任务没有独立可打开结果，请先查看成果区。",
+    );
+
+    assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
+    assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
+    assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
+    assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
+  }, {
+    listTaskArtifacts: async () => ({
+      items: [
+        {
+          artifact_id: "artifact_done_003",
+          artifact_type: "workspace_document",
+          mime_type: "text/markdown",
+          path: "workspace/results/report.md",
+          task_id: "task_done_001",
+          title: "Weekly report",
+        },
+      ],
+      page: {
+        has_more: false,
+        limit: 50,
+        offset: 0,
+        total: 1,
       },
-      "task_done_001",
-    ),
-    "当前任务没有独立可打开结果，请先查看成果区。",
-  );
-
-  assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
-  assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
+    }),
+    openDelivery: async () => ({
+      delivery_result: {
+        payload: {
+          path: null,
+          task_id: "task_done_001",
+          url: null,
+        },
+        preview_text: "Ready",
+        title: "Ready",
+        type: "task_detail",
+      },
+      open_action: "task_detail",
+      resolved_payload: {
+        path: null,
+        task_id: "task_done_001",
+        url: null,
+      },
+    }),
+    openTaskArtifact: async () => ({
+      artifact: {
+        artifact_id: "artifact_done_003",
+        artifact_type: "reveal_in_folder",
+        mime_type: "text/markdown",
+        path: "workspace/results/report.md",
+        task_id: "task_done_001",
+        title: "Weekly report",
+      },
+      delivery_result: {
+        payload: {
+          path: "workspace/results/report.md",
+          task_id: "task_done_001",
+          url: null,
+        },
+        preview_text: "Weekly report",
+        title: "Weekly report",
+        type: "reveal_in_folder",
+      },
+      open_action: "reveal_in_folder",
+      resolved_payload: {
+        path: "workspace/results/report.md",
+        task_id: "task_done_001",
+        url: null,
+      },
+    }),
+  });
 });
 
 test("note resource open helpers normalize task, url, and copy flows", () => {
@@ -1720,9 +1806,9 @@ test("task rpc service keeps transport failures visible instead of switching to 
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        controlTaskByAction: (taskId: string, action: "pause" | "resume" | "cancel" | "restart", source?: "rpc" | "mock") => Promise<unknown>;
-        loadTaskBucketPage: (group: "unfinished" | "finished", options?: { limit?: number; offset?: number; source?: "rpc" | "mock" }) => Promise<unknown>;
-        loadTaskDetailData: (taskId: string, source?: "rpc" | "mock") => Promise<unknown>;
+        controlTaskByAction: (taskId: string, action: "pause" | "resume" | "cancel" | "restart", source?: "rpc") => Promise<unknown>;
+        loadTaskBucketPage: (group: "unfinished" | "finished", options?: { limit?: number; offset?: number; source?: "rpc" }) => Promise<unknown>;
+        loadTaskDetailData: (taskId: string, source?: "rpc") => Promise<unknown>;
       };
 
       await assert.rejects(() => service.loadTaskBucketPage("unfinished", { source: "rpc" }), /transport is not wired/i);
@@ -1746,9 +1832,9 @@ test("note rpc service keeps transport failures visible instead of switching to 
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        convertNoteToTask: (itemId: string, source?: "rpc" | "mock") => Promise<unknown>;
-        loadNoteBucket: (group: "upcoming" | "later" | "recurring_rule" | "closed", source?: "rpc" | "mock") => Promise<unknown>;
-        updateNote: (itemId: string, action: "complete" | "cancel" | "move_upcoming" | "toggle_recurring" | "cancel_recurring" | "restore" | "delete", source?: "rpc" | "mock") => Promise<unknown>;
+        convertNoteToTask: (itemId: string, source?: "rpc") => Promise<unknown>;
+        loadNoteBucket: (group: "upcoming" | "later" | "recurring_rule" | "closed", source?: "rpc") => Promise<unknown>;
+        updateNote: (itemId: string, action: "complete" | "cancel" | "move_upcoming" | "toggle_recurring" | "cancel_recurring" | "restore" | "delete", source?: "rpc") => Promise<unknown>;
       };
 
       await assert.rejects(() => service.loadNoteBucket("upcoming", "rpc"), /transport is not wired/i);

@@ -14,10 +14,9 @@ import {
   updateSettings,
   updateTaskInspectorConfig,
 } from "@/rpc/methods";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import { loadSettings, saveSettings, type DesktopSettings } from "@/services/settingsService";
 
-export type ControlPanelSource = "rpc" | "mock";
+export type ControlPanelSource = "rpc" | "local";
 
 export type ControlPanelData = {
   settings: SettingsSnapshot["settings"];
@@ -94,30 +93,24 @@ function createRequestMeta(): RequestMeta {
   };
 }
 
-function buildMockSecuritySummary(): AgentSecuritySummaryGetResult["summary"] {
+function buildLocalSecuritySummary(settings: DesktopSettings): AgentSecuritySummaryGetResult["summary"] {
   return {
-    security_status: "pending_confirmation",
-    pending_authorizations: 2,
-    latest_restore_point: {
-      recovery_point_id: "cp_restore_mock_001",
-      task_id: "task_control_panel_mock_001",
-      summary: "控制面板变更前的恢复点快照",
-      created_at: "2026-04-09T13:20:00+08:00",
-      objects: ["D:/CialloClawWorkspace", "VS Code", "Docker sandbox"],
-    },
+    security_status: "normal",
+    pending_authorizations: 0,
+    latest_restore_point: null,
     token_cost_summary: {
-      current_task_tokens: 18210,
-      current_task_cost: 1.34,
-      today_tokens: 91230,
-      today_cost: 7.48,
-      single_task_limit: 50000,
-      daily_limit: 300000,
-      budget_auto_downgrade: true,
+      current_task_tokens: 0,
+      current_task_cost: 0,
+      today_tokens: 0,
+      today_cost: 0,
+      single_task_limit: 0,
+      daily_limit: 0,
+      budget_auto_downgrade: settings.settings.data_log.budget_auto_downgrade,
     },
   };
 }
 
-function buildMockInspector(settings: DesktopSettings): AgentTaskInspectorConfigGetResult {
+function buildLocalInspector(settings: DesktopSettings): AgentTaskInspectorConfigGetResult {
   return {
     task_sources: settings.settings.task_automation.task_sources,
     inspection_interval: settings.settings.task_automation.inspection_interval,
@@ -130,14 +123,14 @@ function buildMockInspector(settings: DesktopSettings): AgentTaskInspectorConfig
 
 function getInitialControlPanelData(): ControlPanelData {
   const settings = loadSettings();
-  const inspector = buildMockInspector(settings);
+  const inspector = buildLocalInspector(settings);
   const normalizedSettings = normalizeSettingsSnapshot(projectInspectorToTaskAutomation(settings.settings, inspector));
   return {
     settings: normalizedSettings,
     inspector,
     providerApiKeyInput: "",
-    securitySummary: buildMockSecuritySummary(),
-    source: "mock",
+    securitySummary: buildLocalSecuritySummary(settings),
+    source: "local",
   };
 }
 
@@ -164,7 +157,7 @@ export async function loadControlPanelData(): Promise<ControlPanelData> {
 }
 
 export async function saveControlPanelData(data: ControlPanelData): Promise<ControlPanelSaveResult> {
-  if (data.source === "mock") {
+  if (data.source === "local") {
     const nextSettingsSnapshot = buildSettingsWithProviderApiKeyConfigured(
       projectInspectorToTaskAutomation(data.settings, data.inspector),
       data.settings.data_log.provider_api_key_configured,
@@ -179,7 +172,7 @@ export async function saveControlPanelData(data: ControlPanelData): Promise<Cont
       updatedKeys: ["general", "floating_ball", "memory", "task_automation", "data_log"],
       effectiveSettings: nextDesktopSettings.settings,
       effectiveInspector: data.inspector,
-      source: "mock",
+      source: "local",
     };
   }
 
@@ -219,11 +212,7 @@ export async function saveControlPanelData(data: ControlPanelData): Promise<Cont
       source: "rpc",
     };
   } catch (error) {
-    if (!isRpcChannelUnavailable(error)) {
-      throw error;
-    }
-
-    logRpcMockFallback("control panel save", error);
+    console.warn("control panel save failed, keeping local snapshot only.", error);
     const nextSettingsSnapshot = buildSettingsWithProviderApiKeyConfigured(
       projectInspectorToTaskAutomation(data.settings, data.inspector),
       data.settings.data_log.provider_api_key_configured,
@@ -238,27 +227,14 @@ export async function saveControlPanelData(data: ControlPanelData): Promise<Cont
       updatedKeys: ["general", "floating_ball", "memory", "task_automation", "data_log"],
       effectiveSettings: nextDesktopSettings.settings,
       effectiveInspector: data.inspector,
-      source: "mock",
+      source: "local",
     };
   }
 }
 
 export async function runControlPanelInspection(data: ControlPanelData): Promise<AgentTaskInspectorRunResult> {
-  if (data.source === "mock") {
-    return {
-      inspection_id: `inspection_mock_${Date.now()}`,
-      summary: {
-        parsed_files: 16,
-        identified_items: 9,
-        due_today: 2,
-        overdue: 1,
-        stale: 3,
-      },
-      suggestions: [
-        "将 overdue 任务提升到今日工作流卡片。",
-        "把高频 task source 固定到前两位，减少巡检噪音。",
-      ],
-    };
+  if (data.source === "local") {
+    throw new Error("当前仅有本地设置快照，无法执行正式巡检。请先连接本地服务。");
   }
 
   try {
@@ -268,24 +244,6 @@ export async function runControlPanelInspection(data: ControlPanelData): Promise
       target_sources: data.inspector.task_sources,
     });
   } catch (error) {
-    if (!isRpcChannelUnavailable(error)) {
-      throw error;
-    }
-
-    logRpcMockFallback("control panel inspection", error);
-    return {
-      inspection_id: `inspection_mock_${Date.now()}`,
-      summary: {
-        parsed_files: 16,
-        identified_items: 9,
-        due_today: 2,
-        overdue: 1,
-        stale: 3,
-      },
-      suggestions: [
-        "将 overdue 任务提升到今日工作流卡片。",
-        "把高频 task source 固定到前两位，减少巡检噪音。",
-      ],
-    };
+    throw error;
   }
 }

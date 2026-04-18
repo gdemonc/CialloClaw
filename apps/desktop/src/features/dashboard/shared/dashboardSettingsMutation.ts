@@ -1,5 +1,4 @@
 import type { AgentSettingsUpdateParams, ApplyMode, RequestMeta, SettingsSnapshot } from "@cialloclaw/protocol";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import { updateSettings as requestUpdateSettings } from "@/rpc/methods";
 import { loadSettings, saveSettings, type DesktopSettings } from "@/services/settingsService";
 import { loadDashboardSettingsSnapshot, type DashboardSettingsSnapshotData, type DashboardSettingsSource } from "./dashboardSettingsSnapshot";
@@ -94,22 +93,21 @@ function inferUpdatedKeys(patch: DashboardSettingsPatch) {
   return (Object.keys(patch) as Array<keyof DashboardSettingsPatch>).filter((key) => patch[key] !== undefined).map((key) => String(key));
 }
 
-// Dashboard modules need the same settings mutation rule as the control panel:
-// use JSON-RPC when available, but keep the local snapshot authoritative for
-// immediate rendering and mock-mode operation.
+// Dashboard modules keep a local snapshot for immediate rendering, but formal
+// writes still target the JSON-RPC settings endpoint when it is available.
 export async function updateDashboardSettings(
   patch: DashboardSettingsPatch,
   source: DashboardSettingsSource = "rpc",
 ): Promise<DashboardSettingsMutationResult> {
-  if (source === "mock") {
+  if (source === "local") {
     persistPatchedSettings(patch);
 
     return {
-      snapshot: await loadDashboardSettingsSnapshot("mock"),
+      snapshot: await loadDashboardSettingsSnapshot("local"),
       applyMode: "immediate",
       needRestart: false,
       updatedKeys: inferUpdatedKeys(patch),
-      source: "mock",
+      source: "local",
       persisted: true,
     };
   }
@@ -132,12 +130,8 @@ export async function updateDashboardSettings(
       persisted: true,
     };
   } catch (error) {
-    if (!isRpcChannelUnavailable(error)) {
-      throw error;
-    }
-
-    logRpcMockFallback("dashboard settings update", error);
-    const snapshot = await loadDashboardSettingsSnapshot("mock");
+    console.warn("dashboard settings update failed, keeping local snapshot only.", error);
+    const snapshot = await loadDashboardSettingsSnapshot("local");
 
     return {
       snapshot,
@@ -155,7 +149,7 @@ export function formatDashboardSettingsMutationFeedback(result: DashboardSetting
     return `${subject}未保存，当前仅显示本地快照。`;
   }
 
-  const suffix = result.source === "mock" ? " 当前使用本地快照。" : "";
+  const suffix = result.source === "local" ? " 当前使用本地快照。" : "";
 
   if (result.needRestart || result.applyMode === "restart_required") {
     return `${subject}已保存，重启桌面端后生效。${suffix}`;

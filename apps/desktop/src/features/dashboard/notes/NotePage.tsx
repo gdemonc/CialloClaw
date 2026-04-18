@@ -10,8 +10,6 @@ import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, CircleDashed, NotebookPen, RefreshCcw } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { NotepadAction } from "@cialloclaw/protocol";
-import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
-import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
 import { resolveDashboardModuleRoutePath, resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { dashboardModules } from "@/features/dashboard/shared/dashboardRoutes";
 import { cn } from "@/utils/cn";
@@ -37,13 +35,9 @@ export function NotePage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [showMoreClosed, setShowMoreClosed] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [dataMode, setDataMode] = useState<NotePageDataMode>(() => loadDashboardDataMode("notes") as NotePageDataMode);
+  const dataMode: NotePageDataMode = "rpc";
   const feedbackTimeoutRef = useRef<number | null>(null);
   const noteRefreshPlan = useMemo(() => getDashboardNoteRefreshPlan(dataMode), [dataMode]);
-
-  useEffect(() => {
-    saveDashboardDataMode("notes", dataMode);
-  }, [dataMode]);
 
   const [upcomingQuery, laterQuery, recurringQuery, closedQuery] = useQueries({
     queries: [
@@ -485,13 +479,6 @@ export function NotePage() {
             ) : null}
         </AnimatePresence>
 
-        <DashboardMockToggle
-          enabled={dataMode === "mock"}
-          onToggle={() => {
-            setFeedback(null);
-            setDataMode((current) => (current === "rpc" ? "mock" : "rpc"));
-          }}
-        />
       </>
     </main>
   );

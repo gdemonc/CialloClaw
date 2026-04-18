@@ -2,10 +2,9 @@ import type { AgentTaskDetailGetResult, AgentTaskControlParams, RequestMeta, Tas
 import { controlTask, getTaskDetail, listTasks } from "@/rpc/methods";
 import { isActiveApprovalRequest, isApprovalRequest, isArtifact, isBinaryPendingAuthorizations, isMirrorReference, isRecoveryPoint, isTask, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@/rpc/protocolEnumerations";
-import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskExperience, TaskListItem } from "./taskPage.types";
 
-export type TaskPageDataMode = "rpc" | "mock";
+export type TaskPageDataMode = "rpc";
 
 const INITIAL_TASK_PAGE_LIMIT: Record<TaskListGroup, number> = {
   finished: 24,
@@ -65,7 +64,7 @@ function createFallbackExperience(task: Task): TaskExperience {
 
 function mapTasks(items: Task[]): TaskListItem[] {
   return items.map((task) => ({
-    experience: getTaskExperience(task.task_id) ?? createFallbackExperience(task),
+    experience: createFallbackExperience(task),
     task,
   }));
 }
@@ -233,31 +232,7 @@ export function normalizeTaskDetailData(detail: AgentTaskDetailGetResult) {
   }
 }
 
-function getMockTaskBucketPage(group: TaskListGroup, options?: { limit?: number; offset?: number }): TaskBucketPageData {
-  const limit = options?.limit ?? INITIAL_TASK_PAGE_LIMIT[group];
-  const offset = options?.offset ?? 0;
-  const buckets = getMockTaskBuckets();
-  const bucket = group === "unfinished" ? buckets.unfinished : buckets.finished;
-  const items = bucket.items.slice(offset, offset + limit);
-
-  return {
-    items,
-    page: {
-      has_more: offset + limit < bucket.items.length,
-      limit,
-      offset,
-      total: bucket.items.length,
-    },
-  };
-}
-
 export async function loadTaskBucketPage(group: TaskListGroup, options?: { limit?: number; offset?: number; source?: TaskPageDataMode }): Promise<TaskBucketPageData> {
-  const source = options?.source ?? "rpc";
-
-  if (source === "mock") {
-    return getMockTaskBucketPage(group, options);
-  }
-
   const limit = options?.limit ?? INITIAL_TASK_PAGE_LIMIT[group];
   const offset = options?.offset ?? 0;
   const result = await withTimeout(
@@ -293,10 +268,6 @@ export async function loadTaskBuckets(options?: { unfinishedLimit?: number; fini
 }
 
 export async function loadTaskDetailData(taskId: string, source: TaskPageDataMode = "rpc"): Promise<TaskDetailData> {
-  if (source === "mock") {
-    return getMockTaskDetail(taskId);
-  }
-
   const normalized = normalizeTaskDetailData(
     await withTimeout(
       getTaskDetail({
@@ -310,8 +281,8 @@ export async function loadTaskDetailData(taskId: string, source: TaskPageDataMod
   return {
     detailWarningMessage: normalized.detailWarningMessage,
     detail: normalized.detail,
-    experience: getTaskExperience(taskId) ?? createFallbackExperience(normalized.detail.task),
-    source: "rpc",
+    experience: createFallbackExperience(normalized.detail.task),
+    source,
     task: normalized.detail.task,
   };
 }
@@ -323,12 +294,8 @@ export async function controlTaskByAction(taskId: string, action: TaskControlAct
     task_id: taskId,
   };
 
-  if (source === "mock") {
-    return runMockTaskControl(taskId, action);
-  }
-
   return {
     result: await withTimeout(controlTask(params), `task control ${action}`),
-    source: "rpc",
+    source,
   };
 }

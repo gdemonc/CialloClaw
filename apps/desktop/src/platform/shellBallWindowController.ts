@@ -32,6 +32,48 @@ export const shellBallWindowPermissions = Object.freeze([
 
 export type ShellBallWindowRole = keyof typeof shellBallWindowLabels;
 
+const shellBallHelperWindowOptions = {
+  bubble: {
+    title: "CialloClaw Shell Ball Bubble",
+    url: "shell-ball-bubble.html",
+    width: 270,
+    height: 105,
+    visible: false,
+    transparent: true,
+    decorations: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    shadow: false,
+  },
+  input: {
+    title: "CialloClaw Shell Ball Input",
+    url: "shell-ball-input.html",
+    width: 315,
+    height: 90,
+    visible: false,
+    transparent: true,
+    decorations: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    shadow: false,
+  },
+  voice: {
+    title: "CialloClaw Shell Ball Voice",
+    url: "shell-ball-voice.html",
+    width: 280,
+    height: 320,
+    visible: false,
+    transparent: true,
+    decorations: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    shadow: false,
+  },
+} as const;
+
 export function getShellBallPinnedBubbleWindowLabel(bubbleId: string) {
   return `${shellBallPinnedBubbleWindowLabelPrefix}${bubbleId}`;
 }
@@ -74,10 +116,23 @@ async function getShellBallWindowByLabel(label: string) {
   return Window.getByLabel(label);
 }
 
+async function getOrCreateShellBallHelperWindow(role: Exclude<ShellBallWindowRole, "ball">) {
+  const label = shellBallWindowLabels[role];
+  const existingWindow = await getShellBallWindowByLabel(label);
+
+  if (existingWindow !== null) {
+    return existingWindow;
+  }
+
+  return new Window(label, shellBallHelperWindowOptions[role]);
+}
+
 export async function getShellBallWindow(role: ShellBallWindowRole) {
   const label = shellBallWindowLabels[role];
 
-  const windowHandle = await getShellBallWindowByLabel(label);
+  const windowHandle = role === "ball"
+    ? await getShellBallWindowByLabel(label)
+    : await getOrCreateShellBallHelperWindow(role);
 
   if (windowHandle === null) {
     throw new Error(`Shell-ball window not found: ${label}`);
@@ -92,7 +147,10 @@ export async function showShellBallWindow(role: ShellBallWindowRole) {
 }
 
 export async function hideShellBallWindow(role: ShellBallWindowRole) {
-  const windowHandle = await getShellBallWindow(role);
+  const windowHandle = await getShellBallWindowByLabel(shellBallWindowLabels[role]);
+  if (windowHandle === null) {
+    return;
+  }
   await windowHandle.hide();
 }
 

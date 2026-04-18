@@ -18,9 +18,8 @@ import { cloneShellBallBubbleItems, type ShellBallBubbleItem } from "./shellBall
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
 import type { ShellBallInputBarMode, ShellBallVisualState, ShellBallVoiceHintMode } from "./shellBall.types";
 import type { ShellBallInputSubmitResult } from "./useShellBallInteraction";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
+import { isRpcTransportUnavailable } from "@/rpc/fallback";
 import { readClipboardText } from "@/services/clipboardService";
-import { startTaskFromFiles } from "@/services/taskService";
 import {
   createDefaultShellBallWindowSnapshot,
   createShellBallWindowSnapshot,
@@ -335,7 +334,7 @@ export function createShellBallAgentBubbleItem(
 }
 
 function getShellBallTaskErrorText(error: unknown) {
-  if (isRpcChannelUnavailable(error)) {
+  if (isRpcTransportUnavailable(error)) {
     return "任务入口未连通，请先确认本地服务可用后再重试。";
   }
 

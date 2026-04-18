@@ -29,57 +29,6 @@ type MirrorConversationSnapshot = {
 const MIRROR_CONVERSATION_STORAGE_KEY = "cialloclaw.mirror.conversations";
 const MIRROR_CONVERSATION_RECORD_LIMIT = 100;
 
-const MOCK_MIRROR_CONVERSATION_RECORDS: MirrorConversationRecord[] = [
-  {
-    record_id: "mirror-conversation-mock-001",
-    trace_id: "trace_mirror_mock_001",
-    created_at: "2026-04-12T09:18:00+08:00",
-    updated_at: "2026-04-12T09:18:06+08:00",
-    source: "floating_ball",
-    trigger: "hover_text_input",
-    input_mode: "text",
-    session_id: null,
-    task_id: "task_focus_001",
-    user_text: "把任务页的当前推进感再强调一点，先别让它像普通列表。",
-    agent_text: "我会继续把主任务区做成单任务推进舱，优先强调当前步骤与下一步动作。",
-    agent_bubble_type: "result",
-    status: "responded",
-    error_message: null,
-  },
-  {
-    record_id: "mirror-conversation-mock-002",
-    trace_id: "trace_mirror_mock_002",
-    created_at: "2026-04-12T14:02:00+08:00",
-    updated_at: "2026-04-12T14:02:11+08:00",
-    source: "dashboard",
-    trigger: "voice_commit",
-    input_mode: "voice",
-    session_id: null,
-    task_id: "task_focus_002",
-    user_text: "安全等待授权这件事，要让人一眼看明白为什么停在这里。",
-    agent_text: "我会把等待原因、影响面与恢复点并列整理，让停顿原因更清楚。",
-    agent_bubble_type: "result",
-    status: "responded",
-    error_message: null,
-  },
-  {
-    record_id: "mirror-conversation-mock-003",
-    trace_id: "trace_mirror_mock_003",
-    created_at: "2026-04-13T10:08:00+08:00",
-    updated_at: "2026-04-13T10:08:04+08:00",
-    source: "dashboard",
-    trigger: "voice_commit",
-    input_mode: "voice",
-    session_id: null,
-    task_id: "task_focus_003",
-    user_text: "把最近便签里的约束整理成右侧陪伴脑区的短句。",
-    agent_text: "收到，我会先去重再压缩成更轻的上下文卡，不让右侧区域变成第二主区。",
-    agent_bubble_type: "result",
-    status: "responded",
-    error_message: null,
-  },
-];
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
@@ -168,7 +117,7 @@ export function upsertMirrorConversationRecord(records: MirrorConversationRecord
   return capMirrorConversationRecords(nextRecords);
 }
 
-export function loadMirrorConversationRecords(source: "rpc" | "mock" = "rpc") {
+export function loadMirrorConversationRecords(source: "rpc" | "fallback" = "rpc") {
   if (source === "rpc" && !isMirrorConversationMemoryEnabled()) {
     clearMirrorConversationRecords();
     return [];
@@ -184,10 +133,10 @@ export function loadMirrorConversationRecords(source: "rpc" | "mock" = "rpc") {
       }
     }
   } catch {
-    return source === "mock" ? MOCK_MIRROR_CONVERSATION_RECORDS.map(cloneConversationRecord) : [];
+    return [];
   }
 
-  return source === "mock" ? MOCK_MIRROR_CONVERSATION_RECORDS.map(cloneConversationRecord) : [];
+  return [];
 }
 
 export function saveMirrorConversationRecords(records: MirrorConversationRecord[]) {

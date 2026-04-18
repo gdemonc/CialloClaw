@@ -24,7 +24,6 @@
     "src/features/dashboard/tasks/taskOutput.service.ts",
     "src/features/dashboard/tasks/taskPage.mapper.ts",
     "src/features/dashboard/tasks/taskPage.service.ts",
-    "src/features/dashboard/tasks/taskPage.mock.ts",
     "src/features/dashboard/tasks/taskPage.types.ts",
     "src/features/shell-ball/test-stubs/rpcFallback.ts",
     "src/features/shell-ball/test-stubs/rpcMethods.ts",

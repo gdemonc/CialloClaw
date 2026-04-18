@@ -32,8 +32,6 @@ import type {
 } from "@cialloclaw/protocol";
 import { JsonRpcClientError } from "@/rpc/client";
 import { subscribeApprovalPending, subscribeTask } from "@/rpc/subscriptions";
-import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
-import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
 import {
   isDashboardSafetyApprovalSnapshotOnly,
   resolveDashboardSafetyNavigationRoute,
@@ -42,7 +40,6 @@ import {
   shouldRetainDashboardSafetyActiveDetail,
 } from "@/features/dashboard/shared/dashboardSafetyNavigation";
 import {
-  getInitialSecurityModuleData,
   loadSecurityPendingApprovals,
   applySecurityRestorePoint,
   isSecurityApprovalRespondResult,
@@ -577,7 +574,7 @@ export function SecurityApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [dataMode, setDataMode] = useState<"rpc" | "mock">(() => loadDashboardDataMode("safety"));
+  const dataMode: "rpc" = "rpc";
   const [moduleData, setModuleData] = useState<SecurityModuleData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -695,17 +692,8 @@ export function SecurityApp() {
   }, [dataMode]);
 
   useEffect(() => {
-    saveDashboardDataMode("safety", dataMode);
-  }, [dataMode]);
-
-  useEffect(() => {
     const nextSequence = ++refreshSequenceRef.current;
     setLoadError(null);
-
-    if (dataMode === "mock") {
-      setModuleData(getInitialSecurityModuleData());
-      return;
-    }
 
     setModuleData(null);
     void loadSecurityModuleData("rpc")
@@ -1118,12 +1106,11 @@ export function SecurityApp() {
             <Text>{loadError ? `安全页同步失败：${loadError}` : "正在同步安全数据..."}</Text>
           </div>
         </div>
-        <DashboardMockToggle enabled={dataMode === "mock"} onToggle={() => setDataMode((current) => (current === "rpc" ? "mock" : "rpc"))} />
       </main>
     );
   }
 
-  const sourceBadgeLabel = moduleData.source === "rpc" ? "RPC" : "MOCK";
+  const sourceBadgeLabel = moduleData.source === "rpc" ? "RPC" : "LOCAL";
   const sourceBadgeColor = moduleData.source === "rpc" ? "green" : "amber";
 
   const handleRespond = async (approval: ApprovalRequest, decision: ApprovalDecision, rememberRule: boolean) => {
@@ -2088,7 +2075,6 @@ export function SecurityApp() {
         {cardStack.map(renderDraggableCard)}
         {renderDetailOverlay()}
       </div>
-      <DashboardMockToggle enabled={dataMode === "mock"} onToggle={() => setDataMode((current) => (current === "rpc" ? "mock" : "rpc"))} />
     </main>
   );
 }
