@@ -268,15 +268,9 @@ export function ControlPanelApp() {
       const nextData: ControlPanelData = {
         ...draft,
         inspector: result.effectiveInspector,
+        source: result.source,
         providerApiKeyInput: "",
-        settings: {
-          ...draft.settings,
-          ...result.effectiveSettings,
-          task_automation: {
-            ...draft.settings.task_automation,
-            ...(result.effectiveSettings.task_automation ?? {}),
-          },
-        },
+        settings: result.effectiveSettings,
       };
       setPanelData(nextData);
       setDraft(nextData);
