@@ -40,7 +40,6 @@ type Service struct {
 	screen              tools.ScreenCaptureClient
 	lifecycle           *tools.ScreenLifecycleManager
 	artifactStore       storage.ArtifactStore
-	toolCallStore       storage.ToolCallStore
 	model               *model.Service
 	loop                *agentloop.Runtime
 	audit               *audit.Service
@@ -72,16 +71,6 @@ func (s *Service) WithLoopRuntimeStore(store storage.LoopRuntimeStore) *Service 
 		return nil
 	}
 	s.loopStore = store
-	return s
-}
-
-// WithToolCallStore injects formal tool_call persistence for real execution
-// flows so Agent Loop rounds do not stop at transient in-memory traces.
-func (s *Service) WithToolCallStore(store storage.ToolCallStore) *Service {
-	if s == nil {
-		return nil
-	}
-	s.toolCallStore = store
 	return s
 }
 
@@ -2105,7 +2094,7 @@ func (s *Service) executeAgentLoopTool(ctx context.Context, request Request, cal
 }
 
 func (s *Service) persistAgentLoopRuntime(request Request, result agentloop.Result) {
-	if s.loopStore == nil && s.toolCallStore == nil {
+	if s.loopStore == nil {
 		return
 	}
 	updatedAt := time.Now().UTC().Format(time.RFC3339)
@@ -2173,14 +2162,6 @@ func (s *Service) persistAgentLoopRuntime(request Request, result agentloop.Resu
 	}
 	if s.loopStore != nil && len(eventRecords) > 0 {
 		_ = s.loopStore.SaveEvents(context.Background(), eventRecords)
-	}
-
-	if s.toolCallStore != nil {
-		// Persist each executed tool_call so Agent Loop results round-trip through
-		// the formal tool_call/event/delivery_result chain rather than events only.
-		for _, toolCall := range result.ToolCalls {
-			_ = s.toolCallStore.SaveToolCall(context.Background(), toolCall)
-		}
 	}
 
 	if s.loopStore != nil && result.DeliveryRecord != nil {
