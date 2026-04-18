@@ -4,6 +4,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use windows::core::{BSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
@@ -32,6 +34,7 @@ const BROWSER_KIND_EDGE: &str = "edge";
 const BROWSER_KIND_OTHER_BROWSER: &str = "other_browser";
 const BROWSER_KIND_NON_BROWSER: &str = "non_browser";
 const CHROME_MCP_BROWSER_URL: &str = "http://127.0.0.1:9222";
+const WINDOW_CONTEXT_URL_DEBOUNCE_MS: u64 = 320;
 const SHELL_BALL_WINDOW_LABELS: [&str; 4] = [
     "shell-ball",
     "shell-ball-bubble",
@@ -44,11 +47,20 @@ static WINDOW_CONTEXT_APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| 
 static WINDOW_CONTEXT_FOREGROUND_HOOK: Lazy<Mutex<Option<isize>>> = Lazy::new(|| Mutex::new(None));
 static LAST_EXTERNAL_WINDOW_CONTEXT: Lazy<Mutex<Option<CachedWindowContext>>> =
     Lazy::new(|| Mutex::new(None));
+static WINDOW_CONTEXT_URL_REFRESH_STATE: Lazy<Mutex<UrlRefreshState>> =
+    Lazy::new(|| Mutex::new(UrlRefreshState::default()));
 
 #[derive(Clone)]
 struct CachedWindowContext {
     hwnd: isize,
     context: ActiveWindowContextPayload,
+}
+
+#[derive(Default)]
+struct UrlRefreshState {
+    in_flight_fingerprint: Option<String>,
+    last_completed_fingerprint: Option<String>,
+    last_completed_at: Option<Instant>,
 }
 
 struct ComGuard {
@@ -90,11 +102,12 @@ pub fn read_active_window_context() -> Result<Option<ActiveWindowContextPayload>
     }
 
     if is_shell_ball_cluster_window(hwnd) {
-        return read_cached_window_context_with_url();
+        return Ok(read_cached_window_context());
     }
 
-    let context = read_window_context_for_hwnd(hwnd)?;
+    let context = read_lightweight_window_context_for_hwnd(hwnd)?;
     cache_window_context(hwnd, &context);
+    schedule_window_context_url_refresh(hwnd, &context);
     Ok(Some(context))
 }
 
@@ -133,6 +146,7 @@ pub fn install_window_context_listener(app: &AppHandle) -> Result<(), String> {
 
     if let Some((hwnd, current_context)) = read_current_external_window_context() {
         cache_window_context(hwnd, &current_context);
+        schedule_window_context_url_refresh(hwnd, &current_context);
     }
 
     Ok(())
@@ -145,18 +159,6 @@ fn read_current_external_window_context() -> Option<(HWND, ActiveWindowContextPa
     }
 
     read_lightweight_window_context_for_hwnd(hwnd).ok().map(|context| (hwnd, context))
-}
-
-fn read_window_context_for_hwnd(hwnd: HWND) -> Result<ActiveWindowContextPayload, String> {
-    let mut context = read_lightweight_window_context_for_hwnd(hwnd)?;
-    context.url = match context.browser_kind.as_str() {
-        BROWSER_KIND_CHROME => read_chrome_url_via_mcp(context.title.as_deref())
-            .or_else(|| read_browser_url_via_uia(hwnd)),
-        BROWSER_KIND_EDGE | BROWSER_KIND_OTHER_BROWSER => read_browser_url_via_uia(hwnd),
-        _ => None,
-    };
-
-    Ok(context)
 }
 
 fn read_lightweight_window_context_for_hwnd(hwnd: HWND) -> Result<ActiveWindowContextPayload, String> {
@@ -191,26 +193,6 @@ fn read_cached_window_context() -> Option<ActiveWindowContextPayload> {
         .lock()
         .ok()
         .and_then(|cached| cached.as_ref().map(|value| value.context.clone()))
-}
-
-fn read_cached_window_context_with_url() -> Result<Option<ActiveWindowContextPayload>, String> {
-    let cached = LAST_EXTERNAL_WINDOW_CONTEXT
-        .lock()
-        .ok()
-        .and_then(|context| context.clone());
-
-    let Some(cached_context) = cached else {
-        return Ok(None);
-    };
-
-    let hwnd = HWND(cached_context.hwnd as *mut core::ffi::c_void);
-    if hwnd.0.is_null() {
-        return Ok(Some(cached_context.context));
-    }
-
-    let context = read_window_context_for_hwnd(hwnd).unwrap_or(cached_context.context.clone());
-    cache_window_context(hwnd, &context);
-    Ok(Some(context))
 }
 
 fn is_shell_ball_cluster_window(hwnd: HWND) -> bool {
@@ -281,6 +263,85 @@ unsafe extern "system" fn window_context_foreground_hook(
 
     if let Ok(context) = read_lightweight_window_context_for_hwnd(hwnd) {
         cache_window_context(hwnd, &context);
+        schedule_window_context_url_refresh(hwnd, &context);
+    }
+}
+
+fn schedule_window_context_url_refresh(hwnd: HWND, context: &ActiveWindowContextPayload) {
+    if !should_refresh_window_context_url(context) {
+        return;
+    }
+
+    let context = context.clone();
+    let hwnd_handle = hwnd.0 as isize;
+    let fingerprint = create_window_context_fingerprint(&context);
+    let should_schedule = {
+        let mut state = match WINDOW_CONTEXT_URL_REFRESH_STATE.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+
+        if state.in_flight_fingerprint.as_deref() == Some(fingerprint.as_str()) {
+            false
+        } else if state.last_completed_fingerprint.as_deref() == Some(fingerprint.as_str())
+            && state
+                .last_completed_at
+                .is_some_and(|instant| instant.elapsed() < Duration::from_millis(WINDOW_CONTEXT_URL_DEBOUNCE_MS))
+        {
+            false
+        } else {
+            state.in_flight_fingerprint = Some(fingerprint.clone());
+            true
+        }
+    };
+
+    if !should_schedule {
+        return;
+    }
+
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(WINDOW_CONTEXT_URL_DEBOUNCE_MS));
+
+        let hwnd = HWND(hwnd_handle as *mut core::ffi::c_void);
+        let url = read_url_for_window_context(hwnd, &context);
+        let mut next_context = context.clone();
+        next_context.url = url;
+        cache_window_context(hwnd, &next_context);
+
+        if let Ok(mut state) = WINDOW_CONTEXT_URL_REFRESH_STATE.lock() {
+            let completed_fingerprint = create_window_context_fingerprint(&next_context);
+            state.in_flight_fingerprint = None;
+            state.last_completed_fingerprint = Some(completed_fingerprint);
+            state.last_completed_at = Some(Instant::now());
+        }
+    });
+}
+
+fn should_refresh_window_context_url(context: &ActiveWindowContextPayload) -> bool {
+    matches!(
+        context.browser_kind.as_str(),
+        BROWSER_KIND_CHROME | BROWSER_KIND_EDGE | BROWSER_KIND_OTHER_BROWSER
+    )
+}
+
+fn create_window_context_fingerprint(context: &ActiveWindowContextPayload) -> String {
+    format!(
+        "{}|{}|{}",
+        context.app_name,
+        context.title.clone().unwrap_or_default(),
+        context.process_path.clone().unwrap_or_default()
+    )
+}
+
+fn read_url_for_window_context(
+    hwnd: HWND,
+    context: &ActiveWindowContextPayload,
+) -> Option<String> {
+    match context.browser_kind.as_str() {
+        BROWSER_KIND_CHROME => read_chrome_url_via_mcp(context.title.as_deref())
+            .or_else(|| read_browser_url_via_uia(hwnd)),
+        BROWSER_KIND_EDGE | BROWSER_KIND_OTHER_BROWSER => read_browser_url_via_uia(hwnd),
+        _ => None,
     }
 }
 
