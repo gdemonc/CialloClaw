@@ -9,6 +9,14 @@
     "beforeDevCommand": "corepack pnpm dev",
     "beforeBuildCommand": "corepack pnpm build"
   },
+  "bundle": {
+    "targets": ["nsis"],
+    "externalBin": ["bin/cialloclaw-service"],
+    "resources": {
+      "resources/seed/": "seed/"
+    },
+    "icon": ["icons/icon.ico", "icons/icon.png"]
+  },
   "app": {
     "windows": [
       {

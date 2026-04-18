@@ -1,0 +1,6 @@
+{
+  "seed_version": "0.1.0-beta.1",
+  "seed_name": "beta_seed",
+  "description": "Beta seed resource scaffold for the Windows installer.",
+  "files": []
+}
