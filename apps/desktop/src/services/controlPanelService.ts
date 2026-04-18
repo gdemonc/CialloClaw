@@ -237,13 +237,9 @@ export async function runControlPanelInspection(data: ControlPanelData): Promise
     throw new Error("当前仅有本地设置快照，无法执行正式巡检。请先连接本地服务。");
   }
 
-  try {
-    return await runTaskInspector({
-      request_meta: createRequestMeta(),
-      reason: "control_panel_manual_run",
-      target_sources: data.inspector.task_sources,
-    });
-  } catch (error) {
-    throw error;
-  }
+  return runTaskInspector({
+    request_meta: createRequestMeta(),
+    reason: "control_panel_manual_run",
+    target_sources: data.inspector.task_sources,
+  });
 }

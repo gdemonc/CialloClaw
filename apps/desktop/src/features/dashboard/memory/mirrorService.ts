@@ -212,32 +212,28 @@ export async function loadMirrorOverviewData(source: MirrorOverviewSource = "rpc
     return getInitialMirrorOverviewData();
   }
 
-  try {
-    const params: AgentMirrorOverviewGetParams = {
-      request_meta: createRequestMeta(),
-      include: ["history_summary", "daily_summary", "profile", "memory_references"],
-    };
+  const params: AgentMirrorOverviewGetParams = {
+    request_meta: createRequestMeta(),
+    include: ["history_summary", "daily_summary", "profile", "memory_references"],
+  };
 
-    // Support context and settings are independent read paths, so load them in
-    // parallel with the main mirror overview request to keep refreshes responsive.
-    const [response, supportContext, settingsSnapshot] = await Promise.all([
-      requestMirrorOverview(params),
-      loadMirrorSupportContext("rpc"),
-      loadDashboardSettingsSnapshot("rpc"),
-    ]);
-    const overview = response.data;
+  // Support context and settings are independent read paths, so load them in
+  // parallel with the main mirror overview request to keep refreshes responsive.
+  const [response, supportContext, settingsSnapshot] = await Promise.all([
+    requestMirrorOverview(params),
+    loadMirrorSupportContext("rpc"),
+    loadDashboardSettingsSnapshot("rpc"),
+  ]);
+  const overview = response.data;
 
-    return buildMirrorOverviewData(
-      overview,
-      "rpc",
-      {
-        serverTime: response.meta?.server_time ?? null,
-        warnings: response.warnings,
-      },
-      supportContext,
-      settingsSnapshot,
-    );
-  } catch (error) {
-    throw error;
-  }
+  return buildMirrorOverviewData(
+    overview,
+    "rpc",
+    {
+      serverTime: response.meta?.server_time ?? null,
+      warnings: response.warnings,
+    },
+    supportContext,
+    settingsSnapshot,
+  );
 }

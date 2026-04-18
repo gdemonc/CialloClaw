@@ -564,7 +564,7 @@ export interface InspectorConfig {
   remind_when_stale: boolean;
 }
 
-export interface AgentTaskInspectorConfigGetResult extends InspectorConfig {}
+export type AgentTaskInspectorConfigGetResult = InspectorConfig;
 
 export interface AgentTaskInspectorConfigUpdateParams extends InspectorConfig {
   request_meta: RequestMeta;

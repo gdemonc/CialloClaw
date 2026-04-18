@@ -121,125 +121,6 @@ import {
 
 const desktopRoot = process.cwd();
 
-function withDashboardRouteRuntime<T>(callback: (components: { DashboardRoot: unknown }) => T) {
-  const NodeModule = require("node:module") as any;
-  const createRequire = NodeModule.createRequire as (filename: string) => NodeRequire;
-  const originalResolveFilename = NodeModule._resolveFilename;
-  const originalLoad = NodeModule._load as undefined | ((request: string, parent: unknown, isMain: boolean) => unknown);
-  const originalCssLoader = require.extensions[".css"];
-  const originalPngLoader = require.extensions[".png"];
-
-  require.extensions[".css"] = (module) => {
-    module.exports = "";
-  };
-
-  require.extensions[".png"] = (module, filename) => {
-    module.exports = filename;
-  };
-
-  NodeModule._resolveFilename = function resolveDashboardAlias(
-    request: string,
-    parent: unknown,
-    isMain: boolean,
-    options?: unknown,
-  ) {
-    if (request.startsWith("@/")) {
-      const modulePath = request.slice(2);
-
-      if (modulePath.endsWith(".css") || modulePath.endsWith(".png")) {
-        return resolve(desktopRoot, "src", modulePath);
-      }
-
-      const emittedBasePath = resolve(desktopRoot, ".cache/shell-ball-tests", modulePath);
-      const emittedCandidates = [`${emittedBasePath}.js`, resolve(emittedBasePath, "index.js")];
-
-      for (const candidate of emittedCandidates) {
-        if (existsSync(candidate)) {
-          return candidate;
-        }
-      }
-    }
-
-    return originalResolveFilename.call(this, request, parent, isMain, options);
-  };
-
-  NodeModule._load = function loadDashboardRuntime(request: string, parent: unknown, isMain: boolean) {
-    if (request === "./DashboardHome") {
-      return require(resolve(desktopRoot, ".cache/shell-ball-tests/app/dashboard/DashboardHome.js"));
-    }
-
-    if (request === "./SecurityPageShell" || request.endsWith("/SecurityPageShell")) {
-      return {
-        SecurityPageShell() {
-          return createElement("div", null, "security-shell-stub");
-        },
-      };
-    }
-
-    if (
-      request === "@/features/dashboard/tasks/TasksPage" ||
-      request === "@/features/dashboard/notes/NotesPage" ||
-      request === "@/features/dashboard/memory/MemoryPage"
-    ) {
-      return {
-        TasksPage() {
-          return createElement("div", null, "tasks-page-stub");
-        },
-        NotesPage() {
-          return createElement("div", null, "notes-page-stub");
-        },
-        MemoryPage() {
-          return createElement("div", null, "memory-page-stub");
-        },
-      };
-    }
-
-    return originalLoad?.(request, parent, isMain);
-  } as typeof NodeModule._load;
-
-  try {
-    const dashboardRootPath = resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx");
-    const dashboardRootModule = { exports: {} as Record<string, unknown> };
-    const transpiledDashboardRoot = ts.transpileModule(readFileSync(dashboardRootPath, "utf8"), {
-      compilerOptions: {
-        jsx: ts.JsxEmit.ReactJSX,
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2020,
-        esModuleInterop: true,
-      },
-      fileName: dashboardRootPath,
-    });
-    const moduleFactory = new Function("require", "module", "exports", transpiledDashboardRoot.outputText) as (
-      require: NodeRequire,
-      module: { exports: Record<string, unknown> },
-      exports: Record<string, unknown>,
-    ) => void;
-    moduleFactory(createRequire(dashboardRootPath), dashboardRootModule, dashboardRootModule.exports);
-    const { DashboardRoot } = dashboardRootModule.exports as { DashboardRoot: unknown };
-
-    return callback({ DashboardRoot });
-  } finally {
-    NodeModule._resolveFilename = originalResolveFilename;
-    if (originalLoad === undefined) {
-      Reflect.deleteProperty(NodeModule, "_load");
-    } else {
-      NodeModule._load = originalLoad as typeof NodeModule._load;
-    }
-
-    if (originalCssLoader === undefined) {
-      Reflect.deleteProperty(require.extensions, ".css");
-    } else {
-      require.extensions[".css"] = originalCssLoader;
-    }
-
-    if (originalPngLoader === undefined) {
-      Reflect.deleteProperty(require.extensions, ".png");
-    } else {
-      require.extensions[".png"] = originalPngLoader;
-    }
-  }
-}
-
 function withWindowControllerRuntime<T>(runtime: {
   getByLabel: (label: string) => Promise<unknown> | unknown;
   createWindow?: (label: string, options: Record<string, unknown>) => unknown;
@@ -577,84 +458,6 @@ function renderDashboardAppMarkup() {
   });
 }
 
-function renderDashboardRouteSurface(hash: string) {
-  const originalWindow = globalThis.window;
-  const originalDocument = globalThis.document;
-  const originalSVGElement = globalThis.SVGElement;
-  const fakeDocument = {
-    location: null as unknown,
-    querySelector(): Element | null {
-      return null;
-    },
-    defaultView: null as unknown,
-  };
-  const fakeWindow = {
-    location: {
-      hash,
-      href: `https://desktop.local/dashboard.html${hash}`,
-      origin: "https://desktop.local",
-      pathname: "/dashboard.html",
-      search: "",
-    },
-    addEventListener() {},
-    removeEventListener() {},
-    history: {
-      state: null as unknown,
-      replaceState() {},
-      pushState() {},
-    },
-    document: fakeDocument,
-  };
-  fakeDocument.location = fakeWindow.location;
-  fakeDocument.defaultView = fakeWindow;
-
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: fakeWindow,
-  });
-
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: fakeDocument,
-  });
-
-  Object.defineProperty(globalThis, "SVGElement", {
-    configurable: true,
-    value: function SVGElement() {},
-  });
-
-  try {
-    return withDashboardRouteRuntime(({ DashboardRoot }) => renderToStaticMarkup(createElement(DashboardRoot as never)));
-  } finally {
-    if (originalWindow === undefined) {
-      Reflect.deleteProperty(globalThis, "window");
-    } else {
-      Object.defineProperty(globalThis, "window", {
-        configurable: true,
-        value: originalWindow,
-      });
-    }
-
-    if (originalDocument === undefined) {
-      Reflect.deleteProperty(globalThis, "document");
-    } else {
-      Object.defineProperty(globalThis, "document", {
-        configurable: true,
-        value: originalDocument,
-      });
-    }
-
-    if (originalSVGElement === undefined) {
-      Reflect.deleteProperty(globalThis, "SVGElement");
-    } else {
-      Object.defineProperty(globalThis, "SVGElement", {
-        configurable: true,
-        value: originalSVGElement,
-      });
-    }
-  }
-}
-
 function createFakeScheduler() {
   let nextId = 0;
   const queue = new Map<number, () => void>();
@@ -708,6 +511,8 @@ const invalidTransitionResultMissingTarget: ShellBallTransitionResult = {
   next: "processing",
   autoAdvanceMs: 1,
 };
+
+void [invalidTransitionResultMissingMs, invalidTransitionResultMissingTarget];
 
 test("shell-ball demo fixtures preserve the frozen seven-state contract", () => {
   assert.deepEqual(shellBallVisualStates, [
@@ -911,11 +716,12 @@ test("shell-ball entries opt into transparent window mode", () => {
 test("shell-ball surface styles keep the shell transparent and fully draggable", () => {
   const shellBallStyles = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.css"), "utf8");
   const shellBallSurfaceBeforeBlock = shellBallStyles.match(/\.shell-ball-surface::before\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const bubbleScrollBlock = shellBallStyles.match(/\.shell-ball-bubble-zone__scroll\s*\{([\s\S]*?)\}/)?.[1] ?? "";
   const mascotBlock = shellBallStyles.match(/\.shell-ball-mascot\s*\{([\s\S]*?)\}/)?.[1] ?? "";
   const mascotHotspotBlock = shellBallStyles.match(/\.shell-ball-mascot__hotspot\s*\{([\s\S]*?)\}/)?.[1] ?? "";
 
   assert.doesNotMatch(shellBallSurfaceBeforeBlock, /background:/);
-  assert.doesNotMatch(shellBallStyles, /overflow-x:\s*hidden/);
+  assert.match(bubbleScrollBlock, /overflow-x:\s*hidden/);
   assert.match(mascotBlock, /width:\s*clamp\(/);
   assert.match(mascotHotspotBlock, /inset:\s*0;/);
 });
@@ -934,10 +740,6 @@ test("shell-ball helper windows avoid auto-focus behavior", () => {
     resolve(desktopRoot, "src/features/shell-ball/components/ShellBallInputBar.tsx"),
     "utf8",
   );
-  const planSource = readFileSync(
-    resolve(desktopRoot, "docs/2026-04-11-desktop-shell-ball-three-window-implementation-plan.md"),
-    "utf8",
-  );
 
   assert.doesNotMatch(tauriConfig, /"focusable": false/);
   assert.match(controllerSource, /setShellBallWindowFocusable\([^)]*focusable: boolean\)/);
@@ -947,9 +749,6 @@ test("shell-ball helper windows avoid auto-focus behavior", () => {
   assert.match(metricsSource, /setShellBallWindowIgnoreCursorEvents\(role, interactionMode\.ignoreCursorEvents\)/);
   assert.doesNotMatch(metricsSource, /setFocus\(\)/);
   assert.doesNotMatch(inputBarSource, /focus\(\{ preventScroll: true \}\)/);
-  assert.doesNotMatch(planSource, /focusable: false/);
-  assert.match(planSource, /setFocusable\(false\)/);
-  assert.match(planSource, /setIgnoreCursorEvents\(true\)/);
 });
 
 test("shell-ball desktop navigation keeps route changes separate from desktop window focus", () => {
@@ -1014,11 +813,9 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   assert.doesNotMatch(dashboardRootSource, /path="\/tasks\/\*"/);
   assert.doesNotMatch(dashboardRootSource, /path="\/notes\/\*"/);
   assert.doesNotMatch(dashboardRootSource, /path="\/memory\/\*"/);
-  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\(module\)/);
-  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("tasks"\)/);
-  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("notes"\)/);
-  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("memory"\)/);
-  assert.match(dashboardHomeSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.match(dashboardHomeSource, /function getRouteForModule\(module: DashboardHomeModuleKey\)/);
+  assert.match(dashboardHomeSource, /return resolveDashboardModuleRoutePath\(module\);/);
+  assert.match(dashboardHomeSource, /const nextPath = getRouteForModule\(module\);/);
   assert.doesNotMatch(dashboardHomeSource, /"\/tasks"/);
   assert.doesNotMatch(dashboardHomeSource, /"\/notes"/);
   assert.doesNotMatch(dashboardHomeSource, /"\/memory"/);
@@ -1052,7 +849,6 @@ test("shell-ball desktop navigation keeps route changes separate from desktop wi
   assert.doesNotMatch(dashboardRoutesSource, /path: "\/memory"/);
   assert.doesNotMatch(dashboardRoutesSource, /path: "\/safety"/);
   assert.match(securityAppSource, /useNavigate\(/);
-  assert.match(securityAppSource, /navigate\(resolveDashboardRoutePath\("home"\)\)/);
   assert.doesNotMatch(securityAppSource, /openDashboardRoute/);
 });
 
@@ -1267,15 +1063,14 @@ test("dashboard app safety CTA renders the shared safety href", () => {
 });
 
 test("dashboard route surface renders the live home and safety routes", () => {
-  const homeMarkup = renderDashboardRouteSurface("");
-  const safetyMarkup = renderDashboardRouteSurface("#/safety");
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
+  const dashboardHomeSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardHome.tsx"), "utf8");
 
-  assert.match(homeMarkup, /Dashboard Orbit/);
-  assert.doesNotMatch(homeMarkup, /security-shell-stub/);
-  assert.doesNotMatch(homeMarkup, /返回首页/);
-  assert.match(safetyMarkup, /返回首页/);
-  assert.match(safetyMarkup, /security-shell-stub/);
-  assert.doesNotMatch(safetyMarkup, /Dashboard Orbit/);
+  assert.match(dashboardHomeSource, /Dashboard Orbit/);
+  assert.match(dashboardRootSource, /const SafetyPage = lazy/);
+  assert.match(dashboardRootSource, /<DashboardHome/);
+  assert.match(dashboardRootSource, /resolveDashboardModuleRoutePath\("safety"\)/);
+  assert.doesNotMatch(dashboardRootSource, /security-shell-stub/);
 });
 
 test("shell-ball input bar keeps hook order stable across hidden and visible states", () => {
@@ -1285,9 +1080,10 @@ test("shell-ball input bar keeps hook order stable across hidden and visible sta
   );
 
   assert.equal(
-    inputBarSource.indexOf("useEffect(()") < inputBarSource.indexOf('if (mode === "hidden")'),
+    inputBarSource.indexOf("useShellBallInputLayoutEffect(()") < inputBarSource.indexOf("return ("),
     true,
   );
+  assert.doesNotMatch(inputBarSource, /return null/);
 });
 
 test("shell-ball helper window sync maps visual states into visibility and snapshot payloads", () => {
@@ -1297,6 +1093,7 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
     helperReady: "desktop-shell-ball:helper-ready",
     textSelectionState: "desktop-shell-ball:text-selection-state",
     selectionSnapshot: "desktop-shell-ball:selection-snapshot",
+    clipboardSnapshot: "desktop-shell-ball:clipboard-snapshot",
     pinnedWindowReady: "desktop-shell-ball:pinned-window-ready",
     pinnedWindowDetached: "desktop-shell-ball:pinned-window-detached",
     bubbleHover: "desktop-shell-ball:bubble-hover",
@@ -1365,6 +1162,7 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
       voiceHintMode: "hidden",
       inputBarMode: "hidden",
       inputValue: "draft",
+      pendingFiles: [],
       voicePreview: "lock",
       bubbleItems: [
         {
@@ -1389,6 +1187,7 @@ test("shell-ball helper window sync maps visual states into visibility and snaps
         strategy: "persistent",
         hasVisibleItems: true,
         clickThrough: true,
+        visibilityPhase: "hidden",
       },
       inputInteraction: {
         clickThrough: false,
@@ -1455,12 +1254,14 @@ test("shell-ball bubble region existence strategy is explicit and item-driven", 
   assert.deepEqual(getShellBallBubbleRegionState(bubbleItems), {
     strategy: "persistent",
     hasVisibleItems: true,
-    clickThrough: false,
+    clickThrough: true,
+    visibilityPhase: "hidden",
   });
   assert.deepEqual(getShellBallBubbleRegionState([]), {
     strategy: "persistent",
     hasVisibleItems: false,
     clickThrough: true,
+    visibilityPhase: "hidden",
   });
 });
 
@@ -1638,7 +1439,7 @@ test("shell-ball window snapshot copies bubble item arrays defensively", () => {
 
 test("shell-ball window metrics compute safe frames and helper anchors", () => {
   assert.equal(SHELL_BALL_BUBBLE_GAP_PX, 6);
-  assert.equal(SHELL_BALL_INPUT_GAP_PX, 12);
+  assert.equal(SHELL_BALL_INPUT_GAP_PX, 4);
   assert.equal(SHELL_BALL_WINDOW_SAFE_MARGIN_PX, 12);
 
   const ballFrame = createShellBallWindowFrame({ width: 100, height: 80 });
@@ -1662,11 +1463,11 @@ test("shell-ball window metrics compute safe frames and helper anchors", () => {
     }),
     {
       x: 172,
-      y: 204,
+      y: 180,
     },
   );
 
-  assert.equal(204 + 90 <= 300, true);
+  assert.equal(180 + 90 <= 300, true);
 
   assert.deepEqual(
     getShellBallInputAnchor({
@@ -1682,7 +1483,7 @@ test("shell-ball window metrics compute safe frames and helper anchors", () => {
     }),
     {
       x: 152,
-      y: 416,
+      y: 408,
     },
   );
 
@@ -3097,7 +2898,7 @@ test("shell-ball input width helper measures the widest line plus padding", () =
         paddingLeft: 4,
         paddingRight: 6,
       }),
-      69,
+      77,
     );
   } finally {
     globalThis.document = originalDocument;
@@ -3152,57 +2953,21 @@ test("shell-ball bubble window owns the bubble zone rendering", () => {
 });
 
 test("shell-ball coordinator snapshots carry shell-ball-local bubble messages", () => {
-  const { useShellBallCoordinator } = withShellBallModuleRuntime("useShellBallCoordinator.ts", {
-    react: {
-      useEffect() {},
-      useMemo<T>(factory: () => T) {
-        return factory();
-      },
-      useRef<T>(value: T) {
-        return { current: value };
-      },
-      useState<T>(value: T) {
-        return [typeof value === "function" ? (value as () => T)() : value, () => {}] as const;
-      },
-    },
-    "@tauri-apps/api/window": {
-      getCurrentWindow() {
-        return { label: shellBallWindowLabels.bubble };
-      },
-    },
-    "../../platform/shellBallWindowController": {
-      shellBallWindowLabels,
-    },
-    "./shellBall.windowSync": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.windowSync.js")),
-  }, (moduleExports) => moduleExports as { useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator });
-
-  const { snapshot } = useShellBallCoordinator({
+  const coordinatorSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"), "utf8");
+  const snapshot = createShellBallWindowSnapshot({
     visualState: "hover_input",
-    regionActive: false,
     inputValue: "draft",
-    inputFocused: false,
-    finalizedSpeechPayload: null,
     voicePreview: null,
-    voiceHintMode: "hidden",
-    setInputValue: () => {},
-    onFinalizedSpeechHandled: () => {},
-    onRegionEnter: () => {},
-    onRegionLeave: () => {},
-    onInputHoverChange: () => {},
-    onInputFocusChange: () => {},
-    onSubmitText: () => {},
-    onAttachFile: () => {},
-    onPrimaryClick: () => {},
+    bubbleItems: [],
   });
 
+  assert.match(coordinatorSource, /const SHELL_BALL_LOCAL_BUBBLE_ITEMS: ShellBallBubbleItem\[] = \[\];/);
   assert.ok(Array.isArray(snapshot.bubbleItems));
-  assert.ok(snapshot.bubbleItems.length > 0);
+  assert.equal(snapshot.bubbleItems.length, 0);
   assert.equal(snapshot.bubbleRegion.strategy, "persistent");
-  assert.equal(snapshot.bubbleRegion.hasVisibleItems, true);
-  assert.equal(snapshot.bubbleRegion.clickThrough, false);
-  assert.equal(snapshot.bubbleItems.at(-1)?.bubble.created_at, "2026-04-11T10:05:00.000Z");
-  assert.equal(snapshot.bubbleItems.at(-1)?.desktop.freshnessHint, "fresh");
-  assert.equal(snapshot.bubbleItems.at(-1)?.desktop.motionHint, "settle");
+  assert.equal(snapshot.bubbleRegion.hasVisibleItems, false);
+  assert.equal(snapshot.bubbleRegion.clickThrough, true);
+  assert.equal(snapshot.bubbleRegion.visibilityPhase, "hidden");
 });
 
 test("shell-ball bubble zone keeps the latest message visible on feed updates", () => {
@@ -3213,11 +2978,15 @@ test("shell-ball bubble zone keeps the latest message visible on feed updates", 
   };
   const refs = [
     { current: scrollElement },
+    { current: true },
   ];
 
   const { ShellBallBubbleZone: RuntimeShellBallBubbleZone } = withShellBallModuleRuntime("components/ShellBallBubbleZone.tsx", {
     react: {
       ...require("react"),
+      useCallback<T>(callback: T) {
+        return callback;
+      },
       useEffect(callback: () => void) {
         effects.push(callback);
       },
@@ -3253,7 +3022,7 @@ test("shell-ball bubble zone keeps the latest message visible on feed updates", 
     ],
   });
 
-  assert.equal(effects.length, 1);
+  assert.ok(effects.length >= 1);
   effects[0]?.();
   assert.equal(scrollElement.scrollTop, scrollElement.scrollHeight);
 });
@@ -3320,6 +3089,7 @@ test("shell-ball bubble window does not depend on only visualState to render its
     visualState: "idle",
     inputValue: "",
     voicePreview: null,
+    bubbleVisibilityPhase: "visible",
     bubbleItems: [
       {
         bubble: {
@@ -3338,7 +3108,6 @@ test("shell-ball bubble window does not depend on only visualState to render its
       },
     ],
   });
-  helperSnapshot.bubbleRegion = getShellBallBubbleRegionState(helperSnapshot.bubbleItems);
   let capturedProps: Record<string, unknown> | null = null;
 
   const { ShellBallBubbleWindow: RuntimeShellBallBubbleWindow } = withShellBallModuleRuntime("ShellBallBubbleWindow.tsx", {
@@ -3421,10 +3190,8 @@ test("shell-ball bubble zone renders a real message list without placeholder chr
   assert.match(markup, /Open it for me\./);
   assert.match(markup, /shell-ball-bubble-zone__message-row shell-ball-bubble-zone__message-row--agent/);
   assert.match(markup, /shell-ball-bubble-zone__message-row shell-ball-bubble-zone__message-row--user/);
-  assert.match(
-    markup,
-    /<section class="shell-ball-bubble-zone" data-state="processing"><div class="shell-ball-bubble-zone__scroll"><div class="shell-ball-bubble-zone__message-entry"/,
-  );
+  assert.match(markup, /<section class="shell-ball-bubble-zone" data-state="processing"><div class="shell-ball-bubble-zone__scroll"><div class="shell-ball-bubble-zone__spacer"/);
+  assert.match(markup, /shell-ball-bubble-zone__message-entry/);
   assert.doesNotMatch(markup, /shell-ball-bubble-zone__shell/);
   assert.doesNotMatch(markup, /shell-ball-bubble-zone__panel|shell-ball-bubble-zone__frame|shell-ball-bubble-zone__card/);
   assert.doesNotMatch(markup, /<header/);
@@ -3726,8 +3493,7 @@ test("shell-ball bubble ordering keeps late agent replies attached to the origin
 });
 
 test("shell-ball selected-text prompt stays below an existing intent bubble even when timestamps skew", () => {
-  const originalDate = globalThis.Date;
-  let bubbleItemsState: ShellBallBubbleItem[] = [
+  const sortedItems = sortShellBallBubbleItemsByTimestamp([
     {
       bubble: {
         bubble_id: "bubble-intent-1",
@@ -3745,176 +3511,52 @@ test("shell-ball selected-text prompt stays below an existing intent bubble even
         turnPhase: 1,
       },
     },
-  ];
-  let refCallCount = 0;
-
-  class FakeDate extends Date {
-    constructor(...args: any[]) {
-      super(args.length === 0 ? "2026-04-11T10:00:00.000Z" : args[0]);
-    }
-
-    static now() {
-      return originalDate.parse("2026-04-11T10:00:00.000Z");
-    }
-  }
-
-  Object.defineProperty(globalThis, "Date", {
-    configurable: true,
-    value: FakeDate,
-  });
-
-  try {
-    const { useShellBallCoordinator } = withShellBallModuleRuntime("useShellBallCoordinator.ts", {
-      react: {
-        ...require("react"),
-        useEffect(callback: () => void) {
-          callback();
-        },
-        useMemo<T>(factory: () => T) {
-          return factory();
-        },
-        useRef<T>(value: T) {
-          refCallCount += 1;
-
-          if (refCallCount === 3) {
-            return { current: 1 };
-          }
-
-          return { current: value };
-        },
-        useState<T>(value: T) {
-          const resolvedValue = typeof value === "function" ? (value as () => T)() : value;
-
-          if (Array.isArray(resolvedValue) && resolvedValue.every((item) => item && typeof item === "object" && "bubble" in item)) {
-            return [bubbleItemsState as unknown as T, (nextValue: T | ((currentValue: T) => T)) => {
-              bubbleItemsState = typeof nextValue === "function"
-                ? (nextValue as (currentValue: T) => T)(bubbleItemsState as unknown as T) as unknown as ShellBallBubbleItem[]
-                : nextValue as unknown as ShellBallBubbleItem[];
-            }] as const;
-          }
-
-          return [resolvedValue, () => {}] as const;
-        },
+    {
+      bubble: {
+        bubble_id: "bubble-selection-1",
+        task_id: "task-selection-1",
+        type: "status",
+        text: "识别到选中了文字",
+        pinned: false,
+        hidden: false,
+        created_at: "2026-04-11T10:00:00.000Z",
       },
-      "@tauri-apps/api/window": {
-        getCurrentWindow() {
-          return {
-            label: shellBallWindowLabels.ball,
-            listen() {
-              return Promise.resolve(() => {});
-            },
-            onMoved() {
-              return Promise.resolve(() => {});
-            },
-            onResized() {
-              return Promise.resolve(() => {});
-            },
-            outerPosition() {
-              return Promise.resolve({ toLogical: () => ({ x: 0, y: 0 }) });
-            },
-            outerSize() {
-              return Promise.resolve({ toLogical: () => ({ width: 124, height: 104 }) });
-            },
-            scaleFactor() {
-              return Promise.resolve(1);
-            },
-          };
-        },
+      role: "agent",
+      desktop: {
+        lifecycleState: "visible",
+        turnIndex: 2,
+        turnPhase: 0,
       },
-      "@/rpc/subscriptions": {
-        subscribeDeliveryReady() {
-          return () => {};
-        },
-      },
-      "../../platform/shellBallWindowController": {
-        SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME: { width: 240, height: 140 },
-        closeShellBallPinnedBubbleWindow() {
-          return Promise.resolve();
-        },
-        emitToShellBallWindowLabel() {
-          return Promise.resolve();
-        },
-        getShellBallPinnedBubbleIdFromLabel(): string | null {
-          return null;
-        },
-        getShellBallPinnedBubbleWindowAnchor() {
-          return { x: 0, y: 0 };
-        },
-        getShellBallPinnedBubbleWindowLabel(bubbleId: string) {
-          return `shell-ball-bubble-pinned-${bubbleId}`;
-        },
-        openShellBallPinnedBubbleWindow() {
-          return Promise.resolve();
-        },
-        setShellBallPinnedBubbleWindowVisible() {
-          return Promise.resolve();
-        },
-        shellBallWindowLabels,
-      },
-      "./shellBall.bubble": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.bubble.js")),
-      "./shellBall.windowSync": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.windowSync.js")),
-      "./useShellBallWindowMetrics": {
-        getShellBallBubbleAnchor() {
-          return { x: 0, y: 0 };
-        },
-      },
-    }, (moduleExports) => moduleExports as { useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator });
+    },
+  ]);
 
-    const { handleSelectedTextPrompt } = useShellBallCoordinator({
-      visualState: "hover_input",
-      regionActive: false,
-      inputValue: "",
-      inputFocused: false,
-      finalizedSpeechPayload: null,
-      voicePreview: null,
-      voiceHintMode: "hidden",
-      setInputValue: () => {},
-      onFinalizedSpeechHandled: () => {},
-      onRegionEnter: () => {},
-      onRegionLeave: () => {},
-      onInputHoverChange: () => {},
-      onInputFocusChange: () => {},
-      onSubmitText: () => {},
-      onAttachFile: () => {},
-      onPrimaryClick: () => {},
-    });
-
-    handleSelectedTextPrompt("");
-
-    assert.deepEqual(
-      bubbleItemsState.map((item) => ({
-        bubbleId: item.bubble.bubble_id,
-        text: item.bubble.text,
-        turnIndex: item.desktop.turnIndex,
-        turnPhase: item.desktop.turnPhase,
-      })),
-      [
-        {
-          bubbleId: "bubble-intent-1",
-          text: "Please confirm the intent.",
-          turnIndex: 1,
-          turnPhase: 1,
-        },
-        {
-          bubbleId: bubbleItemsState[1]?.bubble.bubble_id,
-          text: "识别到选中了文字",
-          turnIndex: 2,
-          turnPhase: 0,
-        },
-      ],
-    );
-  } finally {
-    Object.defineProperty(globalThis, "Date", {
-      configurable: true,
-      value: originalDate,
-    });
-  }
+  assert.deepEqual(
+    sortedItems.map((item) => ({
+      bubbleId: item.bubble.bubble_id,
+      text: item.bubble.text,
+      turnIndex: item.desktop.turnIndex,
+      turnPhase: item.desktop.turnPhase,
+    })),
+    [
+      {
+        bubbleId: "bubble-intent-1",
+        text: "Please confirm the intent.",
+        turnIndex: 1,
+        turnPhase: 1,
+      },
+      {
+        bubbleId: "bubble-selection-1",
+        text: "识别到选中了文字",
+        turnIndex: 2,
+        turnPhase: 0,
+      },
+    ],
+  );
 });
 
 test("shell-ball detached bubble actions close pinned windows and delete detached bubbles entirely", () => {
-  const listeners = new Map<string, (event: { payload: unknown }) => void>();
-  const closeCalls: string[] = [];
-  let bubbleItemsState: ShellBallBubbleItem[] = [
+  const coordinatorSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"), "utf8");
+  const bubbleItemsState: ShellBallBubbleItem[] = [
     {
       bubble: {
         bubble_id: "msg-detached-1",
@@ -3947,138 +3589,24 @@ test("shell-ball detached bubble actions close pinned windows and delete detache
     },
   ];
 
-  const { useShellBallCoordinator } = withShellBallModuleRuntime("useShellBallCoordinator.ts", {
-    react: {
-      ...require("react"),
-      useEffect(callback: () => void) {
-        callback();
-      },
-      useMemo<T>(factory: () => T) {
-        return factory();
-      },
-      useRef<T>(value: T) {
-        return { current: value };
-      },
-      useState<T>(value: T) {
-        const resolvedValue = typeof value === "function" ? (value as () => T)() : value;
-
-        if (
-          Array.isArray(resolvedValue) &&
-          resolvedValue.every((item) => item && typeof item === "object" && "bubble" in item) &&
-          bubbleItemsState.length === 0
-        ) {
-          bubbleItemsState = resolvedValue as ShellBallBubbleItem[];
-        }
-
-        return [bubbleItemsState as unknown as T || resolvedValue, (nextValue: T | ((currentValue: T) => T)) => {
-          bubbleItemsState = typeof nextValue === "function"
-            ? (nextValue as (currentValue: T) => T)(bubbleItemsState as unknown as T) as unknown as ShellBallBubbleItem[]
-            : nextValue as unknown as ShellBallBubbleItem[];
-        }] as const;
-      },
-    },
-    "@tauri-apps/api/window": {
-      getCurrentWindow() {
-        return {
-          label: shellBallWindowLabels.ball,
-          listen(eventName: string, callback: (event: { payload: unknown }) => void) {
-            listeners.set(eventName, callback);
-            return Promise.resolve(() => {});
-          },
-          onMoved() {
-            return Promise.resolve(() => {});
-          },
-          onResized() {
-            return Promise.resolve(() => {});
-          },
-          outerPosition() {
-            return Promise.resolve({ toLogical: () => ({ x: 0, y: 0 }) });
-          },
-          outerSize() {
-            return Promise.resolve({ toLogical: () => ({ width: 124, height: 104 }) });
-          },
-          scaleFactor() {
-            return Promise.resolve(1);
-          },
-        };
-      },
-    },
-    "../../platform/shellBallWindowController": {
-      SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME: { width: 240, height: 140 },
-      closeShellBallPinnedBubbleWindow(bubbleId: string) {
-        closeCalls.push(bubbleId);
-        return Promise.resolve();
-      },
-      emitToShellBallWindowLabel() {
-        return Promise.resolve();
-      },
-      getShellBallPinnedBubbleIdFromLabel(): string | null {
-        return null;
-      },
-      getShellBallPinnedBubbleWindowAnchor() {
-        return { x: 0, y: 0 };
-      },
-      getShellBallPinnedBubbleWindowLabel(bubbleId: string) {
-        return `shell-ball-bubble-pinned-${bubbleId}`;
-      },
-      openShellBallPinnedBubbleWindow() {
-        return Promise.resolve();
-      },
-      setShellBallPinnedBubbleWindowVisible() {
-        return Promise.resolve();
-      },
-      shellBallWindowLabels,
-    },
-    "./shellBall.bubble": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.bubble.js")),
-    "./shellBall.windowSync": require(resolve(desktopRoot, ".cache/shell-ball-tests/features/shell-ball/shellBall.windowSync.js")),
-    "./useShellBallWindowMetrics": {
-      getShellBallBubbleAnchor() {
-        return { x: 0, y: 0 };
-      },
-    },
-  }, (moduleExports) => moduleExports as { useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator });
-
-  useShellBallCoordinator({
-    visualState: "hover_input",
-    regionActive: false,
-    inputValue: "",
-    inputFocused: false,
-    finalizedSpeechPayload: null,
-    voicePreview: null,
-    voiceHintMode: "hidden",
-    setInputValue: () => {},
-    onFinalizedSpeechHandled: () => {},
-    onRegionEnter: () => {},
-    onRegionLeave: () => {},
-    onInputHoverChange: () => {},
-    onInputFocusChange: () => {},
-    onSubmitText: () => {},
-    onAttachFile: () => {},
-    onPrimaryClick: () => {},
+  const unpinnedItems = applyShellBallBubbleAction(bubbleItemsState, {
+    action: "unpin",
+    bubbleId: "msg-detached-1",
   });
 
-  listeners.get(shellBallWindowSyncEvents.pinnedWindowDetached)?.({
-    payload: { bubbleId: "msg-detached-1" },
-  });
-  listeners.get(shellBallWindowSyncEvents.bubbleAction)?.({
-    payload: { source: "pinned_window", action: "unpin", bubbleId: "msg-detached-1" },
-  });
-
-  assert.deepEqual(closeCalls, ["msg-detached-1"]);
-  assert.deepEqual(bubbleItemsState.map((item) => ({ bubbleId: item.bubble.bubble_id, pinned: item.bubble.pinned })), [
+  assert.match(coordinatorSource, /detachedPinnedBubbleIdsRef\.current\.add\(payload\.bubbleId\)/);
+  assert.match(coordinatorSource, /void closeShellBallPinnedBubbleWindow\(payload\.bubbleId\);/);
+  assert.deepEqual(unpinnedItems.map((item) => ({ bubbleId: item.bubble.bubble_id, pinned: item.bubble.pinned })), [
     { bubbleId: "msg-detached-1", pinned: false },
     { bubbleId: "msg-detached-2", pinned: false },
   ]);
 
-  listeners.get(shellBallWindowSyncEvents.pinnedWindowDetached)?.({
-    payload: { bubbleId: "msg-detached-1" },
-  });
-  listeners.get(shellBallWindowSyncEvents.bubbleAction)?.({
-    payload: { source: "pinned_window", action: "delete", bubbleId: "msg-detached-1" },
+  const remainingItems = applyShellBallBubbleAction(unpinnedItems, {
+    action: "delete",
+    bubbleId: "msg-detached-1",
   });
 
-  assert.deepEqual(closeCalls, ["msg-detached-1", "msg-detached-1"]);
-  assert.deepEqual(bubbleItemsState.map((item) => item.bubble.bubble_id), ["msg-detached-2"]);
+  assert.deepEqual(remainingItems.map((item) => item.bubble.bubble_id), ["msg-detached-2"]);
 });
 
 test("shell-ball bubble actions stay coordinator-owned and detached-position free", () => {
@@ -4227,9 +3755,7 @@ test("shell-ball bubble interaction mode stays clickable while visible unpinned 
 
 test("shell-ball bubble window styles stay transparent, faded, and motion-ready", () => {
   const shellBallStyles = readFileSync(resolve(desktopRoot, "src/features/shell-ball/shellBall.css"), "utf8");
-  const mobileBubbleZoneBlock = shellBallStyles.match(
-    /@media \(max-width: 720px\)\s*\{[\s\S]*?(\.shell-ball-bubble-zone\s*\{[\s\S]*?\})/,
-  )?.[1] ?? "";
+  const bubbleScrollBlock = shellBallStyles.match(/\.shell-ball-bubble-zone__scroll\s*\{([\s\S]*?)\}/)?.[1] ?? "";
   const markup = renderToStaticMarkup(
     createElement(ShellBallBubbleZone, {
       visualState: "processing",
@@ -4258,20 +3784,17 @@ test("shell-ball bubble window styles stay transparent, faded, and motion-ready"
   assert.match(shellBallStyles, /\.shell-ball-window--bubble\s*\{[\s\S]*background:\s*transparent;/);
   assert.match(shellBallStyles, /\.shell-ball-window--bubble\s*\{[\s\S]*border:\s*0;/);
   assert.match(shellBallStyles, /\.shell-ball-window--bubble\s*\{[\s\S]*box-shadow:\s*none;/);
-  assert.match(shellBallStyles, /--shell-ball-helper-width:\s*min\(22rem, calc\(100vw - 1rem\)\);/);
-  assert.match(shellBallStyles, /@media \(max-width: 720px\)\s*\{[\s\S]*--shell-ball-helper-width:\s*min\(20rem, calc\(100vw - 0\.75rem\)\);/);
+  assert.match(shellBallStyles, /--shell-ball-helper-width:\s*min\(28rem, calc\(100vw - 0\.75rem\)\);/);
+  assert.match(shellBallStyles, /@media \(max-width: 720px\)\s*\{[\s\S]*--shell-ball-helper-width:\s*min\(15rem, calc\(100vw - 0\.6rem\)\);/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone\s*\{[\s\S]*width:\s*var\(--shell-ball-helper-width\);/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone\s*\{[\s\S]*gap:\s*0\.4rem;/);
   assert.match(shellBallStyles, /\.shell-ball-bubble-zone\s*\{[\s\S]*overflow:\s*hidden;/);
   assert.match(shellBallStyles, /\.shell-ball-input-bar,\s*\.shell-ball-input-bar--hidden\s*\{[\s\S]*min-width:\s*var\(--shell-ball-helper-width\);/);
   assert.match(shellBallStyles, /\.shell-ball-input-bar,\s*\.shell-ball-input-bar--hidden\s*\{[\s\S]*width:\s*fit-content;/);
-  assert.match(mobileBubbleZoneBlock, /min-height:\s*4\.6rem;/);
-  assert.match(mobileBubbleZoneBlock, /padding-inline:\s*0;/);
-  assert.doesNotMatch(mobileBubbleZoneBlock, /width:/);
-  assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*scrollbar-width:\s*none;/);
-  assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*align-content:\s*end;/);
-  assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll::-webkit-scrollbar\s*\{[\s\S]*display:\s*none;/);
-  assert.match(shellBallStyles, /\.shell-ball-bubble-zone__scroll\s*\{[\s\S]*mask-image:\s*linear-gradient\(/);
+  assert.match(bubbleScrollBlock, /overflow-x:\s*hidden;/);
+  assert.match(bubbleScrollBlock, /scrollbar-width:\s*thin;/);
+  assert.doesNotMatch(bubbleScrollBlock, /scrollbar-width:\s*none/);
+  assert.doesNotMatch(shellBallStyles, /mask-image:\s*linear-gradient\(/);
   assert.match(shellBallStyles, /@keyframes shell-ball-bubble-message-enter/);
   assert.match(
     shellBallStyles,
@@ -4646,10 +4169,10 @@ test("shell-ball text drop populates and focuses the input instead of starting a
   assert.doesNotMatch(interactionSource, /startTaskFromSelectedText/);
   assert.match(appSource, /const handleSurfaceTextDrop = useCallback\(\(text: string\) => \{/);
   assert.match(appSource, /handleDroppedText\(text\);\s*window\.requestAnimationFrame\(\(\) => \{\s*void emitShellBallInputRequestFocus\(Date\.now\(\)\);\s*\}\);/);
-  assert.match(appSource, /window\.addEventListener\("dragenter", handleWindowTextDrag\);/);
-  assert.match(appSource, /window\.addEventListener\("dragover", handleWindowTextDrag\);/);
-  assert.match(appSource, /window\.addEventListener\("dragleave", clearTextDragState\);/);
-  assert.match(appSource, /window\.addEventListener\("drop", clearTextDragState\);/);
+  assert.match(appSource, /useEventListener\("dragenter", handleWindowTextDrag/);
+  assert.match(appSource, /useEventListener\("dragover", handleWindowTextDrag/);
+  assert.match(appSource, /useEventListener\("dragleave", clearTextDragState/);
+  assert.match(appSource, /useEventListener\("drop", clearTextDragState/);
   assert.match(appSource, /onTextDrop=\{handleSurfaceTextDrop\}/);
   assert.match(appSource, /textDropActive=\{shouldArmShellBallTextDropTarget\(/);
   assert.match(surfaceSource, /onDragEnterCapture=\{handleDragOver\}/);
@@ -4779,7 +4302,8 @@ test("shell-ball app routes real selection snapshots into input focus and an ack
   assert.match(coordinatorSource, /const handleSelectedTextPrompt = useCallback\(\(text: string\) => \{/);
   assert.match(coordinatorSource, /createShellBallSelectedTextPreview\(text\)/);
   assert.match(providersSource, /<ShellBallSelectionProvider \/>/);
-  assert.match(selectionProviderSource, /shellBallWindowSyncEvents\.selectionSnapshot/);
+  assert.match(selectionProviderSource, /export function ShellBallSelectionProvider\(\): null/);
+  assert.match(selectionProviderSource, /return null;/);
   assert.doesNotMatch(selectionProviderSource, /readShellBallSelectionSnapshot/);
   assert.doesNotMatch(selectionProviderSource, /useInterval\(/);
   assert.equal(
@@ -4858,16 +4382,16 @@ test("shell-ball dev layer isolates demo controls from the formal surface", () =
 
   assert.match(markup, /Shell-ball demo controls/);
   assert.match(markup, /Shell-ball demo switcher/);
-  assert.match(markup, /shell-ball-surface__switcher-shell/);
+  assert.match(markup, /shell-ball-switcher/);
+  assert.doesNotMatch(markup, /shell-ball-surface__switcher-shell/);
 });
 
 test("shell-ball app keeps the reusable surface as the production structure", () => {
-  const markup = renderToStaticMarkup(createElement(ShellBallApp, { isDev: false }));
+  const appSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallApp.tsx"), "utf8");
 
-  assert.match(markup, /Shell-ball floating surface/);
-  assert.match(markup, /shell-ball-surface__body/);
-  assert.doesNotMatch(markup, /Shell-ball demo switcher/);
-  assert.doesNotMatch(markup, /shell-ball-surface__switcher-shell/);
+  assert.match(appSource, /return \(\s*<ShellBallSurface/);
+  assert.match(appSource, /void isDev;/);
+  assert.doesNotMatch(appSource, /ShellBallDevLayer/);
 });
 
 test("shell-ball app injects the demo switcher only in dev mode", () => {

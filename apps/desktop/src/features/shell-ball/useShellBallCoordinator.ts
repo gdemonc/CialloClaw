@@ -16,7 +16,7 @@ import {
 } from "../../platform/shellBallWindowController";
 import { cloneShellBallBubbleItems, type ShellBallBubbleItem } from "./shellBall.bubble";
 import type { ShellBallVoicePreview } from "./shellBall.interaction";
-import type { ShellBallInputBarMode, ShellBallVisualState, ShellBallVoiceHintMode } from "./shellBall.types";
+import type { ShellBallVisualState, ShellBallVoiceHintMode } from "./shellBall.types";
 import type { ShellBallInputSubmitResult } from "./useShellBallInteraction";
 import { isRpcTransportUnavailable } from "@/rpc/fallback";
 import { readClipboardText } from "@/services/clipboardService";
@@ -37,7 +37,6 @@ import {
   type ShellBallInputFocusPayload,
   type ShellBallInputHoverPayload,
   type ShellBallPendingFileActionPayload,
-  type ShellBallInputRequestFocusPayload,
   type ShellBallPinnedWindowDetachedPayload,
   type ShellBallPinnedWindowReadyPayload,
   type ShellBallPrimaryAction,

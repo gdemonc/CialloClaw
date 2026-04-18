@@ -35,7 +35,6 @@ import { subscribeApprovalPending, subscribeTask } from "@/rpc/subscriptions";
 import {
   isDashboardSafetyApprovalSnapshotOnly,
   resolveDashboardSafetyNavigationRoute,
-  resolveDashboardSafetyFocusTarget,
   resolveDashboardSafetySnapshotLifecycle,
   shouldRetainDashboardSafetyActiveDetail,
 } from "@/features/dashboard/shared/dashboardSafetyNavigation";
@@ -574,7 +573,7 @@ export function SecurityApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const dataMode: "rpc" = "rpc";
+  const dataMode = "rpc" as const;
   const [moduleData, setModuleData] = useState<SecurityModuleData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
