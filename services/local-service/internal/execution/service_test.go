@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/audit"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/checkpoint"
@@ -17,6 +18,7 @@ import (
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/platform"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/plugin"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/risk"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools/builtin"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools/sidecarclient"
@@ -78,6 +80,7 @@ func newTestExecutionServiceWithConfig(t *testing.T, cfg serviceconfig.ModelConf
 		t.Fatalf("register builtin tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
+	artifactStore := storage.NewService(nil).ArtifactStore()
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -85,6 +88,7 @@ func newTestExecutionServiceWithConfig(t *testing.T, cfg serviceconfig.ModelConf
 		sidecarclient.NewNoopPlaywrightSidecarClient(),
 		sidecarclient.NewNoopOCRWorkerClient(),
 		sidecarclient.NewNoopMediaWorkerClient(),
+		sidecarclient.NewNoopScreenCaptureClient(),
 		model.NewService(cfg, &stubModelClient{output: output}),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -92,7 +96,7 @@ func newTestExecutionServiceWithConfig(t *testing.T, cfg serviceconfig.ModelConf
 		toolRegistry,
 		toolExecutor,
 		plugin.NewService(),
-	), workspaceRoot
+	).WithArtifactStore(artifactStore), workspaceRoot
 }
 
 func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (*Service, string) {
@@ -108,6 +112,7 @@ func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (
 		t.Fatalf("register builtin tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
+	artifactStore := storage.NewService(nil).ArtifactStore()
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -115,6 +120,7 @@ func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (
 		sidecarclient.NewNoopPlaywrightSidecarClient(),
 		sidecarclient.NewNoopOCRWorkerClient(),
 		sidecarclient.NewNoopMediaWorkerClient(),
+		sidecarclient.NewNoopScreenCaptureClient(),
 		model.NewService(serviceconfig.ModelConfig{}, client),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -122,7 +128,7 @@ func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (
 		toolRegistry,
 		toolExecutor,
 		plugin.NewService(),
-	), workspaceRoot
+	).WithArtifactStore(artifactStore), workspaceRoot
 }
 
 func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwright tools.PlaywrightSidecarClient) (*Service, string) {
@@ -141,6 +147,7 @@ func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwrig
 		t.Fatalf("register playwright tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
+	artifactStore := storage.NewService(nil).ArtifactStore()
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -148,6 +155,7 @@ func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwrig
 		playwright,
 		sidecarclient.NewNoopOCRWorkerClient(),
 		sidecarclient.NewNoopMediaWorkerClient(),
+		sidecarclient.NewNoopScreenCaptureClient(),
 		model.NewService(serviceconfig.ModelConfig{}, &stubModelClient{output: output}),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -155,7 +163,7 @@ func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwrig
 		toolRegistry,
 		toolExecutor,
 		plugin.NewService(),
-	), workspaceRoot
+	).WithArtifactStore(artifactStore), workspaceRoot
 }
 
 func newTestExecutionServiceWithWorkers(t *testing.T, output string, playwright tools.PlaywrightSidecarClient, ocr tools.OCRWorkerClient, media tools.MediaWorkerClient) (*Service, string) {
@@ -180,6 +188,7 @@ func newTestExecutionServiceWithWorkers(t *testing.T, output string, playwright 
 		t.Fatalf("register media tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
+	artifactStore := storage.NewService(nil).ArtifactStore()
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -187,6 +196,7 @@ func newTestExecutionServiceWithWorkers(t *testing.T, output string, playwright 
 		playwright,
 		ocr,
 		media,
+		sidecarclient.NewNoopScreenCaptureClient(),
 		model.NewService(serviceconfig.ModelConfig{}, &stubModelClient{output: output}),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -194,7 +204,7 @@ func newTestExecutionServiceWithWorkers(t *testing.T, output string, playwright 
 		toolRegistry,
 		toolExecutor,
 		plugin.NewService(),
-	), workspaceRoot
+	).WithArtifactStore(artifactStore), workspaceRoot
 }
 
 func registerBuiltinTools(t *testing.T) *tools.Registry {
@@ -430,6 +440,7 @@ func newTestExecutionServiceWithModelClientAndConfig(t *testing.T, cfg serviceco
 		sidecarclient.NewNoopPlaywrightSidecarClient(),
 		sidecarclient.NewNoopOCRWorkerClient(),
 		sidecarclient.NewNoopMediaWorkerClient(),
+		sidecarclient.NewNoopScreenCaptureClient(),
 		model.NewService(cfg, client),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -837,6 +848,7 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 		sidecarclient.NewNoopPlaywrightSidecarClient(),
 		sidecarclient.NewNoopOCRWorkerClient(),
 		sidecarclient.NewNoopMediaWorkerClient(),
+		sidecarclient.NewNoopScreenCaptureClient(),
 		model.NewService(serviceconfig.ModelConfig{}, &stubModelClient{err: errors.New("provider unavailable")}),
 		audit.NewService(),
 		checkpoint.NewService(),
@@ -860,6 +872,275 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 	}
 	if !strings.Contains(result.BubbleText, "需要解释的文本") {
 		t.Fatalf("expected fallback bubble to include normalized input, got %s", result.BubbleText)
+	}
+}
+
+func TestScreenCapabilitySnapshotReportsWiringState(t *testing.T) {
+	service, _ := newTestExecutionService(t, "screen capability probe")
+	snapshot := service.ScreenCapabilitySnapshot()
+	if !snapshot.Available {
+		t.Fatalf("expected noop screen capability to be wired, got %+v", snapshot)
+	}
+	if len(snapshot.CaptureModes) != 3 {
+		t.Fatalf("expected three capture modes, got %+v", snapshot)
+	}
+
+	service.screen = nil
+	snapshot = service.ScreenCapabilitySnapshot()
+	if snapshot.Available || len(snapshot.CaptureModes) != 0 {
+		t.Fatalf("expected nil screen capability to report unavailable, got %+v", snapshot)
+	}
+}
+
+func TestScreenLifecycleReadyReportsLifecycleManagerWiring(t *testing.T) {
+	service, _ := newTestExecutionService(t, "screen lifecycle probe")
+	if !service.ScreenLifecycleReady() {
+		t.Fatal("expected lifecycle manager to be wired")
+	}
+	service.lifecycle = nil
+	if service.ScreenLifecycleReady() {
+		t.Fatal("expected nil lifecycle manager to report unavailable")
+	}
+}
+
+func TestBuildScreenObservationFlowSucceeds(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_sess_001/frame_001.png", Text: "fatal error at line 3", Language: "eng", Source: "ocr_worker_text"}}
+	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+	flow, err := service.buildScreenObservationFlow(context.Background(), "task_screen_002", tools.ScreenFrameCandidate{
+		FrameID:         "frame_001",
+		ScreenSessionID: "screen_sess_001",
+		CaptureMode:     tools.ScreenCaptureModeScreenshot,
+		Source:          "voice",
+		Path:            "temp/screen_sess_001/frame_001.png",
+		CapturedAt:      time.Date(2026, 4, 18, 19, 0, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+	}, "eng", "error_evidence", map[string]any{"region_count": 1})
+	if err != nil {
+		t.Fatalf("buildScreenObservationFlow returned error: %v", err)
+	}
+	if flow.OCRInput["path"] != "temp/screen_sess_001/frame_001.png" || flow.OCRResult.Text == "" {
+		t.Fatalf("unexpected OCR bridge result: %+v", flow)
+	}
+	if flow.ObservationSeed["frame_id"] != "frame_001" || flow.Artifact["artifact_type"] != "screen_capture" {
+		t.Fatalf("unexpected observation flow result: %+v", flow)
+	}
+}
+
+func TestBuildScreenObservationFlowReturnsOCRFailure(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{err: tools.ErrOCRWorkerFailed}
+	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+	_, err := service.buildScreenObservationFlow(context.Background(), "task_screen_003", tools.ScreenFrameCandidate{
+		FrameID:         "frame_002",
+		ScreenSessionID: "screen_sess_002",
+		CaptureMode:     tools.ScreenCaptureModeScreenshot,
+		Source:          "voice",
+		Path:            "temp/screen_sess_002/frame_002.png",
+		CapturedAt:      time.Date(2026, 4, 18, 19, 30, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+	}, "eng", "error_evidence", nil)
+	if !errors.Is(err, tools.ErrOCRWorkerFailed) {
+		t.Fatalf("expected OCR worker failure, got %v", err)
+	}
+}
+
+func TestBuildScreenAnalysisResultSucceeds(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_sess_010/frame_010.png", Text: "build failed because dependency lockfile is missing", Language: "eng", Source: "ocr_worker_text"}}
+	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+	analysis, err := service.buildScreenAnalysisResult(context.Background(), "task_screen_analysis_001", tools.ScreenFrameCandidate{
+		FrameID:         "frame_010",
+		ScreenSessionID: "screen_sess_010",
+		CaptureMode:     tools.ScreenCaptureModeScreenshot,
+		Source:          "voice",
+		Path:            "temp/screen_sess_010/frame_010.png",
+		CapturedAt:      time.Date(2026, 4, 18, 20, 0, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+	}, "eng", "error_evidence", map[string]any{"region_count": 1})
+	if err != nil {
+		t.Fatalf("buildScreenAnalysisResult returned error: %v", err)
+	}
+	if !strings.Contains(analysis.BubbleText, "已分析屏幕内容") || analysis.PreviewText == "" {
+		t.Fatalf("expected non-empty bubble/preview, got %+v", analysis)
+	}
+	if analysis.Artifact["artifact_type"] != "screen_capture" {
+		t.Fatalf("expected screen capture artifact, got %+v", analysis.Artifact)
+	}
+	if analysis.ObservationSummary["frame_id"] != "frame_010" {
+		t.Fatalf("expected observation summary to retain frame id, got %+v", analysis.ObservationSummary)
+	}
+	if analysis.CitationSeed["artifact_id"] == "" || analysis.CitationSeed["ocr_excerpt"] == "" {
+		t.Fatalf("expected citation-ready seed, got %+v", analysis.CitationSeed)
+	}
+}
+
+func TestBuildScreenAnalysisResultFallsBackWhenOCRTextEmpty(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_sess_011/frame_011.png", Text: "   ", Language: "eng", Source: "ocr_worker_text"}}
+	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+	analysis, err := service.buildScreenAnalysisResult(context.Background(), "task_screen_analysis_002", tools.ScreenFrameCandidate{
+		FrameID:         "frame_011",
+		ScreenSessionID: "screen_sess_011",
+		CaptureMode:     tools.ScreenCaptureModeScreenshot,
+		Source:          "voice",
+		Path:            "temp/screen_sess_011/frame_011.png",
+		CapturedAt:      time.Date(2026, 4, 18, 20, 30, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+	}, "eng", "error_evidence", nil)
+	if err != nil {
+		t.Fatalf("buildScreenAnalysisResult returned error: %v", err)
+	}
+	if !strings.Contains(analysis.BubbleText, "未识别到可用屏幕文本") {
+		t.Fatalf("expected empty OCR summary fallback, got %+v", analysis)
+	}
+}
+
+func TestExecuteInternalScreenAnalysisReturnsResult(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_sess_020/frame_020.png", Text: "build failed due to missing env file", Language: "eng", Source: "ocr_worker_text"}}
+	service, workspaceRoot := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "temp", "screen_sess_020"), 0o755); err != nil {
+		t.Fatalf("mkdir screen temp dir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "temp", "screen_sess_020", "frame_020.png"), []byte("fake screen capture"), 0o644); err != nil {
+		t.Fatalf("write screen temp file failed: %v", err)
+	}
+	result, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_screen_exec_001",
+		RunID:        "run_screen_exec_001",
+		Title:        "分析屏幕截图",
+		Intent:       map[string]any{"name": internalScreenAnalyzeIntent, "arguments": map[string]any{"frame_id": "frame_020", "screen_session_id": "screen_sess_020", "path": "temp/screen_sess_020/frame_020.png", "capture_mode": "screenshot", "language": "eng", "evidence_role": "error_evidence"}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "请分析截图中的错误"},
+		DeliveryType: "bubble",
+		ResultTitle:  "屏幕分析结果",
+	})
+	if err != nil {
+		t.Fatalf("internal screen analysis execute failed: %v", err)
+	}
+	if result.ToolName != internalScreenAnalyzeIntent || !strings.Contains(result.BubbleText, "已分析屏幕内容") {
+		t.Fatalf("unexpected internal screen analysis result: %+v", result)
+	}
+	if len(result.Artifacts) != 1 || result.Artifacts[0]["artifact_type"] != "screen_capture" {
+		t.Fatalf("expected one screen capture artifact, got %+v", result.Artifacts)
+	}
+	if result.ToolOutput["observation_summary"] == nil || result.ToolOutput["citation_seed"] == nil {
+		t.Fatalf("expected observation and citation outputs, got %+v", result.ToolOutput)
+	}
+	if result.AuditRecord == nil || result.ToolOutput["audit_record"] == nil {
+		t.Fatalf("expected audit record to be attached, got result=%+v", result)
+	}
+	auditRecord := result.AuditRecord
+	if auditRecord["action"] != "screen.capture.screenshot_analyze" {
+		t.Fatalf("expected formalized screen audit action, got %+v", auditRecord)
+	}
+	auditMetadata := mapValue(auditRecord, "metadata")
+	if auditMetadata["screen_session_id"] == "" || auditMetadata["capture_mode"] != "screenshot" {
+		t.Fatalf("expected screen audit metadata, got %+v", auditRecord)
+	}
+	cleanupSummary := mapValue(result.ToolOutput, "cleanup_summary")
+	if cleanupSummary["reason"] != "screen_analysis_pending_cleanup" || cleanupSummary["skipped_count"] != 1 {
+		t.Fatalf("expected cleanup summary to be attached, got %+v", result.ToolOutput)
+	}
+	traceSummary := mapValue(result.ToolOutput, "trace_summary")
+	if traceSummary["kind"] != "screen_analysis" || traceSummary["frame_id"] != "frame_020" {
+		t.Fatalf("expected trace summary to be attached, got %+v", result.ToolOutput)
+	}
+	evalSummary := mapValue(result.ToolOutput, "eval_summary")
+	if evalSummary["kind"] != "screen_analysis" || evalSummary["has_artifact"] != true {
+		t.Fatalf("expected eval summary to be attached, got %+v", result.ToolOutput)
+	}
+	cleanupPlan := mapValue(result.ToolOutput, "cleanup_plan")
+	if cleanupPlan["cleanup_required"] != true {
+		t.Fatalf("expected cleanup plan to be attached, got %+v", result.ToolOutput)
+	}
+	cleanupExecuted := mapValue(result.ToolOutput, "cleanup_executed")
+	if cleanupExecuted["deleted_count"] != 1 {
+		t.Fatalf("expected cleanup execution summary, got %+v", result.ToolOutput)
+	}
+	persisted := mapValue(result.ToolOutput, "artifact_persisted")
+	if persisted["persisted"] != true {
+		t.Fatalf("expected artifact persistence result, got %+v", result.ToolOutput)
+	}
+	if len(result.RecoveryPoint) != 0 || len(mapValue(result.ToolOutput, "recovery_point")) != 0 {
+		t.Fatalf("expected successful cleanup to avoid recovery point, got %+v", result)
+	}
+	records, total, err := service.artifactStore.ListArtifacts(context.Background(), "task_screen_exec_001", 20, 0)
+	if err != nil || total != 1 || len(records) != 1 {
+		t.Fatalf("expected persisted screen artifact record, total=%d len=%d err=%v", total, len(records), err)
+	}
+	if records[0].ArtifactType != "screen_capture" {
+		t.Fatalf("expected screen_capture artifact record, got %+v", records[0])
+	}
+}
+
+func TestExecuteInternalScreenAnalysisRejectsIncompleteCandidate(t *testing.T) {
+	service, _ := newTestExecutionService(t, "unused")
+	_, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_screen_exec_002",
+		RunID:        "run_screen_exec_002",
+		Title:        "分析屏幕截图",
+		Intent:       map[string]any{"name": internalScreenAnalyzeIntent, "arguments": map[string]any{"screen_session_id": "screen_sess_021"}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "请分析截图中的错误"},
+		DeliveryType: "bubble",
+		ResultTitle:  "屏幕分析结果",
+	})
+	if err == nil || !strings.Contains(err.Error(), "screen analysis candidate arguments are incomplete") {
+		t.Fatalf("expected incomplete candidate error, got %v", err)
+	}
+}
+
+func TestExecuteScreenCleanupPlanHandlesSkippedPaths(t *testing.T) {
+	service, _ := newTestExecutionService(t, "unused")
+	result := service.executeScreenCleanupPlan(map[string]any{
+		"reason":           "screen_analysis_pending_cleanup",
+		"cleanup_required": true,
+		"paths":            []string{"temp/missing.png"},
+	})
+	if result["deleted_count"] != 0 || result["skipped_count"] != 1 {
+		t.Fatalf("expected skipped cleanup result, got %+v", result)
+	}
+}
+
+func TestExecuteScreenCleanupPlanDeletesExistingWorkspacePath(t *testing.T) {
+	service, workspaceRoot := newTestExecutionService(t, "unused")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "temp", "screen_sess_030"), 0o755); err != nil {
+		t.Fatalf("mkdir temp screen path: %v", err)
+	}
+	targetPath := filepath.Join(workspaceRoot, "temp", "screen_sess_030", "frame_030.png")
+	if err := os.WriteFile(targetPath, []byte("demo"), 0o644); err != nil {
+		t.Fatalf("write temp screen file: %v", err)
+	}
+	result := service.executeScreenCleanupPlan(map[string]any{
+		"reason":           "screen_analysis_pending_cleanup",
+		"cleanup_required": true,
+		"paths":            []string{"temp/screen_sess_030/frame_030.png"},
+	})
+	if result["deleted_count"] != 1 || result["skipped_count"] != 0 {
+		t.Fatalf("expected deleted cleanup result, got %+v", result)
+	}
+	if _, err := os.Stat(targetPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected target file to be removed, got %v", err)
+	}
+}
+
+func TestScreenAnalysisRecoveryPointRefinesPendingCleanupSemantics(t *testing.T) {
+	service, _ := newTestExecutionService(t, "unused")
+	recoveryPoint := service.screenAnalysisRecoveryPoint(context.Background(), "task_screen_recovery_001", map[string]any{
+		"screen_session_id": "screen_sess_099",
+		"reason":            "screen_analysis_pending_cleanup",
+		"cleanup_required":  true,
+		"paths":             []string{"temp/screen_sess_099/frame_099.png"},
+	}, map[string]any{
+		"reason":        "screen_analysis_pending_cleanup",
+		"deleted_paths": []string{},
+		"skipped_paths": []string{"temp/screen_sess_099/frame_099.png"},
+		"deleted_count": 0,
+		"skipped_count": 1,
+	})
+	if recoveryPoint == nil {
+		t.Fatal("expected pending cleanup to yield recovery point")
+	}
+	if recoveryPoint["summary"] != "screen_cleanup_pending:screen_analysis_pending_cleanup" {
+		t.Fatalf("expected refined screen cleanup summary, got %+v", recoveryPoint)
+	}
+	if recoveryPoint["kind"] != "screen_cleanup" || recoveryPoint["cleanup_status"] != "pending_retry" {
+		t.Fatalf("expected refined recovery semantics, got %+v", recoveryPoint)
 	}
 }
 
@@ -1113,6 +1394,46 @@ func TestExecutionWorkerHelpersCoverArtifactsRecoveryAndTrace(t *testing.T) {
 	}
 	if len(cloneMapSlice([]map[string]any{{"path": "notes/demo.txt"}})) != 1 {
 		t.Fatalf("expected cloneMapSlice to clone one item")
+	}
+	screenArtifact, err := screenArtifactFromCandidate("task_screen_001", tools.NewScreenLifecycleManager(), tools.ScreenFrameCandidate{
+		FrameID:         "frame_001",
+		ScreenSessionID: "screen_sess_001",
+		CaptureMode:     tools.ScreenCaptureModeKeyframe,
+		Source:          "voice",
+		Path:            "temp/screen_sess_001/frame_001.png",
+		CapturedAt:      time.Date(2026, 4, 18, 18, 0, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+	}, "error_evidence", map[string]any{"region_count": 2})
+	if err != nil {
+		t.Fatalf("screenArtifactFromCandidate returned error: %v", err)
+	}
+	if screenArtifact["artifact_type"] != "screen_capture" || screenArtifact["artifact_id"] == "" {
+		t.Fatalf("expected stable screen artifact, got %+v", screenArtifact)
+	}
+	payload := mapValue(screenArtifact, "delivery_payload")
+	if payload["screen_session_id"] != "screen_sess_001" || payload["evidence_role"] != "error_evidence" {
+		t.Fatalf("expected screen metadata in delivery payload, got %+v", payload)
+	}
+	ocrInput, ok := screenOCRInputFromCandidate(tools.ScreenFrameCandidate{Path: "temp/screen_sess_001/frame_001.png"}, "eng")
+	if !ok || ocrInput["path"] != "temp/screen_sess_001/frame_001.png" || ocrInput["language"] != "eng" {
+		t.Fatalf("unexpected screen OCR input: %+v ok=%v", ocrInput, ok)
+	}
+	if _, ok := screenOCRInputFromCandidate(tools.ScreenFrameCandidate{}, "eng"); ok {
+		t.Fatal("expected empty screen candidate to skip OCR input generation")
+	}
+	observation := screenObservationSeed(
+		tools.ScreenFrameCandidate{
+			FrameID:         "frame_001",
+			ScreenSessionID: "screen_sess_001",
+			CaptureMode:     tools.ScreenCaptureModeScreenshot,
+			Source:          "voice",
+			Path:            "temp/screen_sess_001/frame_001.png",
+			CapturedAt:      time.Date(2026, 4, 18, 18, 30, 0, 0, time.UTC),
+		},
+		tools.OCRTextResult{Path: "temp/screen_sess_001/frame_001.png", Text: "screen error text example", Language: "eng", Source: "ocr_worker_text"},
+	)
+	if observation["frame_id"] != "frame_001" || observation["ocr_language"] != "eng" {
+		t.Fatalf("unexpected screen observation seed: %+v", observation)
 	}
 }
 
