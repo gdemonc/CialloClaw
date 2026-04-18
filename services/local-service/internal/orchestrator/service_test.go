@@ -3081,6 +3081,87 @@ func TestServiceSecurityRespondPersistsAuthorizationRecord(t *testing.T) {
 	if items[0].TaskID != taskID || items[0].Decision != "allow_once" || !items[0].RememberRule {
 		t.Fatalf("unexpected authorization record: %+v", items[0])
 	}
+	approvalItems, approvalTotal, err := service.storage.ApprovalRequestStore().ListApprovalRequests(context.Background(), taskID, 20, 0)
+	if err != nil || approvalTotal != 1 || len(approvalItems) != 1 {
+		t.Fatalf("expected one approval request after authorization, got total=%d items=%+v err=%v", approvalTotal, approvalItems, err)
+	}
+	if approvalItems[0].Status != "approved" {
+		t.Fatalf("expected resolved approval request to be marked approved, got %+v", approvalItems[0])
+	}
+}
+
+func TestServiceSecurityRespondKeepsAuthorizationHistoryAcrossMultipleCycles(t *testing.T) {
+	service, workspaceRoot := newTestServiceWithExecution(t, "history persistence output")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "notes"), 0o755); err != nil {
+		t.Fatalf("mkdir notes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "notes", "output.md"), []byte("old content"), 0o644); err != nil {
+		t.Fatalf("seed output file: %v", err)
+	}
+
+	startResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_authorization_history",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请覆盖该文件",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"target_path": "notes/output.md",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+
+	if _, err := service.SecurityRespond(map[string]any{"task_id": taskID, "approval_id": taskID, "decision": "allow_once"}); err != nil {
+		t.Fatalf("security respond for initial write failed: %v", err)
+	}
+	pointsResult, err := service.SecurityRestorePointsList(map[string]any{"task_id": taskID, "limit": 20, "offset": 0})
+	if err != nil {
+		t.Fatalf("security restore points list failed: %v", err)
+	}
+	points := pointsResult["items"].([]map[string]any)
+	if len(points) == 0 {
+		t.Fatal("expected restore point to exist for second approval cycle")
+	}
+	if _, err := service.SecurityRestoreApply(map[string]any{"task_id": taskID, "recovery_point_id": points[0]["recovery_point_id"]}); err != nil {
+		t.Fatalf("security restore apply failed: %v", err)
+	}
+	if _, err := service.SecurityRespond(map[string]any{"task_id": taskID, "approval_id": "appr_restore_apply_history", "decision": "allow_once"}); err != nil {
+		t.Fatalf("security respond for restore apply failed: %v", err)
+	}
+
+	items, total, err := service.storage.AuthorizationRecordStore().ListAuthorizationRecords(context.Background(), taskID, 20, 0)
+	if err != nil {
+		t.Fatalf("list authorization history failed: %v", err)
+	}
+	if total < 2 || len(items) < 2 {
+		t.Fatalf("expected at least two authorization records, got total=%d items=%+v", total, items)
+	}
+	if items[0].AuthorizationRecordID == items[1].AuthorizationRecordID {
+		t.Fatalf("expected unique authorization record ids across approval cycles, got %+v", items)
+	}
+	if items[0].ApprovalID == "" || items[1].ApprovalID == "" {
+		t.Fatalf("expected authorization history to keep approval ids, got %+v", items)
+	}
+	approvalItems, approvalTotal, err := service.storage.ApprovalRequestStore().ListApprovalRequests(context.Background(), taskID, 20, 0)
+	if err != nil || approvalTotal < 2 || len(approvalItems) < 2 {
+		t.Fatalf("expected approval history for both cycles, got total=%d items=%+v err=%v", approvalTotal, approvalItems, err)
+	}
+	for _, item := range approvalItems {
+		if item.Status == "pending" {
+			t.Fatalf("expected all resolved approvals to be non-pending, got %+v", approvalItems)
+		}
+	}
 }
 
 func TestServiceStartTaskWriteFileOverwriteWaitsForApproval(t *testing.T) {
@@ -5273,6 +5354,43 @@ func TestServiceSecurityPendingListFallsBackToApprovalRequestStore(t *testing.T)
 	page := result["page"].(map[string]any)
 	if page["total"] != 1 || page["has_more"] != false {
 		t.Fatalf("expected storage-backed page metadata, got %+v", page)
+	}
+}
+
+func TestServiceSecurityPendingListIgnoresResolvedApprovalStoreRecords(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "security pending approval resolved fallback")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+
+	err := service.storage.ApprovalRequestStore().WriteApprovalRequest(context.Background(), storage.ApprovalRequestRecord{
+		ApprovalID:      "appr_store_resolved_001",
+		TaskID:          "task_store_resolved_001",
+		OperationName:   "restore_apply",
+		RiskLevel:       "red",
+		TargetObject:    "workspace/result.md",
+		Reason:          "resolved approval request should not backfill pending list",
+		Status:          "approved",
+		ImpactScopeJSON: `{"files":["workspace/result.md"]}`,
+		CreatedAt:       "2026-04-18T10:00:00Z",
+		UpdatedAt:       "2026-04-18T10:01:00Z",
+	})
+	if err != nil {
+		t.Fatalf("write resolved approval request failed: %v", err)
+	}
+
+	result, err := service.SecurityPendingList(map[string]any{"limit": float64(20), "offset": float64(0)})
+	if err != nil {
+		t.Fatalf("security pending list failed: %v", err)
+	}
+
+	items := result["items"].([]map[string]any)
+	if len(items) != 0 {
+		t.Fatalf("expected resolved approval record to stay out of pending list, got %+v", items)
+	}
+	page := result["page"].(map[string]any)
+	if page["total"] != 0 || page["has_more"] != false {
+		t.Fatalf("expected empty page metadata after filtering resolved approvals, got %+v", page)
 	}
 }
 

@@ -560,16 +560,31 @@ func (s *Service) persistAuthorizationRecord(taskID string, authorizationRecord 
 	if s == nil || s.storage == nil || len(authorizationRecord) == 0 {
 		return nil
 	}
+	approvalID := stringValue(authorizationRecord, "approval_id", "")
+	recordID := stringValue(authorizationRecord, "authorization_record_id", "")
+	if approvalID != "" {
+		recordID = fmt.Sprintf("auth_%s_%d", approvalID, time.Now().UnixNano())
+	}
 	record := storage.AuthorizationRecordRecord{
-		AuthorizationRecordID: stringValue(authorizationRecord, "authorization_record_id", ""),
+		AuthorizationRecordID: recordID,
 		TaskID:                firstNonEmptyString(stringValue(authorizationRecord, "task_id", ""), taskID),
-		ApprovalID:            stringValue(authorizationRecord, "approval_id", ""),
+		ApprovalID:            approvalID,
 		Decision:              stringValue(authorizationRecord, "decision", ""),
 		Operator:              stringValue(authorizationRecord, "operator", "user"),
 		RememberRule:          boolValue(authorizationRecord, "remember_rule", false),
 		CreatedAt:             stringValue(authorizationRecord, "created_at", time.Now().Format(dateTimeLayout)),
 	}
-	return s.storage.AuthorizationRecordStore().WriteAuthorizationRecord(context.Background(), record)
+	if err := s.storage.AuthorizationRecordStore().WriteAuthorizationRecord(context.Background(), record); err != nil {
+		return err
+	}
+	decision := record.Decision
+	status := "resolved"
+	if decision == "deny_once" || decision == "deny_always" {
+		status = "denied"
+	} else if decision == "allow_once" || decision == "allow_always" {
+		status = "approved"
+	}
+	return s.storage.ApprovalRequestStore().UpdateApprovalRequestStatus(context.Background(), approvalID, status, record.CreatedAt)
 }
 
 // ConfirmTask handles agent.task.confirm.
@@ -1494,7 +1509,7 @@ func (s *Service) SecurityPendingList(params map[string]any) (map[string]any, er
 	// requests exist but the task snapshots do not expose a structured payload.
 	if total == 0 {
 		if s.storage != nil {
-			storedRecords, storedTotal, err := s.storage.ApprovalRequestStore().ListApprovalRequests(context.Background(), "", limit, offset)
+			storedRecords, storedTotal, err := s.storage.ApprovalRequestStore().ListPendingApprovalRequests(context.Background(), limit, offset)
 			if err == nil && storedTotal > 0 {
 				items = approvalRequestRecordsToItems(storedRecords)
 				total = storedTotal
@@ -1737,10 +1752,17 @@ func (s *Service) SecurityRespond(params map[string]any) (map[string]any, error)
 
 	decision := stringValue(params, "decision", "allow_once")
 	rememberRule := boolValue(params, "remember_rule", false)
+	approvalID := stringValue(task.ApprovalRequest, "approval_id", "")
+	if approvalID == "" {
+		approvalID = stringValue(params, "approval_id", "")
+	}
+	if approvalID == "" {
+		approvalID = "appr_001"
+	}
 	authorizationRecord := map[string]any{
-		"authorization_record_id": fmt.Sprintf("auth_%s", task.TaskID),
+		"authorization_record_id": fmt.Sprintf("auth_%s_%d", task.TaskID, time.Now().UnixNano()),
 		"task_id":                 task.TaskID,
-		"approval_id":             stringValue(params, "approval_id", "appr_001"),
+		"approval_id":             approvalID,
 		"decision":                decision,
 		"remember_rule":           rememberRule,
 		"operator":                "user",
@@ -3695,7 +3717,7 @@ func buildApprovalRequest(taskID string, taskIntent map[string]any, assessment e
 	}
 
 	return map[string]any{
-		"approval_id":    fmt.Sprintf("appr_%s", taskID),
+		"approval_id":    fmt.Sprintf("appr_%s_%d", taskID, time.Now().UnixNano()),
 		"task_id":        taskID,
 		"operation_name": firstNonEmptyString(assessment.OperationName, firstNonEmptyString(stringValue(taskIntent, "name", ""), "write_file")),
 		"risk_level":     firstNonEmptyString(assessment.RiskLevel, "red"),

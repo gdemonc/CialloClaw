@@ -273,6 +273,39 @@ func TestApprovalAndAuthorizationStoresPersistStructuredGovernanceRecords(t *tes
 	if authorizationItems[0].Decision != "allow_once" || !authorizationItems[0].RememberRule {
 		t.Fatalf("unexpected authorization record: %+v", authorizationItems[0])
 	}
+	if err := service.ApprovalRequestStore().UpdateApprovalRequestStatus(context.Background(), "appr_001", "approved", "2026-04-18T10:02:00Z"); err != nil {
+		t.Fatalf("update approval request status failed: %v", err)
+	}
+	updatedApprovalItems, updatedApprovalTotal, err := service.ApprovalRequestStore().ListApprovalRequests(context.Background(), "task_approval_001", 10, 0)
+	if err != nil || updatedApprovalTotal != 1 || len(updatedApprovalItems) != 1 {
+		t.Fatalf("unexpected updated approval records total=%d len=%d err=%v", updatedApprovalTotal, len(updatedApprovalItems), err)
+	}
+	if updatedApprovalItems[0].Status != "approved" || updatedApprovalItems[0].UpdatedAt != "2026-04-18T10:02:00Z" {
+		t.Fatalf("expected updated approval record status, got %+v", updatedApprovalItems[0])
+	}
+	pendingApprovalItems, pendingApprovalTotal, err := service.ApprovalRequestStore().ListPendingApprovalRequests(context.Background(), 10, 0)
+	if err != nil || pendingApprovalTotal != 0 || len(pendingApprovalItems) != 0 {
+		t.Fatalf("expected no pending approvals after approval update, got total=%d len=%d err=%v items=%+v", pendingApprovalTotal, len(pendingApprovalItems), err, pendingApprovalItems)
+	}
+	err = service.AuthorizationRecordStore().WriteAuthorizationRecord(context.Background(), AuthorizationRecordRecord{
+		AuthorizationRecordID: "auth_002",
+		TaskID:                "task_approval_001",
+		ApprovalID:            "appr_001",
+		Decision:              "deny_once",
+		Operator:              "user",
+		RememberRule:          false,
+		CreatedAt:             "2026-04-18T10:03:00Z",
+	})
+	if err != nil {
+		t.Fatalf("write second authorization record failed: %v", err)
+	}
+	updatedAuthorizationItems, updatedAuthorizationTotal, err := service.AuthorizationRecordStore().ListAuthorizationRecords(context.Background(), "task_approval_001", 10, 0)
+	if err != nil || updatedAuthorizationTotal != 2 || len(updatedAuthorizationItems) != 2 {
+		t.Fatalf("expected full authorization history total=%d len=%d err=%v items=%+v", updatedAuthorizationTotal, len(updatedAuthorizationItems), err, updatedAuthorizationItems)
+	}
+	if updatedAuthorizationItems[0].AuthorizationRecordID != "auth_002" || updatedAuthorizationItems[1].AuthorizationRecordID != "auth_001" {
+		t.Fatalf("expected authorization history ordering to preserve both records, got %+v", updatedAuthorizationItems)
+	}
 }
 
 // TestCloseIsSafeWithoutConfiguredStore 验证CloseIsSafeWithoutConfiguredStore。

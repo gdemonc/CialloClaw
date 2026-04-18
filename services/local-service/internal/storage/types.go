@@ -312,7 +312,9 @@ type AuthorizationRecordRecord struct {
 // ApprovalRequestStore persists formal approval_requests records.
 type ApprovalRequestStore interface {
 	WriteApprovalRequest(ctx context.Context, record ApprovalRequestRecord) error
+	UpdateApprovalRequestStatus(ctx context.Context, approvalID string, status string, updatedAt string) error
 	ListApprovalRequests(ctx context.Context, taskID string, limit, offset int) ([]ApprovalRequestRecord, int, error)
+	ListPendingApprovalRequests(ctx context.Context, limit, offset int) ([]ApprovalRequestRecord, int, error)
 }
 
 // AuthorizationRecordStore persists formal authorization_records records.

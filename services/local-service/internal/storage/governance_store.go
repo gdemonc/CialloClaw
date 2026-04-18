@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,22 +29,42 @@ func newInMemoryApprovalRequestStore() *inMemoryApprovalRequestStore {
 func (s *inMemoryApprovalRequestStore) WriteApprovalRequest(_ context.Context, record ApprovalRequestRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for i := range s.records {
+		if s.records[i].ApprovalID == record.ApprovalID {
+			s.records[i] = record
+			return nil
+		}
+	}
 	s.records = append(s.records, record)
+	return nil
+}
+
+func (s *inMemoryApprovalRequestStore) UpdateApprovalRequestStatus(_ context.Context, approvalID string, status string, updatedAt string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.records {
+		if s.records[i].ApprovalID == approvalID {
+			s.records[i].Status = status
+			if updatedAt != "" {
+				s.records[i].UpdatedAt = updatedAt
+			}
+			return nil
+		}
+	}
 	return nil
 }
 
 func (s *inMemoryApprovalRequestStore) ListApprovalRequests(_ context.Context, taskID string, limit, offset int) ([]ApprovalRequestRecord, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	items := make([]ApprovalRequestRecord, 0)
-	for _, record := range s.records {
-		if taskID == "" || record.TaskID == taskID {
-			items = append(items, record)
-		}
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		return parseGovernanceTime(items[i].CreatedAt).After(parseGovernanceTime(items[j].CreatedAt))
-	})
+	items := filterApprovalRequests(s.records, taskID, "")
+	return pageApprovalRequests(items, limit, offset), len(items), nil
+}
+
+func (s *inMemoryApprovalRequestStore) ListPendingApprovalRequests(_ context.Context, limit, offset int) ([]ApprovalRequestRecord, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := filterApprovalRequests(s.records, "", "pending")
 	return pageApprovalRequests(items, limit, offset), len(items), nil
 }
 
@@ -292,25 +313,71 @@ func (s *SQLiteApprovalRequestStore) WriteApprovalRequest(ctx context.Context, r
 	return nil
 }
 
+func (s *SQLiteApprovalRequestStore) UpdateApprovalRequestStatus(ctx context.Context, approvalID string, status string, updatedAt string) error {
+	if approvalID == "" {
+		return nil
+	}
+	if updatedAt == "" {
+		updatedAt = time.Now().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE approval_requests
+		SET status = ?, updated_at = ?
+		WHERE approval_id = ?
+	`, status, updatedAt, approvalID)
+	if err != nil {
+		return fmt.Errorf("update approval request status: %w", err)
+	}
+	return nil
+}
+
 func (s *SQLiteApprovalRequestStore) ListApprovalRequests(ctx context.Context, taskID string, limit, offset int) ([]ApprovalRequestRecord, int, error) {
+	items, total, err := s.listApprovalRequests(ctx, taskID, "", limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (s *SQLiteApprovalRequestStore) ListPendingApprovalRequests(ctx context.Context, limit, offset int) ([]ApprovalRequestRecord, int, error) {
+	items, total, err := s.listApprovalRequests(ctx, "", "pending", limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (s *SQLiteApprovalRequestStore) listApprovalRequests(ctx context.Context, taskID string, status string, limit, offset int) ([]ApprovalRequestRecord, int, error) {
 	countQuery := `SELECT COUNT(1) FROM approval_requests`
 	query := `SELECT approval_id, task_id, operation_name, risk_level, target_object, reason, status, impact_scope_json, created_at, updated_at FROM approval_requests`
-	args := []any{}
+	where := make([]string, 0, 2)
+	countArgs := make([]any, 0, 2)
+	queryArgs := make([]any, 0, 4)
 	if taskID != "" {
-		countQuery += ` WHERE task_id = ?`
-		query += ` WHERE task_id = ?`
-		args = append(args, taskID)
+		where = append(where, `task_id = ?`)
+		countArgs = append(countArgs, taskID)
+		queryArgs = append(queryArgs, taskID)
+	}
+	if status != "" {
+		where = append(where, `status = ?`)
+		countArgs = append(countArgs, status)
+		queryArgs = append(queryArgs, status)
+	}
+	if len(where) > 0 {
+		clause := " WHERE " + strings.Join(where, " AND ")
+		countQuery += clause
+		query += clause
 	}
 	query += ` ORDER BY created_at DESC, approval_id DESC`
 	if limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
-		args = append(args, limit, offset)
+		queryArgs = append(queryArgs, limit, offset)
 	}
 	var total int
-	if err := s.db.QueryRowContext(ctx, countQuery, firstArg(taskID)...).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count approval requests: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list approval requests: %w", err)
 	}
@@ -505,11 +572,14 @@ func (s *SQLiteRecoveryPointStore) WriteRecoveryPoint(ctx context.Context, point
 }
 
 func pageApprovalRequests(items []ApprovalRequestRecord, limit, offset int) []ApprovalRequestRecord {
+	if offset < 0 {
+		offset = 0
+	}
 	if offset >= len(items) {
 		return nil
 	}
 	if limit <= 0 {
-		return append([]ApprovalRequestRecord(nil), items[offset:]...)
+		limit = 20
 	}
 	end := offset + limit
 	if end > len(items) {
@@ -519,17 +589,37 @@ func pageApprovalRequests(items []ApprovalRequestRecord, limit, offset int) []Ap
 }
 
 func pageAuthorizationRecords(items []AuthorizationRecordRecord, limit, offset int) []AuthorizationRecordRecord {
+	if offset < 0 {
+		offset = 0
+	}
 	if offset >= len(items) {
 		return nil
 	}
 	if limit <= 0 {
-		return append([]AuthorizationRecordRecord(nil), items[offset:]...)
+		limit = 20
 	}
 	end := offset + limit
 	if end > len(items) {
 		end = len(items)
 	}
 	return append([]AuthorizationRecordRecord(nil), items[offset:end]...)
+}
+
+func filterApprovalRequests(records []ApprovalRequestRecord, taskID string, status string) []ApprovalRequestRecord {
+	items := make([]ApprovalRequestRecord, 0)
+	for _, record := range records {
+		if taskID != "" && record.TaskID != taskID {
+			continue
+		}
+		if status != "" && record.Status != status {
+			continue
+		}
+		items = append(items, record)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return parseGovernanceTime(items[i].CreatedAt).After(parseGovernanceTime(items[j].CreatedAt))
+	})
+	return items
 }
 
 func (s *SQLiteRecoveryPointStore) ListRecoveryPoints(ctx context.Context, taskID string, limit, offset int) ([]checkpoint.RecoveryPoint, int, error) {
