@@ -113,7 +113,7 @@ func New(cfg config.Config) (*App, error) {
 	deliveryService := delivery.NewService()
 	pluginService := plugin.NewService()
 	traceEvalService := traceeval.NewService(storageService.TraceStore(), storageService.EvalStore())
-	executionService := execution.NewService(fileSystem, executionBackend, playwrightClient, ocrClient, mediaClient, modelService, auditService, checkpointService, deliveryService, toolRegistry, toolExecutor, pluginService)
+	executionService := execution.NewService(fileSystem, executionBackend, playwrightClient, ocrClient, mediaClient, modelService, auditService, checkpointService, deliveryService, toolRegistry, toolExecutor, pluginService).WithLoopRuntimeStore(storageService.LoopRuntimeStore())
 	inspectorService := taskinspector.NewService(fileSystem)
 	runEngine, err := runengine.NewEngineWithStore(storageService.TaskRunStore())
 	if err != nil {
