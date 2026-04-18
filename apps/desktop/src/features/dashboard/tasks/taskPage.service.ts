@@ -110,6 +110,29 @@ function parseTaskEventPayload(event: TaskEvent): Record<string, unknown> | null
   }
 }
 
+function createFallbackRuntimeSummary(): AgentTaskDetailGetResult["runtime_summary"] {
+  return {
+    active_steering_count: 0,
+    events_count: 0,
+    latest_event_type: null,
+    loop_stop_reason: null,
+  };
+}
+
+function normalizeRuntimeSummary(detail: AgentTaskDetailGetResult): AgentTaskDetailGetResult["runtime_summary"] {
+  const candidate = detail.runtime_summary as Partial<AgentTaskDetailGetResult["runtime_summary"]> | null | undefined;
+  if (!candidate || typeof candidate !== "object") {
+    return createFallbackRuntimeSummary();
+  }
+
+  return {
+    active_steering_count: typeof candidate.active_steering_count === "number" ? candidate.active_steering_count : 0,
+    events_count: typeof candidate.events_count === "number" ? candidate.events_count : 0,
+    latest_event_type: typeof candidate.latest_event_type === "string" ? candidate.latest_event_type : null,
+    loop_stop_reason: typeof candidate.loop_stop_reason === "string" ? candidate.loop_stop_reason : null,
+  };
+}
+
 function normalizeTaskEventPage(result: { items: TaskEvent[]; page: TaskEventPageData["page"] }): TaskEventPageData {
   return {
     items: normalizeArray(result.items, isTaskEvent, "task events payload items").map((event) => ({
@@ -182,7 +205,7 @@ export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): Age
     approval_request: approvalRequest,
     artifacts,
     mirror_references: mirrorReferences,
-    runtime_summary: detail.runtime_summary,
+    runtime_summary: normalizeRuntimeSummary(detail),
     security_summary: {
       ...detail.security_summary,
       latest_restore_point: latestRestorePoint,

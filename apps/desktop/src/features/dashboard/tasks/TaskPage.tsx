@@ -163,13 +163,18 @@ export function TaskPage() {
       return;
     }
 
+    function invalidateSelectedTaskDetail(taskId: string) {
+      void queryClient.invalidateQueries({ queryKey: buildDashboardTaskDetailQueryKey(dataMode, taskId) });
+      void queryClient.invalidateQueries({ queryKey: buildDashboardTaskArtifactQueryKey(dataMode, taskId) });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", "tasks", "events", dataMode, taskId] });
+    }
+
     function invalidateTaskQueries(deliveryTaskId?: string) {
       for (const queryKey of securityRefreshPlan.invalidatePrefixes) {
         void queryClient.invalidateQueries({ queryKey });
       }
       if (selectedTaskId && (!deliveryTaskId || deliveryTaskId === selectedTaskId)) {
-        void queryClient.invalidateQueries({ queryKey: buildDashboardTaskArtifactQueryKey(dataMode, selectedTaskId) });
-        void queryClient.invalidateQueries({ queryKey: ["dashboard", "tasks", "events", dataMode, selectedTaskId] });
+        invalidateSelectedTaskDetail(selectedTaskId);
       }
     }
 
@@ -185,7 +190,7 @@ export function TaskPage() {
 
     const clearRuntimeSubscription = selectedTaskId
       ? subscribeTaskRuntime(selectedTaskId, () => {
-          invalidateTaskQueries(selectedTaskId);
+          invalidateSelectedTaskDetail(selectedTaskId);
         })
       : () => {};
 
@@ -337,7 +342,16 @@ export function TaskPage() {
       return;
     }
 
-    taskSteerMutation.mutate({ message, taskId: detailData.task.task_id });
+    taskSteerMutation.mutate(
+      { message, taskId: detailData.task.task_id },
+      {
+        onSuccess: () => {
+          // Keep the only editable draft intact until the formal steering request succeeds.
+          // This prevents user input loss when the local service is temporarily unavailable.
+          setFeedback((current) => current);
+        },
+      },
+    );
   }
 
   function handleLoadMore(group: "unfinished" | "finished") {
