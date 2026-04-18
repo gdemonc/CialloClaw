@@ -76,6 +76,14 @@ function buildSettingsWithProviderApiKeyConfigured(
   };
 }
 
+function resolveProviderApiKeyConfigured(input: ControlPanelData) {
+  if (input.providerApiKeyInput.trim() !== "") {
+    return true;
+  }
+
+  return input.settings.data_log.provider_api_key_configured;
+}
+
 function buildDataLogUpdatePayload(input: ControlPanelData) {
   const apiKey = input.providerApiKeyInput.trim();
 
@@ -160,7 +168,7 @@ export async function saveControlPanelData(data: ControlPanelData): Promise<Cont
   if (data.source === "local") {
     const nextSettingsSnapshot = buildSettingsWithProviderApiKeyConfigured(
       projectInspectorToTaskAutomation(data.settings, data.inspector),
-      data.settings.data_log.provider_api_key_configured,
+      resolveProviderApiKeyConfigured(data),
     );
     const nextDesktopSettings: DesktopSettings = {
       settings: nextSettingsSnapshot,
@@ -215,7 +223,7 @@ export async function saveControlPanelData(data: ControlPanelData): Promise<Cont
     console.warn("control panel save failed, keeping local snapshot only.", error);
     const nextSettingsSnapshot = buildSettingsWithProviderApiKeyConfigured(
       projectInspectorToTaskAutomation(data.settings, data.inspector),
-      data.settings.data_log.provider_api_key_configured,
+      resolveProviderApiKeyConfigured(data),
     );
     const nextDesktopSettings: DesktopSettings = {
       settings: nextSettingsSnapshot,

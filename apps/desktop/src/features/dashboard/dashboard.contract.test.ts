@@ -187,6 +187,72 @@ function loadSettingsServiceModule() {
   );
 }
 
+function loadControlPanelServiceModule(rpcMethods?: DashboardContractRpcMethodOverrides) {
+  return withDesktopAliasRuntime((requireFn) => {
+    const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/services/controlPanelService.js");
+
+    delete requireFn.cache[modulePath];
+
+    return requireFn(modulePath) as {
+      saveControlPanelData: (data: {
+        settings: {
+          data_log: {
+            budget_auto_downgrade: boolean;
+            provider: string;
+            provider_api_key_configured: boolean;
+          };
+          task_automation: {
+            inspect_on_file_change: boolean;
+            inspect_on_startup: boolean;
+            inspection_interval: { unit: string; value: number };
+            remind_before_deadline: boolean;
+            remind_when_stale: boolean;
+            task_sources: string[];
+          };
+        };
+        inspector: {
+          inspect_on_file_change: boolean;
+          inspect_on_startup: boolean;
+          inspection_interval: { unit: string; value: number };
+          remind_before_deadline: boolean;
+          remind_when_stale: boolean;
+          task_sources: string[];
+        };
+        providerApiKeyInput: string;
+        source: "local" | "rpc";
+      }) => Promise<{
+        effectiveSettings: {
+          data_log: {
+            provider_api_key_configured: boolean;
+          };
+        };
+        source: "local" | "rpc";
+      }>;
+    };
+  }, rpcMethods);
+}
+
+function loadMirrorServiceModule(rpcMethods?: DashboardContractRpcMethodOverrides) {
+  return withDesktopAliasRuntime((requireFn) => {
+    const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/memory/mirrorService.js");
+
+    delete requireFn.cache[modulePath];
+
+    return requireFn(modulePath) as {
+      loadMirrorOverviewData: (source?: "rpc" | "fallback") => Promise<{
+        source: "rpc" | "fallback";
+        overview: {
+          history_summary: string[];
+          memory_references: unknown[];
+        };
+        rpcContext: {
+          warnings: string[];
+        };
+      }>;
+    };
+  }, rpcMethods);
+}
+
 function loadDashboardSettingsMutationModule(rpcMethods?: {
   controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
   convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
@@ -233,7 +299,13 @@ function loadDashboardSettingsMutationModule(rpcMethods?: {
 type DashboardContractRpcMethodOverrides = {
   controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
   convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
+  getMirrorOverviewDetailed?: (params: unknown) => Promise<unknown>;
+  getSecuritySummary?: (params: unknown) => Promise<unknown>;
+  getSettings?: (params: unknown) => Promise<unknown>;
+  getTaskInspectorConfig?: (params: unknown) => Promise<unknown>;
   updateSettings?: (params: unknown) => Promise<unknown>;
+  updateTaskInspectorConfig?: (params: unknown) => Promise<unknown>;
+  runTaskInspector?: (params: unknown) => Promise<unknown>;
   getSettingsDetailed?: (params: unknown) => Promise<unknown>;
   getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
   listTaskArtifacts?: (params: unknown) => Promise<AgentTaskArtifactListResult>;
@@ -257,7 +329,13 @@ function withDesktopAliasRuntime<T>(
   rpcMethods?: {
     controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
     convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
+    getMirrorOverviewDetailed?: (params: unknown) => Promise<unknown>;
+    getSecuritySummary?: (params: unknown) => Promise<unknown>;
+    getSettings?: (params: unknown) => Promise<unknown>;
+    getTaskInspectorConfig?: (params: unknown) => Promise<unknown>;
     updateSettings?: (params: unknown) => Promise<unknown>;
+    updateTaskInspectorConfig?: (params: unknown) => Promise<unknown>;
+    runTaskInspector?: (params: unknown) => Promise<unknown>;
     getSettingsDetailed?: (params: unknown) => Promise<unknown>;
     getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
     listTaskArtifacts?: (params: unknown) => Promise<AgentTaskArtifactListResult>;
@@ -333,6 +411,18 @@ function withDesktopAliasRuntime<T>(
           (() => {
             throw new Error("convertNotepadToTask should not run in dashboard contract tests");
           }),
+        getMirrorOverviewDetailed:
+          rpcMethods?.getMirrorOverviewDetailed ??
+          (() => Promise.reject(new Error("getMirrorOverviewDetailed should not run in dashboard contract tests"))),
+        getSecuritySummary:
+          rpcMethods?.getSecuritySummary ??
+          (() => Promise.reject(new Error("getSecuritySummary should not run in dashboard contract tests"))),
+        getSettings:
+          rpcMethods?.getSettings ??
+          (() => Promise.reject(new Error("getSettings should not run in dashboard contract tests"))),
+        getTaskInspectorConfig:
+          rpcMethods?.getTaskInspectorConfig ??
+          (() => Promise.reject(new Error("getTaskInspectorConfig should not run in dashboard contract tests"))),
         getTaskDetail:
           rpcMethods?.getTaskDetail ??
           (() => {
@@ -368,8 +458,14 @@ function withDesktopAliasRuntime<T>(
           (() => {
             throw new Error("updateNotepad should not run in dashboard contract tests");
           }),
+        runTaskInspector:
+          rpcMethods?.runTaskInspector ??
+          (() => Promise.reject(new Error("runTaskInspector should not run in dashboard contract tests"))),
         getSettingsDetailed: rpcMethods?.getSettingsDetailed ?? (() => Promise.reject(new Error("getSettingsDetailed should not run in dashboard contract tests"))),
         updateSettings: rpcMethods?.updateSettings ?? (() => Promise.reject(new Error("updateSettings should not run in dashboard contract tests"))),
+        updateTaskInspectorConfig:
+          rpcMethods?.updateTaskInspectorConfig ??
+          (() => Promise.reject(new Error("updateTaskInspectorConfig should not run in dashboard contract tests"))),
       };
     }
 
@@ -1106,6 +1202,73 @@ test("dashboard settings mutation keeps fallback snapshots read-only when the RP
       Object.assign(globalThis, { window: originalWindow });
     }
   }
+});
+
+test("control panel local save persists a newly entered provider API key as configured", async () => {
+  const { saveControlPanelData } = loadControlPanelServiceModule();
+  const { loadSettings } = loadSettingsServiceModule();
+  const originalWindow = globalThis.window;
+  const storage = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      storage.set(key, value);
+    },
+    removeItem(key: string) {
+      storage.delete(key);
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      localStorage,
+    },
+  });
+
+  try {
+    const result = await saveControlPanelData({
+      settings: loadSettings().settings as never,
+      inspector: {
+        inspect_on_file_change: true,
+        inspect_on_startup: true,
+        inspection_interval: {
+          unit: "minute",
+          value: 15,
+        },
+        remind_before_deadline: true,
+        remind_when_stale: false,
+        task_sources: ["D:/workspace/todos"],
+      },
+      providerApiKeyInput: "sk-local-value",
+      source: "local",
+    });
+
+    assert.equal(result.source, "local");
+    assert.equal(result.effectiveSettings.data_log.provider_api_key_configured, true);
+    assert.equal(JSON.parse(localStorage.getItem("cialloclaw.settings") ?? "{}").settings.data_log.provider_api_key_configured, true);
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
+test("mirror overview rpc transport failures fall back to the empty snapshot contract", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+  const { loadMirrorOverviewData } = loadMirrorServiceModule({
+    getMirrorOverviewDetailed: () => Promise.reject(transportError),
+  });
+
+  const result = await loadMirrorOverviewData("rpc");
+
+  assert.equal(result.source, "fallback");
+  assert.deepEqual(result.overview.history_summary, []);
+  assert.deepEqual(result.overview.memory_references, []);
+  assert.match(result.rpcContext.warnings.join(" "), /transport is not wired/i);
 });
 
 test("SecurityApp route resolution reacts to each new route state and exposes task refresh targets", () => {
