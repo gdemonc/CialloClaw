@@ -4,6 +4,7 @@
 mod activity;
 mod screen_capture;
 mod selection;
+mod window_context;
 
 use serde_json::Value;
 use std::collections::HashMap;
@@ -274,6 +275,14 @@ async fn desktop_capture_screenshot() -> Result<screen_capture::ScreenCapturePay
     tauri::async_runtime::spawn_blocking(screen_capture::capture_screenshot)
         .await
         .map_err(|error| format!("desktop screenshot task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_get_active_window_context(
+) -> Result<Option<window_context::ActiveWindowContextPayload>, String> {
+    tauri::async_runtime::spawn_blocking(window_context::read_active_window_context)
+        .await
+        .map_err(|error| format!("desktop window-context task failed: {error}"))?
 }
 
 fn writer_loop(
@@ -908,6 +917,7 @@ fn main() {
             shell_ball_get_mouse_position,
             desktop_get_mouse_activity_snapshot,
             desktop_capture_screenshot,
+            desktop_get_active_window_context,
             pick_shell_ball_files,
             shell_ball_read_selection_snapshot
         ])

@@ -2,6 +2,7 @@ import type { BubbleMessage, DeliveryResult } from "@cialloclaw/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { captureDesktopScreenshot } from "@/platform/desktopScreen";
+import { getActiveWindowContext } from "@/platform/desktopWindowContext";
 import { subscribeDeliveryReady } from "@/rpc/subscriptions";
 import { submitTextInput } from "@/services/agentInputService";
 import {
@@ -82,6 +83,7 @@ const SHELL_BALL_BUBBLE_HIDE_DELAY_MS = 5_000;
 const SHELL_BALL_BUBBLE_FADE_DURATION_MS = 420;
 const SHELL_BALL_CLIPBOARD_COMMAND = "粘贴板";
 const SHELL_BALL_SCREENSHOT_COMMAND = "截屏";
+const SHELL_BALL_WINDOW_COMMAND = "窗口";
 
 type ShellBallBubbleTurnOrder = {
   turnIndex?: number;
@@ -734,6 +736,64 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
     revealBubbleRegion();
   }, [revealBubbleRegion]);
 
+  /**
+   * Reads the current active window context and appends a local shell-ball
+   * reply with the active application name and, when available, the browser
+   * URL.
+   *
+   * @returns A promise that resolves after the local bubble timeline updates.
+   */
+  const handleWindowPrompt = useCallback(async () => {
+    const createdAt = new Date().toISOString();
+
+    setBubbleItems((currentItems) =>
+      sortShellBallBubbleItemsByTimestamp([
+        ...currentItems,
+        createShellBallTextBubbleItem({
+          role: "user",
+          text: SHELL_BALL_WINDOW_COMMAND,
+          bubbleType: "result",
+          createdAt,
+        }),
+      ]),
+    );
+    revealBubbleRegion();
+
+    try {
+      const context = await getActiveWindowContext();
+      setBubbleItems((currentItems) =>
+        sortShellBallBubbleItemsByTimestamp([
+          ...currentItems,
+          createShellBallTextBubbleItem({
+            role: "agent",
+            text: context
+              ? createShellBallWindowContextReply(context.app_name, context.url)
+              : "Window context is unavailable.",
+            bubbleType: "result",
+            createdAt: new Date().toISOString(),
+          }),
+        ]),
+      );
+    } catch (error) {
+      console.warn("shell-ball window context lookup failed", error);
+      setBubbleItems((currentItems) =>
+        sortShellBallBubbleItemsByTimestamp([
+          ...currentItems,
+          createShellBallTextBubbleItem({
+            role: "agent",
+            text: "Window context lookup failed.",
+            bubbleType: "status",
+            createdAt: new Date().toISOString(),
+          }),
+        ]),
+      );
+    }
+
+    handlersRef.current.setInputValue("");
+    handlersRef.current.onInputFocusChange(false);
+    revealBubbleRegion();
+  }, [revealBubbleRegion]);
+
   useEffect(() => {
     const visibleBubbleCount = getShellBallVisibleBubbleItems(bubbleItems).length;
     const previousVisibleBubbleCount = previousVisibleBubbleCountRef.current;
@@ -1043,6 +1103,14 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         case "submit": {
           const submittedText = snapshotRef.current.inputValue.trim();
           const submittedFiles = snapshotRef.current.pendingFiles;
+
+          if (shouldHandleShellBallWindowCommand({
+            text: submittedText,
+            files: submittedFiles,
+          })) {
+            void handleWindowPrompt();
+            break;
+          }
 
           if (shouldHandleShellBallScreenshotCommand({
             text: submittedText,
@@ -1552,4 +1620,33 @@ function shouldHandleShellBallScreenshotCommand(input: {
   files: string[];
 }) {
   return input.files.length === 0 && input.text.trim() === SHELL_BALL_SCREENSHOT_COMMAND;
+}
+
+/**
+ * Determines whether the current shell-ball draft should resolve the active
+ * window context locally.
+ *
+ * @param input Current text draft and pending file attachments.
+ * @returns Whether the active-window shortcut should run locally.
+ */
+function shouldHandleShellBallWindowCommand(input: {
+  text: string;
+  files: string[];
+}) {
+  return input.files.length === 0 && input.text.trim() === SHELL_BALL_WINDOW_COMMAND;
+}
+
+/**
+ * Formats the local shell-ball reply for active-window context lookups.
+ *
+ * @param appName Active application name.
+ * @param url Optional browser URL resolved by the host.
+ * @returns The local shell-ball reply bubble text.
+ */
+function createShellBallWindowContextReply(appName: string, url: string | null) {
+  if (url && url.trim() !== "") {
+    return `App: ${appName}\nURL: ${url}`;
+  }
+
+  return `App: ${appName}`;
 }
