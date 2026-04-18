@@ -900,11 +900,13 @@ fn main() {
         .manage(Arc::new(NamedPipeBridgeState::default()))
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            activity::install_mouse_activity_listener()
-                .map_err(|error| std::io::Error::other(error))?;
+            // activity::install_mouse_activity_listener()
+            //     .map_err(|error| std::io::Error::other(error))?;
             install_shell_ball_clipboard_hooks(app.handle())
                 .map_err(|error| std::io::Error::other(error))?;
             selection::install_selection_listener(app.handle())
+                .map_err(|error| std::io::Error::other(error))?;
+            window_context::install_window_context_listener(app.handle())
                 .map_err(|error| std::io::Error::other(error))?;
 
             Ok(install_system_tray(app)?)

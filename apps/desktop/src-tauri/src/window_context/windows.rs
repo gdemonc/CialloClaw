@@ -1,7 +1,10 @@
 use super::types::ActiveWindowContextPayload;
+use once_cell::sync::Lazy;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager};
 use windows::core::{BSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows::Win32::System::Com::{
@@ -16,11 +19,12 @@ use windows::Win32::System::Threading::{
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
-    IUIAutomationElementArray, IUIAutomationValuePattern, TreeScope_Subtree,
-    UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_ValuePatternId,
+    IUIAutomationElementArray, IUIAutomationValuePattern, SetWinEventHook, TreeScope_Subtree,
+    UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_ValuePatternId, HWINEVENTHOOK,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    GetAncestor, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, EVENT_SYSTEM_FOREGROUND, GA_ROOT, WINEVENT_OUTOFCONTEXT,
 };
 
 const BROWSER_KIND_CHROME: &str = "chrome";
@@ -28,6 +32,18 @@ const BROWSER_KIND_EDGE: &str = "edge";
 const BROWSER_KIND_OTHER_BROWSER: &str = "other_browser";
 const BROWSER_KIND_NON_BROWSER: &str = "non_browser";
 const CHROME_MCP_BROWSER_URL: &str = "http://127.0.0.1:9222";
+const SHELL_BALL_WINDOW_LABELS: [&str; 4] = [
+    "shell-ball",
+    "shell-ball-bubble",
+    "shell-ball-input",
+    "shell-ball-voice",
+];
+const SHELL_BALL_PINNED_WINDOW_PREFIX: &str = "shell-ball-bubble-pinned-";
+
+static WINDOW_CONTEXT_APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
+static WINDOW_CONTEXT_FOREGROUND_HOOK: Lazy<Mutex<Option<isize>>> = Lazy::new(|| Mutex::new(None));
+static LAST_EXTERNAL_WINDOW_CONTEXT: Lazy<Mutex<Option<ActiveWindowContextPayload>>> =
+    Lazy::new(|| Mutex::new(None));
 
 struct ComGuard {
     should_uninitialize: bool,
@@ -64,9 +80,68 @@ impl Drop for ComGuard {
 pub fn read_active_window_context() -> Result<Option<ActiveWindowContextPayload>, String> {
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.0.is_null() {
-        return Ok(None);
+        return Ok(read_cached_window_context());
     }
 
+    if is_shell_ball_cluster_window(hwnd) {
+        return Ok(read_cached_window_context());
+    }
+
+    let context = read_window_context_for_hwnd(hwnd)?;
+    cache_window_context(&context);
+    Ok(Some(context))
+}
+
+/// Installs the Windows foreground-window listener used to keep a cached copy
+/// of the last external active window context.
+pub fn install_window_context_listener(app: &AppHandle) -> Result<(), String> {
+    if let Ok(mut app_handle) = WINDOW_CONTEXT_APP_HANDLE.lock() {
+        *app_handle = Some(app.clone());
+    }
+
+    let mut hook = WINDOW_CONTEXT_FOREGROUND_HOOK
+        .lock()
+        .map_err(|_| "window context foreground hook lock poisoned".to_string())?;
+
+    if hook.is_some() {
+        return Ok(());
+    }
+
+    unsafe {
+        let installed_hook = SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            None,
+            Some(window_context_foreground_hook),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT,
+        );
+
+        if installed_hook.0.is_null() {
+            return Err("failed to install window context foreground hook".to_string());
+        }
+
+        *hook = Some(installed_hook.0 as isize);
+    }
+
+    if let Some(current_context) = read_current_external_window_context() {
+        cache_window_context(&current_context);
+    }
+
+    Ok(())
+}
+
+fn read_current_external_window_context() -> Option<ActiveWindowContextPayload> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() || is_shell_ball_cluster_window(hwnd) {
+        return None;
+    }
+
+    read_window_context_for_hwnd(hwnd).ok()
+}
+
+fn read_window_context_for_hwnd(hwnd: HWND) -> Result<ActiveWindowContextPayload, String> {
     let process_path = get_process_path(hwnd);
     let app_name = process_path
         .as_deref()
@@ -80,13 +155,97 @@ pub fn read_active_window_context() -> Result<Option<ActiveWindowContextPayload>
         _ => None,
     };
 
-    Ok(Some(ActiveWindowContextPayload {
+    Ok(ActiveWindowContextPayload {
         app_name,
         process_path,
         title,
         url,
         browser_kind: browser_kind.to_string(),
-    }))
+    })
+}
+
+fn cache_window_context(context: &ActiveWindowContextPayload) {
+    if let Ok(mut cached_context) = LAST_EXTERNAL_WINDOW_CONTEXT.lock() {
+        *cached_context = Some(context.clone());
+    }
+}
+
+fn read_cached_window_context() -> Option<ActiveWindowContextPayload> {
+    LAST_EXTERNAL_WINDOW_CONTEXT
+        .lock()
+        .ok()
+        .and_then(|context| context.clone())
+}
+
+fn is_shell_ball_cluster_window(hwnd: HWND) -> bool {
+    let Some(app) = WINDOW_CONTEXT_APP_HANDLE
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+    else {
+        return false;
+    };
+
+    let root_window = get_root_window(hwnd);
+
+    for label in SHELL_BALL_WINDOW_LABELS {
+        let Some(window) = app.get_webview_window(label) else {
+            continue;
+        };
+
+        let Ok(window_hwnd) = window.hwnd() else {
+            continue;
+        };
+
+        if window_hwnd == root_window {
+            return true;
+        }
+    }
+
+    for window in app.webview_windows().values() {
+        if !window.label().starts_with(SHELL_BALL_PINNED_WINDOW_PREFIX) {
+            continue;
+        }
+
+        let Ok(window_hwnd) = window.hwnd() else {
+            continue;
+        };
+
+        if window_hwnd == root_window {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn get_root_window(hwnd: HWND) -> HWND {
+    unsafe {
+        let root = GetAncestor(hwnd, GA_ROOT);
+        if root.0.is_null() {
+            hwnd
+        } else {
+            root
+        }
+    }
+}
+
+unsafe extern "system" fn window_context_foreground_hook(
+    _hook: HWINEVENTHOOK,
+    _event: u32,
+    hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _thread_id: u32,
+    _event_time: u32,
+) {
+    if hwnd.0.is_null() || is_shell_ball_cluster_window(hwnd) {
+        return;
+    }
+
+    if let Ok(context) = read_window_context_for_hwnd(hwnd) {
+        cache_window_context(&context);
+    }
 }
 
 fn classify_browser_kind(app_name: &str) -> &'static str {
