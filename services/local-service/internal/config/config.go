@@ -1,7 +1,12 @@
-// 该文件负责本地服务配置结构与默认值。
 package config
 
-// ModelConfig 描述当前模块配置。
+import (
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// ModelConfig describes the local service model configuration snapshot.
 type ModelConfig struct {
 	Provider             string
 	ModelID              string
@@ -16,31 +21,46 @@ type ModelConfig struct {
 	ContextKeepRecent    int
 }
 
-// RPCConfig 描述当前模块配置。
+// RPCConfig describes the stable local transport endpoints.
 type RPCConfig struct {
 	Transport        string
 	NamedPipeName    string
 	DebugHTTPAddress string
 }
 
-// Config 描述当前模块配置。
+// LoadOptions captures runtime path overrides provided by the desktop shell.
+type LoadOptions struct {
+	DataDir string
+	SeedDir string
+}
+
+// Config describes the runtime configuration consumed by bootstrap.
 type Config struct {
 	RPC           RPCConfig
+	DataDir       string
+	SeedDir       string
 	WorkspaceRoot string
 	DatabasePath  string
 	Model         ModelConfig
 }
 
-// Load 加载当前能力。
-func Load() Config {
+// Load resolves runtime paths and returns the full local service configuration.
+func Load(options LoadOptions) Config {
+	dataDir := resolveDataDir(options.DataDir)
+	seedDir := resolveOptionalPath(options.SeedDir)
+	workspaceRoot := filepath.Join(dataDir, "workspace")
+	databasePath := filepath.Join(dataDir, "data", "cialloclaw.db")
+
 	return Config{
 		RPC: RPCConfig{
 			Transport:        "named_pipe",
 			NamedPipeName:    `\\.\pipe\cialloclaw-rpc`,
 			DebugHTTPAddress: ":4317",
 		},
-		WorkspaceRoot: "workspace",
-		DatabasePath:  "data/cialloclaw.db",
+		DataDir:       dataDir,
+		SeedDir:       seedDir,
+		WorkspaceRoot: workspaceRoot,
+		DatabasePath:  databasePath,
 		Model: ModelConfig{
 			Provider:             "openai_responses",
 			ModelID:              "gpt-5.4",
@@ -55,4 +75,24 @@ func Load() Config {
 			ContextKeepRecent:    4,
 		},
 	}
+}
+
+func resolveDataDir(raw string) string {
+	if resolved := resolveOptionalPath(raw); resolved != "" {
+		return resolved
+	}
+
+	if userConfigDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(userConfigDir) != "" {
+		return filepath.Clean(filepath.Join(userConfigDir, "CialloClaw"))
+	}
+
+	return filepath.Clean(filepath.Join(os.TempDir(), "CialloClaw"))
+}
+
+func resolveOptionalPath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Clean(trimmed)
 }

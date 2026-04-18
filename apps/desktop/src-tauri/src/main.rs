@@ -7,12 +7,16 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufReader, BufWriter, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use tauri::ipc::Channel;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::path::BaseDirectory;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, RunEvent};
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 
 #[cfg(windows)]
 use once_cell::sync::Lazy;
@@ -87,6 +91,120 @@ impl Default for NamedPipeBridgeState {
             next_subscription_id: AtomicU32::new(1),
         }
     }
+}
+
+struct LocalServiceSidecarState {
+    child: Mutex<Option<CommandChild>>,
+}
+
+impl Default for LocalServiceSidecarState {
+    fn default() -> Self {
+        Self {
+            child: Mutex::new(None),
+        }
+    }
+}
+
+impl LocalServiceSidecarState {
+    fn is_running(&self) -> Result<bool, String> {
+        self.child
+            .lock()
+            .map(|child| child.is_some())
+            .map_err(|_| "local service sidecar lock poisoned".to_string())
+    }
+
+    fn store(&self, child: CommandChild) -> Result<(), String> {
+        let mut guard = self
+            .child
+            .lock()
+            .map_err(|_| "local service sidecar lock poisoned".to_string())?;
+        *guard = Some(child);
+        Ok(())
+    }
+
+    fn clear(&self) {
+        if let Ok(mut guard) = self.child.lock() {
+            *guard = None;
+        }
+    }
+
+    fn stop(&self) -> Result<(), String> {
+        let mut guard = self
+            .child
+            .lock()
+            .map_err(|_| "local service sidecar lock poisoned".to_string())?;
+
+        if let Some(child) = guard.take() {
+            child
+                .kill()
+                .map_err(|error| format!("failed to stop local service sidecar: {error}"))?;
+        }
+        Ok(())
+    }
+}
+
+/// resolve_required_path converts a resolved runtime path into a lossy string
+/// because the shell sidecar API accepts CLI arguments as UTF-8 strings.
+fn resolve_required_path(path: PathBuf, label: &str) -> Result<String, String> {
+    let resolved = path.to_string_lossy().trim().to_string();
+    if resolved.is_empty() {
+        return Err(format!("failed to resolve {label}"));
+    }
+    Ok(resolved)
+}
+
+/// start_local_service_sidecar boots the packaged Go service before any UI path
+/// starts issuing JSON-RPC requests against the named-pipe bridge.
+fn start_local_service_sidecar(
+    app: &tauri::AppHandle,
+    sidecar_state: &Arc<LocalServiceSidecarState>,
+) -> Result<(), String> {
+    if sidecar_state.is_running()? {
+        return Ok(());
+    }
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("failed to create app data dir: {error}"))?;
+
+    let seed_dir = app
+        .path()
+        .resolve("seed", BaseDirectory::Resource)
+        .map_err(|error| format!("failed to resolve bundled seed dir: {error}"))?;
+
+    let data_dir_arg = resolve_required_path(data_dir, "app data dir")?;
+    let seed_dir_arg = resolve_required_path(seed_dir, "bundled seed dir")?;
+    let command = app
+        .shell()
+        .sidecar("cialloclaw-service")
+        .map_err(|error| format!("failed to resolve local service sidecar: {error}"))?
+        .args([
+            "--data-dir",
+            data_dir_arg.as_str(),
+            "--seed-dir",
+            seed_dir_arg.as_str(),
+        ]);
+    let (mut rx, child) = command
+        .spawn()
+        .map_err(|error| format!("failed to start local service sidecar: {error}"))?;
+    sidecar_state.store(child)?;
+
+    let tracked_state = Arc::clone(sidecar_state);
+    tauri::async_runtime::spawn(async move {
+        // Keep draining sidecar events so startup logs do not block the packaged
+        // service process, and clear state when the sidecar exits unexpectedly.
+        while let Some(event) = rx.recv().await {
+            if matches!(event, CommandEvent::Terminated(_)) {
+                tracked_state.clear();
+                break;
+            }
+        }
+    });
+
+    Ok(())
 }
 
 impl NamedPipeBridgeState {
@@ -873,10 +991,15 @@ async fn shell_ball_read_selection_snapshot(
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(Arc::new(NamedPipeBridgeState::default()))
+        .manage(Arc::new(LocalServiceSidecarState::default()))
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            let sidecar_state = app.state::<Arc<LocalServiceSidecarState>>();
+            start_local_service_sidecar(app.handle(), sidecar_state.inner())
+                .map_err(std::io::Error::other)?;
             install_shell_ball_clipboard_hooks(app.handle())
                 .map_err(|error| std::io::Error::other(error))?;
             selection::install_selection_listener(app.handle())
@@ -893,6 +1016,13 @@ fn main() {
             pick_shell_ball_files,
             shell_ball_read_selection_snapshot
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+            let sidecar_state = app_handle.state::<Arc<LocalServiceSidecarState>>();
+            let _ = sidecar_state.stop();
+        }
+    });
 }
