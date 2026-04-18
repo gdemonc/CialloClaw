@@ -10,6 +10,7 @@
     "beforeBuildCommand": "corepack pnpm build"
   },
   "bundle": {
+    "active": true,
     "targets": ["nsis"],
     "externalBin": ["bin/cialloclaw-service"],
     "resources": {
