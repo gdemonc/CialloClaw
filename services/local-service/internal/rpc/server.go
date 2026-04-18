@@ -449,8 +449,6 @@ func taskIDsFromResponse(response any) []string {
 	return result
 }
 
-// collectTaskIDs walks arbitrary decoded response payloads and gathers every
-// embedded task_id.
 func requestRoutingHints(request requestEnvelope) (map[string]bool, string, string) {
 	params, rpcErr := decodeParams(request.Params)
 	if rpcErr != nil {

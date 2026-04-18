@@ -225,8 +225,6 @@ func (s *Service) WithStorage(storageService *storage.Service) *Service {
 	return s
 }
 
-// Snapshot returns the minimal orchestrator summary used by debug and health
-// endpoints.
 // WithTraceEval attaches the owner-5 trace/eval recording service.
 func (s *Service) WithTraceEval(traceEvalService *traceeval.Service) *Service {
 	if traceEvalService != nil {
@@ -255,15 +253,15 @@ func (s *Service) Snapshot() map[string]any {
 	}
 }
 
-// SubmitInput handles agent.input.submit.
-// It captures context, derives intent suggestions, and decides whether the task
-// waits for more input, asks for confirmation, or runs immediately.
 // RunEngine exposes the attached runtime engine for transport-layer tests and
 // debug wiring that need to seed notifications or inspect task state.
 func (s *Service) RunEngine() *runengine.Engine {
 	return s.runEngine
 }
 
+// SubmitInput handles agent.input.submit.
+// It captures context, derives intent suggestions, and decides whether the task
+// waits for more input, asks for confirmation, or runs immediately.
 func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 	snapshot := s.context.Capture(params)
 	options := mapValue(params, "options")
@@ -4209,8 +4207,6 @@ func truncateText(value string, maxLength int) string {
 	return value[:maxLength] + "..."
 }
 
-// dateTimeLayout is the shared timestamp layout exposed by orchestrator RPC
-// payloads.
 func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.TaskContextSnapshot, taskIntent map[string]any) (runengine.TaskRecord, map[string]any, map[string]any, []map[string]any, error) {
 	processingTask, ok := s.runEngine.BeginExecution(task.TaskID, executionStepName(taskIntent), "开始生成正式结果")
 	if !ok {
@@ -4586,6 +4582,8 @@ func (s *Service) appendAuditData(task runengine.TaskRecord, auditRecords []map[
 	return updatedTask
 }
 
+// dateTimeLayout is the shared timestamp layout exposed by orchestrator RPC
+// payloads.
 const dateTimeLayout = time.RFC3339
 
 func stringSliceValue(rawValue any) []string {
