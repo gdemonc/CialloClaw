@@ -903,9 +903,8 @@ func normalizeDeliveryOpenResult(artifact map[string]any, deliveryResult map[str
 	return resolved
 }
 
-// TaskControl 处理当前模块的相关逻辑。
-
-// TaskControl 处理 agent.task.control，把用户控制动作转换成状态机操作。
+// TaskControl handles agent.task.control and converts user control actions into
+// state-machine operations.
 func (s *Service) TaskControl(params map[string]any) (map[string]any, error) {
 	taskID := stringValue(params, "task_id", "")
 	if strings.TrimSpace(taskID) == "" {
@@ -967,16 +966,12 @@ func (s *Service) TaskControl(params map[string]any) (map[string]any, error) {
 	}, nil
 }
 
-// TaskInspectorConfigGet 处理当前模块的相关逻辑。
-
-// TaskInspectorConfigGet 处理 agent.task_inspector.config.get。
+// TaskInspectorConfigGet handles agent.task_inspector.config.get.
 func (s *Service) TaskInspectorConfigGet() (map[string]any, error) {
 	return s.runEngine.InspectorConfig(), nil
 }
 
-// TaskInspectorConfigUpdate 处理当前模块的相关逻辑。
-
-// TaskInspectorConfigUpdate 处理 agent.task_inspector.config.update。
+// TaskInspectorConfigUpdate handles agent.task_inspector.config.update.
 func (s *Service) TaskInspectorConfigUpdate(params map[string]any) (map[string]any, error) {
 	effective := s.runEngine.UpdateInspectorConfig(params)
 	return map[string]any{
@@ -985,9 +980,8 @@ func (s *Service) TaskInspectorConfigUpdate(params map[string]any) (map[string]a
 	}, nil
 }
 
-// TaskInspectorRun 处理当前模块的相关逻辑。
-
-// TaskInspectorRun 处理 agent.task_inspector.run，返回巡检摘要和建议。
+// TaskInspectorRun handles agent.task_inspector.run and returns the inspection
+// summary plus suggestions.
 func (s *Service) TaskInspectorRun(params map[string]any) (map[string]any, error) {
 	config := s.runEngine.InspectorConfig()
 	targetSources := stringSliceValue(params["target_sources"])
@@ -1016,9 +1010,7 @@ func (s *Service) TaskInspectorRun(params map[string]any) (map[string]any, error
 	}, nil
 }
 
-// NotepadList 处理当前模块的相关逻辑。
-
-// NotepadList 处理 agent.notepad.list。
+// NotepadList handles agent.notepad.list.
 func (s *Service) NotepadList(params map[string]any) (map[string]any, error) {
 	group := stringValue(params, "group", "upcoming")
 	limit := intValue(params, "limit", 20)
@@ -1030,7 +1022,7 @@ func (s *Service) NotepadList(params map[string]any) (map[string]any, error) {
 	}, nil
 }
 
-// NotepadUpdate 处理 agent.notepad.update。
+// NotepadUpdate handles agent.notepad.update.
 func (s *Service) NotepadUpdate(params map[string]any) (map[string]any, error) {
 	itemID := stringValue(params, "item_id", "")
 	if itemID == "" {
@@ -1064,9 +1056,7 @@ func (s *Service) NotepadUpdate(params map[string]any) (map[string]any, error) {
 	return response, nil
 }
 
-// NotepadConvertToTask 处理当前模块的相关逻辑。
-
-// NotepadConvertToTask 处理 agent.notepad.convert_to_task。
+// NotepadConvertToTask handles agent.notepad.convert_to_task.
 func (s *Service) NotepadConvertToTask(params map[string]any) (map[string]any, error) {
 	itemID := stringValue(params, "item_id", "")
 	if itemID == "" {
@@ -1792,9 +1782,7 @@ func taskIsTerminal(status string) bool {
 	}
 }
 
-// timelineMap 处理当前模块的相关逻辑。
-
-// timelineMap 把内部时间线记录映射成对外返回值。
+// timelineMap converts internal timeline records into protocol-facing values.
 func timelineMap(timeline []runengine.TaskStepRecord) []map[string]any {
 	result := make([]map[string]any, 0, len(timeline))
 	for _, step := range timeline {
@@ -1811,9 +1799,7 @@ func timelineMap(timeline []runengine.TaskStepRecord) []map[string]any {
 	return result
 }
 
-// pageMap 处理当前模块的相关逻辑。
-
-// pageMap 统一列表接口返回的分页信息。
+// pageMap builds the shared paging payload used by list endpoints.
 func pageMap(limit, offset, total int) map[string]any {
 	return map[string]any{
 		"limit":    limit,
@@ -2201,7 +2187,8 @@ func cloneTimePointer(value *time.Time) *time.Time {
 	return &cloned
 }
 
-// taskStatusForSuggestion 处理当前模块的相关逻辑。
+// taskStatusForSuggestion derives the initial task_status from the suggestion
+// confirmation requirement.
 func taskStatusForSuggestion(requiresConfirm bool) string {
 	if requiresConfirm {
 		return "confirming_intent"
@@ -2209,7 +2196,8 @@ func taskStatusForSuggestion(requiresConfirm bool) string {
 	return "processing"
 }
 
-// currentStepForSuggestion 处理当前模块的相关逻辑。
+// currentStepForSuggestion derives the initial current_step from the suggested
+// intent.
 func currentStepForSuggestion(requiresConfirm bool, taskIntent map[string]any) string {
 	if requiresConfirm {
 		return "intent_confirmation"
@@ -2220,7 +2208,8 @@ func currentStepForSuggestion(requiresConfirm bool, taskIntent map[string]any) s
 	return "generate_output"
 }
 
-// bubbleTypeForSuggestion 处理当前模块的相关逻辑。
+// bubbleTypeForSuggestion selects the outward-facing bubble type for the
+// suggestion result.
 func bubbleTypeForSuggestion(requiresConfirm bool) string {
 	if requiresConfirm {
 		return "intent_confirm"
@@ -2228,7 +2217,7 @@ func bubbleTypeForSuggestion(requiresConfirm bool) string {
 	return "result"
 }
 
-// bubbleTextForInput 处理当前模块的相关逻辑。
+// bubbleTextForInput returns the bubble text for agent.input.submit flows.
 func bubbleTextForInput(suggestion intent.Suggestion) string {
 	if suggestion.RequiresConfirm {
 		if !suggestion.IntentConfirmed {
@@ -2239,7 +2228,7 @@ func bubbleTextForInput(suggestion intent.Suggestion) string {
 	return suggestion.ResultBubbleText
 }
 
-// bubbleTextForStart 处理当前模块的相关逻辑。
+// bubbleTextForStart returns the bubble text for agent.task.start flows.
 func bubbleTextForStart(suggestion intent.Suggestion) string {
 	if suggestion.RequiresConfirm {
 		if !suggestion.IntentConfirmed {
@@ -2267,10 +2256,8 @@ func confirmIntentText(taskIntent map[string]any) string {
 	}
 }
 
-// initialTimeline 处理当前模块的相关逻辑。
-
-// initialTimeline 生成任务创建时的第一条时间线步骤。
-// 它会根据当前 task_status 决定步骤初始状态是 pending 还是 running。
+// initialTimeline creates the first timeline step for a new task and derives
+// whether that step starts as pending or running.
 func initialTimeline(status, currentStep string) []runengine.TaskStepRecord {
 	stepStatus := "running"
 	if status == "confirming_intent" || status == "waiting_input" {
@@ -2294,9 +2281,7 @@ func initialTimeline(status, currentStep string) []runengine.TaskStepRecord {
 	}
 }
 
-// controlBubbleText 处理当前模块的相关逻辑。
-
-// controlBubbleText 根据 task_control_action 生成对应的状态气泡文案。
+// controlBubbleText returns the status bubble text for a task_control action.
 func controlBubbleText(action string) string {
 	switch action {
 	case "pause":
@@ -2321,7 +2306,8 @@ func isSupportedTaskControlAction(action string) bool {
 	}
 }
 
-// currentTimeFromTask 处理当前模块的相关逻辑。
+// currentTimeFromTask returns the latest task update time formatted for bubble
+// payloads.
 func currentTimeFromTask(engine *runengine.Engine, taskID string) string {
 	task, ok := engine.GetTask(taskID)
 	if !ok {
@@ -2330,9 +2316,8 @@ func currentTimeFromTask(engine *runengine.Engine, taskID string) string {
 	return task.UpdatedAt.Format(dateTimeLayout)
 }
 
-// workspacePathFromSettings 处理当前模块的相关逻辑。
-
-// workspacePathFromSettings 从设置快照里提取当前 workspace 路径。
+// workspacePathFromSettings extracts the current workspace path from the
+// settings snapshot.
 func workspacePathFromSettings(settings map[string]any) string {
 	general, ok := settings["general"].(map[string]any)
 	if !ok {
@@ -2387,9 +2372,8 @@ func notepadSnapshot(item map[string]any) contextsvc.TaskContextSnapshot {
 	}
 }
 
-// defaultMirrorReference 处理当前模块的相关逻辑。
-
-// defaultMirrorReference 构造镜像模块返回的示例记忆引用。
+// defaultMirrorReference creates the sample memory reference returned by the
+// mirror module.
 func defaultMirrorReference() map[string]any {
 	return map[string]any{
 		"memory_id": "pref_001",
@@ -4077,9 +4061,7 @@ func floatValueFromAny(value any) float64 {
 	}
 }
 
-// firstMapOrNil 处理当前模块的相关逻辑。
-
-// firstMapOrNil 返回列表中的第一项拷贝；如果为空则返回 nil。
+// firstMapOrNil returns a copy of the first item in a list, or nil when empty.
 func firstMapOrNil(items []map[string]any) map[string]any {
 	if len(items) == 0 {
 		return nil
@@ -4087,7 +4069,8 @@ func firstMapOrNil(items []map[string]any) map[string]any {
 	return cloneMap(items[0])
 }
 
-// latestRestorePointFromApprovals 处理当前模块的相关逻辑。
+// latestRestorePointFromApprovals extracts the newest restore point carried by
+// approval-derived task data.
 func latestRestorePointFromApprovals(items []map[string]any) any {
 	if len(items) == 0 {
 		return nil
@@ -4098,9 +4081,7 @@ func latestRestorePointFromApprovals(items []map[string]any) any {
 	}
 }
 
-// cloneMap 处理当前模块的相关逻辑。
-
-// cloneMap 对 map[string]any 做递归复制，避免不同层之间共享引用。
+// cloneMap recursively copies a map[string]any payload.
 func cloneMap(values map[string]any) map[string]any {
 	if len(values) == 0 {
 		return nil
@@ -4121,9 +4102,7 @@ func cloneMap(values map[string]any) map[string]any {
 	return result
 }
 
-// cloneMapSlice 处理当前模块的相关逻辑。
-
-// cloneMapSlice 对 []map[string]any 做逐项复制。
+// cloneMapSlice recursively copies a []map[string]any payload.
 func cloneMapSlice(values []map[string]any) []map[string]any {
 	if len(values) == 0 {
 		return nil
@@ -4135,9 +4114,7 @@ func cloneMapSlice(values []map[string]any) []map[string]any {
 	return result
 }
 
-// mapValue 处理当前模块的相关逻辑。
-
-// mapValue 安全读取嵌套对象字段。
+// mapValue safely reads a nested object field.
 func mapValue(values map[string]any, key string) map[string]any {
 	rawValue, ok := values[key]
 	if !ok {
@@ -4150,9 +4127,7 @@ func mapValue(values map[string]any, key string) map[string]any {
 	return value
 }
 
-// stringValue 处理当前模块的相关逻辑。
-
-// stringValue 安全读取字符串字段，并在空值时回退到默认值。
+// stringValue safely reads a string field and falls back when empty.
 func stringValue(values map[string]any, key, fallback string) string {
 	rawValue, ok := values[key]
 	if !ok {
@@ -4169,9 +4144,7 @@ func requestTraceID(values map[string]any) string {
 	return stringValue(mapValue(values, "request_meta"), "trace_id", "")
 }
 
-// boolValue 处理当前模块的相关逻辑。
-
-// boolValue 安全读取布尔字段。
+// boolValue safely reads a boolean field.
 func boolValue(values map[string]any, key string, fallback bool) bool {
 	rawValue, ok := values[key]
 	if !ok {
@@ -4184,9 +4157,7 @@ func boolValue(values map[string]any, key string, fallback bool) bool {
 	return value
 }
 
-// intValue 处理当前模块的相关逻辑。
-
-// intValue 安全读取经过 JSON 解码后的数值字段。
+// intValue safely reads a JSON-decoded numeric field.
 func intValue(values map[string]any, key string, fallback int) int {
 	rawValue, ok := values[key]
 	if !ok {
@@ -4199,9 +4170,8 @@ func intValue(values map[string]any, key string, fallback int) int {
 	return int(value)
 }
 
-// truncateText 处理当前模块的相关逻辑。
-
-// truncateText 以固定长度截断文本，用于推荐文案和 memory 查询。
+// truncateText trims text to a fixed length for recommendation and memory
+// query surfaces.
 func truncateText(value string, maxLength int) string {
 	if len(value) <= maxLength {
 		return value
@@ -4209,7 +4179,8 @@ func truncateText(value string, maxLength int) string {
 	return value[:maxLength] + "..."
 }
 
-// dateTimeLayout 定义当前模块的基础变量。
+// dateTimeLayout is the shared timestamp layout exposed by orchestrator RPC
+// payloads.
 func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.TaskContextSnapshot, taskIntent map[string]any) (runengine.TaskRecord, map[string]any, map[string]any, []map[string]any, error) {
 	processingTask, ok := s.runEngine.BeginExecution(task.TaskID, executionStepName(taskIntent), "开始生成正式结果")
 	if !ok {
