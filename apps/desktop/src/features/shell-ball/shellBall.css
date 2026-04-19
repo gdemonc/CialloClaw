@@ -843,65 +843,6 @@
   background: transparent;
 }
 
-.shell-ball-input-bar__resize-handle {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(132, 132, 132, 0.12));
-  border-radius: 0.78rem 0.22rem 0.92rem 0.22rem;
-  bottom: 0.16rem;
-  box-shadow:
-    0 1px 3px rgba(86, 94, 107, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  cursor: nwse-resize;
-  height: 0.82rem;
-  opacity: 0.78;
-  position: absolute;
-  right: 0.08rem;
-  touch-action: none;
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    background 160ms ease;
-  width: 0.82rem;
-  z-index: 1;
-}
-
-.shell-ball-input-bar__resize-handle::before {
-  background:
-    repeating-linear-gradient(
-      135deg,
-      transparent 0 0.2rem,
-      rgba(132, 132, 132, 0.44) 0.2rem 0.28rem,
-      transparent 0.28rem 0.42rem
-    );
-  border-radius: 0 0.22rem 0.44rem 0;
-  content: "";
-  inset: 0.16rem 0.12rem 0.12rem 0.16rem;
-  opacity: 0.88;
-  position: absolute;
-}
-
-.shell-ball-input-bar__resize-handle::after {
-  background: radial-gradient(circle at 70% 70%, rgba(255, 255, 255, 0.4), transparent 58%);
-  content: "";
-  inset: 0;
-  position: absolute;
-}
-
-.shell-ball-input-bar__resize-handle:hover {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(116, 129, 147, 0.16));
-  box-shadow:
-    0 2px 5px rgba(86, 94, 107, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.42);
-  opacity: 0.92;
-  transform: translate(-0.02rem, -0.02rem);
-}
-
-.shell-ball-input-bar:focus-within .shell-ball-input-bar__resize-handle {
-  opacity: 0.9;
-}
-
 .shell-ball-input-bar__action {
   align-items: center;
   background: transparent;

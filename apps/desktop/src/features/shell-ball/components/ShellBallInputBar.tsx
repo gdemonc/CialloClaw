@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { CSSProperties, ChangeEvent, CompositionEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties, ChangeEvent, CompositionEvent, KeyboardEvent } from "react";
 import { ArrowUp, Paperclip } from "lucide-react";
 import { cn } from "../../../utils/cn";
 import type { ShellBallVoicePreview } from "../shellBall.interaction";
 import type { ShellBallInputBarMode } from "../shellBall.types";
 import {
-  clampShellBallInputResizeDimension,
   focusShellBallInputField,
   measureShellBallInputContentWidth,
   resolveShellBallInputAutoWidth,
@@ -65,13 +64,12 @@ export function ShellBallInputBar({
   onAttachFile,
   onSubmit,
   onFocusChange,
-  onResizeStateChange = () => {},
+  onResizeStateChange: _onResizeStateChange = () => {},
   onCompositionStateChange = () => {},
   onTransientInputActivity = () => {},
 }: ShellBallInputBarProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const compositionActiveRef = useRef(false);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
   const [manualSize, setManualSize] = useState<ShellBallInputManualSize>({ width: null, height: null });
   const [resolvedFieldWidth, setResolvedFieldWidth] = useState<number | null>(null);
   const [resolvedFieldHeight, setResolvedFieldHeight] = useState<number | null>(null);
@@ -186,12 +184,6 @@ export function ShellBallInputBar({
     }
   }, [contentOverflowing, isHidden, isVoice, manualSize.height, manualSize.width, resolvedFieldHeight, resolvedFieldWidth, value]);
 
-  useEffect(() => {
-    return () => {
-      resizeCleanupRef.current?.();
-    };
-  }, []);
-
   function handleChange(event: ChangeEvent<HTMLTextAreaElement>) {
     if (!isInteractive) {
       return;
@@ -223,112 +215,6 @@ export function ShellBallInputBar({
     compositionActiveRef.current = false;
     onCompositionStateChange(false);
   }
-
-  const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const field = inputRef.current;
-    if (field === null || typeof window === "undefined") {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    const handle = event.currentTarget;
-    const pointerId = event.pointerId;
-
-    const rect = field.getBoundingClientRect();
-    const computedStyle = window.getComputedStyle(field);
-    const restingWidth = measureShellBallInputRestingWidth(field);
-    const minHeight = parseFloat(computedStyle.minHeight) || rect.height;
-    const initialWidth = restingWidth;
-    const minWidth = initialWidth;
-    const maxWidth = resolveShellBallInputMaxWidth(initialWidth);
-    const maxHeight = resolveShellBallInputMaxHeight({
-      lineHeight: parseFloat(computedStyle.lineHeight) || minHeight / SHELL_BALL_INPUT_MAX_VISIBLE_LINES,
-      paddingTop: parseFloat(computedStyle.paddingTop) || 0,
-      paddingBottom: parseFloat(computedStyle.paddingBottom) || 0,
-      minHeight,
-    });
-    const startWidth = manualSize.width ?? rect.width;
-    const startHeight = manualSize.height ?? rect.height;
-    const startX = event.clientX;
-    const startY = event.clientY;
-
-    resizeCleanupRef.current?.();
-
-    const previousBodyCursor = document.body.style.cursor;
-    const previousBodyUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "nwse-resize";
-    document.body.style.userSelect = "none";
-
-    onResizeStateChange(true);
-
-    try {
-      handle.setPointerCapture(pointerId);
-    } catch {
-      // Ignore pointer-capture failures from environments that do not support captured dragging.
-    }
-
-    let cleanedUp = false;
-
-    const cleanup = () => {
-      if (cleanedUp) {
-        return;
-      }
-
-      cleanedUp = true;
-
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", cleanup);
-      window.removeEventListener("pointercancel", cleanup);
-      window.removeEventListener("blur", cleanup);
-      handle.removeEventListener("lostpointercapture", cleanup);
-
-      try {
-        if (handle.hasPointerCapture(pointerId)) {
-          handle.releasePointerCapture(pointerId);
-        }
-      } catch {
-        // Ignore release failures when the browser already dropped pointer capture.
-      }
-
-      document.body.style.cursor = previousBodyCursor;
-      document.body.style.userSelect = previousBodyUserSelect;
-      resizeCleanupRef.current = null;
-      onResizeStateChange(false);
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      const nextWidth = clampShellBallInputResizeDimension(
-        startWidth + moveEvent.clientX - startX,
-        minWidth,
-        maxWidth,
-      );
-      const nextHeight = clampShellBallInputResizeDimension(
-        startHeight + moveEvent.clientY - startY,
-        minHeight,
-        maxHeight,
-      );
-
-      setManualSize((current) => {
-        if (current.width === nextWidth && current.height === nextHeight) {
-          return current;
-        }
-
-        return {
-          width: nextWidth,
-          height: nextHeight,
-        };
-      });
-    };
-
-    resizeCleanupRef.current = cleanup;
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", cleanup);
-    window.addEventListener("pointercancel", cleanup);
-    window.addEventListener("blur", cleanup);
-    handle.addEventListener("lostpointercapture", cleanup);
-  }, [manualSize.height, manualSize.width, onResizeStateChange]);
 
   const textareaStyle: CSSProperties = {
     height: resolvedFieldHeight ?? undefined,
@@ -384,14 +270,6 @@ export function ShellBallInputBar({
           {SHELL_BALL_INPUT_LABEL}
         </span>
         <i aria-hidden="true" className="shell-ball-input-bar__field-line" />
-        {!isInteractive ? null : (
-          <div
-            aria-hidden="true"
-            className="shell-ball-input-bar__resize-handle"
-            data-shell-ball-input-resize-handle="true"
-            onPointerDown={handleResizePointerDown}
-          />
-        )}
       </div>
       <div className="shell-ball-input-bar__actions">
         <button
