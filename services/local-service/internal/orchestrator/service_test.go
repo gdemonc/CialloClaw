@@ -5123,6 +5123,96 @@ func TestServiceStartTaskHandlesControlledScreenAnalyzeIntent(t *testing.T) {
 	}
 }
 
+func TestServiceStartTaskInfersScreenAnalyzeFromVisualErrorRequest(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_local_0001/frame_0001.png", Text: "fatal build error", Language: "eng", Source: "ocr_worker_text"}}
+	service, _ := newTestServiceWithExecutionWorkers(t, "unused", platform.LocalExecutionBackend{}, nil, sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+
+	result, err := service.StartTask(map[string]any{
+		"session_id": "sess_screen_infer_start",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "帮我看看这个页面的报错",
+			"page_context": map[string]any{
+				"title":        "Build Dashboard",
+				"url":          "https://example.com/build",
+				"app_name":     "Chrome",
+				"window_title": "Browser - Build Dashboard",
+				"visible_text": "Fatal build error: missing release asset",
+			},
+		},
+		"context": map[string]any{
+			"screen_summary": "release validation failed on current screen",
+		},
+	})
+	if err != nil {
+		t.Fatalf("start inferred screen analyze task failed: %v", err)
+	}
+	task := result["task"].(map[string]any)
+	if task["source_type"] != "screen_capture" {
+		t.Fatalf("expected screen_capture source type, got %+v", task)
+	}
+	if task["status"] != "waiting_auth" {
+		t.Fatalf("expected inferred screen analyze task to wait for auth, got %+v", task)
+	}
+	intentValue := task["intent"].(map[string]any)
+	if intentValue["name"] != "screen_analyze" {
+		t.Fatalf("expected screen_analyze intent, got %+v", intentValue)
+	}
+	arguments := intentValue["arguments"].(map[string]any)
+	if arguments["evidence_role"] != "error_evidence" || arguments["page_title"] != "Build Dashboard" {
+		t.Fatalf("expected inferred visual arguments to be preserved, got %+v", arguments)
+	}
+	record, exists := service.runEngine.GetTask(task["task_id"].(string))
+	if !exists || record.PendingExecution == nil {
+		t.Fatalf("expected runtime task to keep pending execution for inferred screen task, got %+v", record)
+	}
+	if stringValue(record.PendingExecution, "source_path", "") != "" {
+		t.Fatalf("expected inferred screen task to authorize current screen instead of an existing file, got %+v", record.PendingExecution)
+	}
+	if stringValue(record.PendingExecution, "target_object", "") != "Build Dashboard" {
+		t.Fatalf("expected inferred screen target to use page context, got %+v", record.PendingExecution)
+	}
+}
+
+func TestServiceSubmitInputInfersScreenAnalyzeFromVisualErrorRequest(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_local_0001/frame_0001.png", Text: "fatal build error", Language: "eng", Source: "ocr_worker_text"}}
+	service, _ := newTestServiceWithExecutionWorkers(t, "unused", platform.LocalExecutionBackend{}, nil, sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+
+	result, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_screen_infer_submit",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type":       "text",
+			"text":       "看看当前屏幕上的报错",
+			"input_mode": "text",
+		},
+		"context": map[string]any{
+			"page": map[string]any{
+				"title":        "Release Checklist",
+				"url":          "https://example.com/release",
+				"app_name":     "Chrome",
+				"window_title": "Browser - Release Checklist",
+				"visible_text": "Warning: release notes are incomplete.",
+			},
+			"screen_summary": "release checklist shows blocking warning",
+		},
+	})
+	if err != nil {
+		t.Fatalf("submit inferred screen analyze task failed: %v", err)
+	}
+	task := result["task"].(map[string]any)
+	if task["status"] != "waiting_auth" || task["source_type"] != "screen_capture" {
+		t.Fatalf("expected submit input to route into waiting screen authorization, got %+v", task)
+	}
+	bubble := result["bubble_message"].(map[string]any)
+	if bubble["type"] != "status" {
+		t.Fatalf("expected waiting authorization status bubble, got %+v", bubble)
+	}
+}
+
 func TestSecurityRespondScreenAnalyzeFailureReconcilesTaskState(t *testing.T) {
 	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_local_0001/frame_0001.png", Text: "fatal build error", Language: "eng", Source: "ocr_worker_text"}}
 	service, _ := newTestServiceWithExecutionWorkers(t, "unused", platform.LocalExecutionBackend{}, nil, sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
