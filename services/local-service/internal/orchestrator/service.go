@@ -292,6 +292,12 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 	options := mapValue(params, "options")
 	confirmRequired := boolValue(options, "confirm_required", false)
 	suggestion := s.intent.Suggest(snapshot, nil, confirmRequired)
+	suggestion = s.normalizeSuggestedIntentForAvailability(snapshot, suggestion, confirmRequired)
+	if handledResponse, handled, err := s.handleScreenAnalyzeSuggestion(params, snapshot, suggestion); err != nil {
+		return nil, err
+	} else if handled {
+		return handledResponse, nil
+	}
 	preferredDelivery, fallbackDelivery := deliveryPreferenceFromSubmit(params)
 	if !suggestion.RequiresConfirm {
 		preferredDelivery, fallbackDelivery = mergeSuggestedDeliveryPreference(preferredDelivery, fallbackDelivery, suggestion.DirectDeliveryType)
@@ -391,6 +397,12 @@ func (s *Service) StartTask(params map[string]any) (map[string]any, error) {
 		return handledResponse, nil
 	}
 	suggestion := s.intent.Suggest(snapshot, explicitIntent, len(explicitIntent) == 0)
+	suggestion = s.normalizeSuggestedIntentForAvailability(snapshot, suggestion, false)
+	if handledResponse, handled, err := s.handleScreenAnalyzeSuggestion(params, snapshot, suggestion); err != nil {
+		return nil, err
+	} else if handled {
+		return handledResponse, nil
+	}
 	preferredDelivery, fallbackDelivery := deliveryPreferenceFromStart(params)
 	if len(explicitIntent) == 0 && !suggestion.RequiresConfirm {
 		preferredDelivery, fallbackDelivery = mergeSuggestedDeliveryPreference(preferredDelivery, fallbackDelivery, suggestion.DirectDeliveryType)
@@ -460,12 +472,13 @@ func (s *Service) handleScreenAnalyzeStart(params map[string]any, snapshot conte
 	if stringValue(explicitIntent, "name", "") != "screen_analyze" || s.executor == nil || s.executor.ScreenCapabilitySnapshot().Available == false {
 		return nil, false, nil
 	}
+	resolvedIntent := s.resolveScreenAnalyzeIntent(snapshot, explicitIntent)
 	task := s.runEngine.CreateTask(runengine.CreateTaskInput{
 		SessionID:         stringValue(params, "session_id", ""),
-		Title:             firstNonEmptyString(stringValue(explicitIntent, "title", ""), "分析屏幕截图"),
+		Title:             firstNonEmptyString(stringValue(resolvedIntent, "title", ""), inferredScreenTaskTitle(snapshot)),
 		SourceType:        "screen_capture",
 		Status:            "waiting_auth",
-		Intent:            cloneMap(explicitIntent),
+		Intent:            cloneMap(resolvedIntent),
 		PreferredDelivery: "bubble",
 		FallbackDelivery:  "bubble",
 		CurrentStep:       "waiting_authorization",
@@ -500,21 +513,55 @@ func (s *Service) handleScreenAnalyzeStart(params map[string]any, snapshot conte
 	}, true, nil
 }
 
+func (s *Service) handleScreenAnalyzeSuggestion(params map[string]any, snapshot contextsvc.TaskContextSnapshot, suggestion intent.Suggestion) (map[string]any, bool, error) {
+	if stringValue(suggestion.Intent, "name", "") != "screen_analyze" || suggestion.RequiresConfirm {
+		return nil, false, nil
+	}
+	return s.handleScreenAnalyzeStart(params, snapshot, suggestion.Intent)
+}
+
+func (s *Service) normalizeSuggestedIntentForAvailability(snapshot contextsvc.TaskContextSnapshot, suggestion intent.Suggestion, confirmRequired bool) intent.Suggestion {
+	if stringValue(suggestion.Intent, "name", "") != "screen_analyze" {
+		return suggestion
+	}
+	if s.executor != nil && s.executor.ScreenCapabilitySnapshot().Available {
+		return suggestion
+	}
+	fallback := suggestion
+	fallback.Intent = map[string]any{
+		"name":      "agent_loop",
+		"arguments": map[string]any{},
+	}
+	fallback.IntentConfirmed = true
+	// Preserve the caller's confirmation gate when screen-specific handling is
+	// unavailable so the downgrade does not auto-execute a generic task.
+	fallback.RequiresConfirm = confirmRequired
+	fallback.TaskSourceType = "hover_input"
+	fallback.TaskTitle = "处理：" + inferredScreenFallbackSubject(snapshot)
+	fallback.DirectDeliveryType = "bubble"
+	fallback.ResultTitle = "处理结果"
+	fallback.ResultPreview = "结果已通过气泡返回"
+	fallback.ResultBubbleText = "当前环境暂不支持受控屏幕查看，已改为按现有文本和页面上下文继续处理。"
+	return fallback
+}
+
+func inferredScreenFallbackSubject(snapshot contextsvc.TaskContextSnapshot) string {
+	return truncateText(firstNonEmptyString(strings.TrimSpace(snapshot.Text), screenSubjectFromSnapshot(snapshot)), 18)
+}
+
 // buildScreenAnalysisApprovalState reconstructs the controlled approval plan
 // from the task intent so queued resumes can re-enter the same authorization
 // path instead of falling through to the generic executor.
 func (s *Service) buildScreenAnalysisApprovalState(task runengine.TaskRecord) (map[string]any, map[string]any, map[string]any, error) {
 	arguments := mapValue(task.Intent, "arguments")
 	sourcePath := stringValue(arguments, "path", "")
-	if strings.TrimSpace(sourcePath) == "" {
-		return nil, nil, nil, fmt.Errorf("screen_analyze requires intent.arguments.path")
-	}
+	targetObject := screenTargetObject(arguments)
 	approvalRequest := map[string]any{
 		"approval_id":    fmt.Sprintf("appr_%s", task.TaskID),
 		"task_id":        task.TaskID,
 		"operation_name": "screen_capture",
 		"risk_level":     "yellow",
-		"target_object":  sourcePath,
+		"target_object":  targetObject,
 		"reason":         "screen_capture_requires_authorization",
 		"status":         "pending",
 		"created_at":     time.Now().Format(dateTimeLayout),
@@ -523,13 +570,14 @@ func (s *Service) buildScreenAnalysisApprovalState(task runengine.TaskRecord) (m
 		"kind":           "screen_analysis",
 		"operation_name": "screen_capture",
 		"source_path":    sourcePath,
+		"target_object":  targetObject,
 		"language":       firstNonEmptyString(stringValue(arguments, "language", ""), "eng"),
 		"evidence_role":  firstNonEmptyString(stringValue(arguments, "evidence_role", ""), "error_evidence"),
 		"delivery_type":  "bubble",
 		"result_title":   "屏幕分析结果",
 		"preview_text":   "已准备分析屏幕截图",
 		"impact_scope": map[string]any{
-			"files":                    []string{sourcePath},
+			"files":                    impactFilesForScreenTarget(sourcePath),
 			"webpages":                 []string{},
 			"apps":                     []string{},
 			"out_of_workspace":         false,
@@ -538,6 +586,84 @@ func (s *Service) buildScreenAnalysisApprovalState(task runengine.TaskRecord) (m
 	}
 	bubble := s.delivery.BuildBubbleMessage(task.TaskID, "status", "屏幕截图分析属于敏感能力，请先确认授权。", task.UpdatedAt.Format(dateTimeLayout))
 	return approvalRequest, pendingExecution, bubble, nil
+}
+
+func (s *Service) resolveScreenAnalyzeIntent(snapshot contextsvc.TaskContextSnapshot, current map[string]any) map[string]any {
+	updatedIntent := cloneMap(current)
+	arguments := cloneMap(mapValue(updatedIntent, "arguments"))
+	if arguments == nil {
+		arguments = map[string]any{}
+	}
+	if strings.TrimSpace(stringValue(arguments, "language", "")) == "" {
+		arguments["language"] = "eng"
+	}
+	if strings.TrimSpace(stringValue(arguments, "evidence_role", "")) == "" {
+		arguments["evidence_role"] = inferredScreenEvidenceRole(snapshot, arguments)
+	}
+	if strings.TrimSpace(stringValue(arguments, "page_title", "")) == "" && strings.TrimSpace(snapshot.PageTitle) != "" {
+		arguments["page_title"] = snapshot.PageTitle
+	}
+	if strings.TrimSpace(stringValue(arguments, "window_title", "")) == "" && strings.TrimSpace(snapshot.WindowTitle) != "" {
+		arguments["window_title"] = snapshot.WindowTitle
+	}
+	if strings.TrimSpace(stringValue(arguments, "visible_text", "")) == "" && strings.TrimSpace(snapshot.VisibleText) != "" {
+		arguments["visible_text"] = snapshot.VisibleText
+	}
+	if strings.TrimSpace(stringValue(arguments, "screen_summary", "")) == "" && strings.TrimSpace(snapshot.ScreenSummary) != "" {
+		arguments["screen_summary"] = snapshot.ScreenSummary
+	}
+	updatedIntent["arguments"] = arguments
+	if strings.TrimSpace(stringValue(updatedIntent, "title", "")) == "" {
+		updatedIntent["title"] = inferredScreenTaskTitle(snapshot)
+	}
+	return updatedIntent
+}
+
+func inferredScreenTaskTitle(snapshot contextsvc.TaskContextSnapshot) string {
+	target := screenSubjectFromSnapshot(snapshot)
+	if strings.TrimSpace(snapshot.ErrorText) != "" || strings.Contains(strings.ToLower(snapshot.Text), "错误") || strings.Contains(strings.ToLower(snapshot.Text), "报错") || strings.Contains(strings.ToLower(snapshot.Text), "error") {
+		return fmt.Sprintf("查看屏幕报错：%s", truncateText(target, 18))
+	}
+	return fmt.Sprintf("查看当前屏幕：%s", truncateText(target, 18))
+}
+
+func screenSubjectFromSnapshot(snapshot contextsvc.TaskContextSnapshot) string {
+	return firstNonEmptyString(snapshot.PageTitle, firstNonEmptyString(snapshot.WindowTitle, "当前屏幕"))
+}
+
+func screenTargetObject(arguments map[string]any) string {
+	if sourcePath := stringValue(arguments, "path", ""); strings.TrimSpace(sourcePath) != "" {
+		return sourcePath
+	}
+	for _, value := range []string{
+		stringValue(arguments, "page_title", ""),
+		stringValue(arguments, "window_title", ""),
+		stringValue(arguments, "screen_summary", ""),
+		stringValue(arguments, "visible_text", ""),
+	} {
+		if strings.TrimSpace(value) != "" {
+			return truncateText(value, 64)
+		}
+	}
+	return "current_screen"
+}
+
+func impactFilesForScreenTarget(sourcePath string) []string {
+	if strings.TrimSpace(sourcePath) == "" {
+		return []string{}
+	}
+	return []string{sourcePath}
+}
+
+func inferredScreenEvidenceRole(snapshot contextsvc.TaskContextSnapshot, arguments map[string]any) string {
+	if role := stringValue(arguments, "evidence_role", ""); strings.TrimSpace(role) != "" {
+		return role
+	}
+	combined := strings.ToLower(strings.Join([]string{snapshot.Text, snapshot.ErrorText, snapshot.VisibleText, snapshot.ScreenSummary}, " "))
+	if strings.Contains(combined, "error") || strings.Contains(combined, "warning") || strings.Contains(combined, "报错") || strings.Contains(combined, "错误") || strings.Contains(combined, "异常") {
+		return "error_evidence"
+	}
+	return "page_context"
 }
 
 func (s *Service) resumeQueuedControlledTask(task runengine.TaskRecord) (runengine.TaskRecord, bool, error) {
@@ -2265,6 +2391,7 @@ func (s *Service) executeScreenAnalysisAfterApproval(task runengine.TaskRecord, 
 			"retention_policy":  string(candidate.RetentionPolicy),
 			"language":          stringValue(pendingExecution, "language", "eng"),
 			"evidence_role":     stringValue(pendingExecution, "evidence_role", "error_evidence"),
+			"target_object":     stringValue(pendingExecution, "target_object", "current_screen"),
 		},
 	}
 	updatedTask, bubble, deliveryResult, _, err := s.executeTask(task, snapshotFromTask(task), execIntent)
