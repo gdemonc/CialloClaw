@@ -2054,12 +2054,14 @@ func (s *Service) SecurityRespond(params map[string]any) (map[string]any, error)
 // SettingsGet handles agent.settings.get.
 func (s *Service) SettingsGet(params map[string]any) (map[string]any, error) {
 	settings := s.runEngine.Settings()
-	settingsWithSecrets, err := s.attachSensitiveSettingAvailability(settings)
-	if err != nil {
-		return nil, err
-	}
-	settings = settingsWithSecrets
 	scope := stringValue(params, "scope", "all")
+	if scope == "all" || scope == "data_log" {
+		settingsWithSecrets, err := s.attachSensitiveSettingAvailability(settings)
+		if err != nil {
+			return nil, err
+		}
+		settings = settingsWithSecrets
+	}
 	if scope == "all" {
 		return map[string]any{"settings": settings}, nil
 	}
@@ -2094,11 +2096,13 @@ func (s *Service) SettingsUpdate(params map[string]any) (map[string]any, error) 
 		}
 	}
 	effectiveSettings, updatedKeys, applyMode, needRestart := s.runEngine.UpdateSettings(params)
-	effectiveSettingsWithSecrets, err := s.attachSensitiveSettingAvailability(effectiveSettings)
-	if err != nil {
-		return nil, err
+	if _, ok := effectiveSettings["data_log"]; ok {
+		effectiveSettingsWithSecrets, err := s.attachSensitiveSettingAvailability(effectiveSettings)
+		if err != nil {
+			return nil, err
+		}
+		effectiveSettings = effectiveSettingsWithSecrets
 	}
-	effectiveSettings = effectiveSettingsWithSecrets
 	return map[string]any{
 		"updated_keys":       updatedKeys,
 		"effective_settings": effectiveSettings,

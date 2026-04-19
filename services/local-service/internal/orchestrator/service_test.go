@@ -7730,6 +7730,24 @@ func TestSettingsGetReturnsStrongholdErrorWhenSecretStoreUnreadable(t *testing.T
 	}
 }
 
+func TestSettingsGetUnrelatedScopeIgnoresSecretStoreOutage(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "settings general scope")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	if err := service.storage.Close(); err != nil {
+		t.Fatalf("close storage failed: %v", err)
+	}
+	result, err := service.SettingsGet(map[string]any{"scope": "general"})
+	if err != nil {
+		t.Fatalf("expected unrelated settings scope to ignore secret outage, got %v", err)
+	}
+	settings := result["settings"].(map[string]any)
+	if _, ok := settings["general"].(map[string]any); !ok {
+		t.Fatalf("expected general scope payload, got %+v", settings)
+	}
+}
+
 func TestSettingsUpdatePersistsSecretOutsideRegularSettings(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "settings secret persist")
 	if service.storage == nil {
@@ -7873,6 +7891,31 @@ func TestSettingsUpdateReturnsStrongholdErrorWithoutStorage(t *testing.T) {
 	})
 	if !errors.Is(err, ErrStrongholdAccessFailed) {
 		t.Fatalf("expected ErrStrongholdAccessFailed, got %v", err)
+	}
+}
+
+func TestSettingsUpdateUnrelatedScopeIgnoresSecretStoreOutage(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "settings unrelated update")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	if err := service.storage.Close(); err != nil {
+		t.Fatalf("close storage failed: %v", err)
+	}
+	result, err := service.SettingsUpdate(map[string]any{
+		"general": map[string]any{
+			"language": "zh-CN",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected unrelated settings update to ignore secret outage, got %v", err)
+	}
+	effectiveSettings := result["effective_settings"].(map[string]any)
+	if _, ok := effectiveSettings["general"].(map[string]any); !ok {
+		t.Fatalf("expected general effective settings payload, got %+v", effectiveSettings)
+	}
+	if _, exists := effectiveSettings["data_log"]; exists {
+		t.Fatalf("expected unrelated settings update to avoid attaching data_log metadata, got %+v", effectiveSettings)
 	}
 }
 
