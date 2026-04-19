@@ -5357,6 +5357,154 @@ func TestServiceSecuritySummaryIncludesRuntimeTokenUsage(t *testing.T) {
 	}
 }
 
+func TestServiceBudgetAutoDowngradeSwitchesWorkspaceDeliveryToBubble(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "executor-backed downgrade output")
+
+	result, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_budget_downgrade",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": strings.Repeat("long task content ", 20),
+		},
+		"options": map[string]any{
+			"confirm_required":   false,
+			"preferred_delivery": "workspace_document",
+		},
+	})
+	if err != nil {
+		t.Fatalf("submit input failed: %v", err)
+	}
+	taskID := result["task"].(map[string]any)["task_id"].(string)
+	record, ok := service.runEngine.GetTask(taskID)
+	if !ok {
+		t.Fatal("expected downgraded task to remain in runtime")
+	}
+	_, ok = service.runEngine.AppendAuditData(taskID, nil, map[string]any{"total_tokens": 96, "estimated_cost": 0.12})
+	if !ok {
+		t.Fatal("expected token usage update to succeed")
+	}
+	record, ok = service.runEngine.GetTask(taskID)
+	if !ok {
+		t.Fatal("expected downgraded task to remain in runtime after token usage update")
+	}
+	updatedTask, bubble, deliveryResult, _, err := service.executeTask(record, snapshotFromTask(record), record.Intent)
+	if err != nil {
+		t.Fatalf("executeTask failed after token usage pressure: %v", err)
+	}
+	if bubble == nil || bubble["type"] != "result" {
+		t.Fatalf("expected downgraded execution to keep a result bubble, got %+v", bubble)
+	}
+
+	if deliveryResult["type"] != "bubble" {
+		t.Fatalf("expected budget downgrade to switch delivery to bubble, got %+v", deliveryResult)
+	}
+	record, ok = service.runEngine.GetTask(updatedTask.TaskID)
+	if !ok {
+		t.Fatal("expected downgraded task to remain in runtime")
+	}
+	if record.DeliveryResult["type"] != "bubble" {
+		t.Fatalf("expected runtime delivery result to use downgraded bubble delivery, got %+v", record.DeliveryResult)
+	}
+	notifications, ok := service.runEngine.PendingNotifications(taskID)
+	if !ok {
+		t.Fatalf("expected budget downgrade notifications to remain buffered")
+	}
+	foundDowngradeEvent := false
+	for _, notification := range notifications {
+		if notification.Method != "budget.downgrade.applied" {
+			continue
+		}
+		eventPayload := mapValue(mapValue(notification.Params, "event"), "payload")
+		if eventPayload["trigger_reason"] != "budget_pressure" {
+			t.Fatalf("expected budget downgrade payload to explain budget pressure, got %+v", notification.Params)
+		}
+		foundDowngradeEvent = true
+		break
+	}
+	if !foundDowngradeEvent {
+		t.Fatalf("expected one budget.downgrade.applied notification, got %+v", notifications)
+	}
+	if len(record.AuditRecords) == 0 || stringValue(record.AuditRecords[len(record.AuditRecords)-1], "action", "") != "budget_auto_downgrade.applied" {
+		t.Fatalf("expected budget downgrade audit record, got %+v", record.AuditRecords)
+	}
+}
+
+func TestServiceBudgetAutoDowngradeProviderUnavailableDisablesExpensiveTools(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "executor-backed provider unavailable")
+	if _, err := service.SettingsUpdate(map[string]any{
+		"data_log": map[string]any{
+			"provider":              "unsupported_provider",
+			"budget_auto_downgrade": true,
+		},
+	}); err != nil {
+		t.Fatalf("settings update failed: %v", err)
+	}
+
+	task := runengine.TaskRecord{
+		TaskID:            "task_budget_provider_unavailable",
+		SessionID:         "sess_budget_provider_unavailable",
+		RunID:             "run_budget_provider_unavailable",
+		Title:             "provider unavailable task",
+		SourceType:        "hover_input",
+		Status:            "processing",
+		Intent:            map[string]any{"name": "summarize", "arguments": map[string]any{"style": "key_points"}},
+		PreferredDelivery: "workspace_document",
+		FallbackDelivery:  "bubble",
+		CurrentStep:       "generate_output",
+		RiskLevel:         "green",
+		StartedAt:         time.Now().UTC(),
+		UpdatedAt:         time.Now().UTC(),
+	}
+	decision := service.evaluateBudgetAutoDowngrade(task, task.Intent)
+	if !decision.Applied || decision.TriggerReason != "provider_unavailable" {
+		t.Fatalf("expected provider unavailable downgrade decision, got %+v", decision)
+	}
+	updatedTask, updatedSnapshot, updatedIntent := service.applyBudgetAutoDowngrade(task, contextsvc.TaskContextSnapshot{Text: strings.Repeat("provider unavailable ", 20)}, task.Intent, decision)
+	if updatedTask.PreferredDelivery != "bubble" || updatedTask.FallbackDelivery != "bubble" {
+		t.Fatalf("expected provider unavailable downgrade to force bubble delivery, got task=%+v", updatedTask)
+	}
+	if mapValue(updatedIntent, "arguments")["disable_tool_calls"] != true {
+		t.Fatalf("expected provider unavailable downgrade to disable expensive tool calls, got %+v", updatedIntent)
+	}
+	if len(updatedSnapshot.Text) == 0 {
+		t.Fatalf("expected snapshot text to survive downgrade mutation, got %+v", updatedSnapshot)
+	}
+}
+
+func TestServiceBudgetAutoDowngradeDisabledKeepsWorkspaceDelivery(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "executor-backed no downgrade")
+	if _, err := service.SettingsUpdate(map[string]any{
+		"data_log": map[string]any{
+			"budget_auto_downgrade": false,
+		},
+	}); err != nil {
+		t.Fatalf("settings update failed: %v", err)
+	}
+
+	result, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_budget_disabled",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": strings.Repeat("long task content ", 20),
+		},
+		"options": map[string]any{
+			"confirm_required":   false,
+			"preferred_delivery": "workspace_document",
+		},
+	})
+	if err != nil {
+		t.Fatalf("submit input failed: %v", err)
+	}
+	deliveryResult := result["delivery_result"].(map[string]any)
+	if deliveryResult["type"] != "workspace_document" {
+		t.Fatalf("expected disabled budget downgrade to preserve workspace_document delivery, got %+v", deliveryResult)
+	}
+}
+
 func TestServiceSecuritySummaryFallsBackToStoredRecoveryPoint(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed summary")
 	if service.storage == nil {

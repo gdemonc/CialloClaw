@@ -67,6 +67,18 @@ type Service struct {
 	taskStartTaps  map[uint64]func(taskID, sessionID, traceID string)
 }
 
+// budgetDowngradeDecision describes one real execution-time downgrade decision
+// so orchestrator can apply lighter execution paths instead of treating the
+// setting as a display-only summary field.
+type budgetDowngradeDecision struct {
+	Enabled        bool
+	Applied        bool
+	TriggerReason  string
+	TriggerStage   string
+	DegradeActions []string
+	Summary        string
+}
+
 // NewService wires the main orchestration dependencies.
 func NewService(
 	context *contextsvc.Service,
@@ -4617,6 +4629,95 @@ func previewTextForDeliveryType(deliveryType string) string {
 	return "\u5df2\u4e3a\u4f60\u5199\u5165\u6587\u6863\u5e76\u6253\u5f00"
 }
 
+// evaluateBudgetAutoDowngrade decides whether the visible budget setting should
+// become a real execution downgrade before the task reaches model/tool work.
+// The first P1 slice keeps the trigger set intentionally small and auditable:
+// provider/API-key unavailability and token/cost pressure on the current task.
+func (s *Service) evaluateBudgetAutoDowngrade(task runengine.TaskRecord, taskIntent map[string]any) budgetDowngradeDecision {
+	dataLogSettings := mapValue(s.runEngine.Settings(), "data_log")
+	if !boolValue(dataLogSettings, "budget_auto_downgrade", true) {
+		return budgetDowngradeDecision{}
+	}
+	decision := budgetDowngradeDecision{
+		Enabled:      true,
+		TriggerStage: "execution_preflight",
+	}
+	provider := providerFromSettings(dataLogSettings, model.OpenAIResponsesProvider)
+	if !supportsBudgetProvider(provider) {
+		decision.Applied = true
+		decision.TriggerReason = "provider_unavailable"
+		decision.DegradeActions = []string{"lightweight_delivery", "skip_expensive_tools"}
+		decision.Summary = "预算降级已生效：当前模型提供方不可用，任务改走轻量交付路径。"
+		return decision
+	}
+	totalTokens := intValueFromAny(task.TokenUsage["total_tokens"])
+	estimatedCost := floatValueFromAny(task.TokenUsage["estimated_cost"])
+	if totalTokens >= 64 || estimatedCost >= 0.05 {
+		decision.Applied = true
+		decision.TriggerReason = "budget_pressure"
+		decision.DegradeActions = []string{"lightweight_delivery", "shrink_context"}
+		decision.Summary = "预算降级已生效：当前任务命中 token/成本压力，改为轻量交付并压缩上下文。"
+	}
+	return decision
+}
+
+// applyBudgetAutoDowngrade mutates the execution request shape so the downgrade
+// decision changes the real path instead of only updating settings summaries.
+func (s *Service) applyBudgetAutoDowngrade(task runengine.TaskRecord, snapshot contextsvc.TaskContextSnapshot, taskIntent map[string]any, decision budgetDowngradeDecision) (runengine.TaskRecord, contextsvc.TaskContextSnapshot, map[string]any) {
+	if !decision.Applied {
+		return task, snapshot, taskIntent
+	}
+	updatedTask := task
+	updatedTask.PreferredDelivery = "bubble"
+	updatedTask.FallbackDelivery = "bubble"
+	updatedIntent := cloneMap(taskIntent)
+	arguments := cloneMap(mapValue(updatedIntent, "arguments"))
+	if len(arguments) > 0 {
+		if containsString(decision.DegradeActions, "skip_expensive_tools") {
+			arguments["disable_tool_calls"] = true
+		}
+		arguments["budget_auto_downgrade_applied"] = true
+		updatedIntent["arguments"] = arguments
+	}
+	updatedSnapshot := snapshot
+	if containsString(decision.DegradeActions, "shrink_context") {
+		updatedSnapshot.Text = truncateText(updatedSnapshot.Text, 160)
+		updatedSnapshot.SelectionText = truncateText(updatedSnapshot.SelectionText, 160)
+	}
+	updatedTask.SecuritySummary = mergeBudgetDowngradeSummary(updatedTask.SecuritySummary, decision)
+	return updatedTask, updatedSnapshot, updatedIntent
+}
+
+func mergeBudgetDowngradeSummary(current map[string]any, decision budgetDowngradeDecision) map[string]any {
+	updated := cloneMap(current)
+	if updated == nil {
+		updated = map[string]any{}
+	}
+	updated["budget_auto_downgrade_applied"] = decision.Applied
+	updated["budget_auto_downgrade_reason"] = decision.TriggerReason
+	updated["budget_auto_downgrade_actions"] = append([]string(nil), decision.DegradeActions...)
+	updated["budget_auto_downgrade_summary"] = decision.Summary
+	return updated
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func supportsBudgetProvider(provider string) bool {
+	switch strings.TrimSpace(provider) {
+	case "", model.OpenAIResponsesProvider:
+		return true
+	default:
+		return false
+	}
+}
+
 func firstNonEmptyString(primary, fallback string) string {
 	if primary != "" {
 		return primary
@@ -4798,6 +4899,8 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 	if !ok {
 		return runengine.TaskRecord{}, nil, nil, nil, ErrTaskNotFound
 	}
+	budgetDecision := s.evaluateBudgetAutoDowngrade(processingTask, taskIntent)
+	processingTask, snapshot, taskIntent = s.applyBudgetAutoDowngrade(processingTask, snapshot, taskIntent, budgetDecision)
 
 	resultTitle, _, resultBubbleText := resultSpecFromIntent(taskIntent)
 	deliveryType := resolveTaskDeliveryType(processingTask, taskIntent)
@@ -4812,7 +4915,9 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		)
 		artifacts := delivery.EnsureArtifactIdentifiers(processingTask.TaskID, s.delivery.BuildArtifact(processingTask.TaskID, resultTitle, deliveryResult))
 		resultBubble := s.delivery.BuildBubbleMessage(processingTask.TaskID, "result", resultBubbleText, processingTask.UpdatedAt.Format(dateTimeLayout))
-		processingTask = s.appendAuditData(processingTask, compactAuditRecords(s.audit.BuildDeliveryAudit(processingTask.TaskID, processingTask.RunID, deliveryResult)), nil)
+		auditRecords := compactAuditRecords(s.audit.BuildDeliveryAudit(processingTask.TaskID, processingTask.RunID, deliveryResult), s.buildBudgetDowngradeAudit(processingTask, budgetDecision))
+		processingTask = s.appendAuditData(processingTask, auditRecords, nil)
+		processingTask = s.recordBudgetDowngradeEvent(processingTask, budgetDecision)
 		traceCapture, traceErr := s.captureExecutionTrace(processingTask, snapshot, taskIntent, execution.Result{
 			Content:        previewTextForDeliveryType(deliveryType),
 			DeliveryResult: deliveryResult,
@@ -4853,7 +4958,9 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		auditDeliveryResult = nil
 	}
 	executionAuditRecords, executionTokenUsage := s.buildExecutionAudit(processingTask, executionResult.ToolCalls, auditDeliveryResult)
+	executionAuditRecords = append(executionAuditRecords, s.buildBudgetDowngradeAudit(processingTask, budgetDecision))
 	processingTask = s.appendAuditData(processingTask, executionAuditRecords, executionTokenUsage)
+	processingTask = s.recordBudgetDowngradeEvent(processingTask, budgetDecision)
 	traceCapture, traceErr := s.captureExecutionTrace(processingTask, snapshot, taskIntent, executionResult, err)
 	if traceErr != nil {
 		failedTask, failureBubble := s.failExecutionTask(processingTask, taskIntent, executionResult, traceErr)
@@ -5165,6 +5272,46 @@ func (s *Service) appendAuditData(task runengine.TaskRecord, auditRecords []map[
 		return task
 	}
 	updatedTask, ok := s.runEngine.AppendAuditData(task.TaskID, auditRecords, tokenUsage)
+	if !ok {
+		return task
+	}
+	return updatedTask
+}
+
+func (s *Service) buildBudgetDowngradeAudit(task runengine.TaskRecord, decision budgetDowngradeDecision) map[string]any {
+	if !decision.Applied {
+		return nil
+	}
+	return map[string]any{
+		"audit_record_id": fmt.Sprintf("audit_budget_%s_%d", task.TaskID, time.Now().UnixNano()),
+		"task_id":         task.TaskID,
+		"run_id":          task.RunID,
+		"category":        "budget_auto_downgrade",
+		"action":          "budget_auto_downgrade.applied",
+		"result":          "applied",
+		"reason":          decision.TriggerReason,
+		"created_at":      time.Now().Format(dateTimeLayout),
+		"details": map[string]any{
+			"trigger_stage":   decision.TriggerStage,
+			"degrade_actions": append([]string(nil), decision.DegradeActions...),
+			"summary":         decision.Summary,
+		},
+	}
+}
+
+func (s *Service) recordBudgetDowngradeEvent(task runengine.TaskRecord, decision budgetDowngradeDecision) runengine.TaskRecord {
+	if !decision.Applied {
+		return task
+	}
+	updatedTask, ok := s.runEngine.EmitRuntimeNotification(task.TaskID, "budget.downgrade.applied", map[string]any{
+		"task_id":          task.TaskID,
+		"run_id":           task.RunID,
+		"trigger_reason":   decision.TriggerReason,
+		"trigger_stage":    decision.TriggerStage,
+		"degrade_actions":  append([]string(nil), decision.DegradeActions...),
+		"summary":          decision.Summary,
+		"budget_auto_down": true,
+	})
 	if !ok {
 		return task
 	}
