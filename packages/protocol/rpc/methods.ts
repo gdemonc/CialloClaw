@@ -6,6 +6,7 @@ import type {
   Artifact,
   AuditRecord,
   BubbleMessage,
+  Citation,
   DeliveryPayload,
   DeliveryResult,
   DeliveryType,
@@ -345,6 +346,7 @@ export interface AgentTaskDetailGetResult {
   task: Task;
   timeline: TaskStep[];
   artifacts: Artifact[];
+  citations: Citation[];
   mirror_references: MirrorReference[];
   approval_request: ApprovalRequest | null;
   security_summary: SecuritySummary;

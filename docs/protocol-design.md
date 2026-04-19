@@ -1504,7 +1504,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户进入任务详情页时
-- **系统处理**：返回任务头部、时间线、成果、记忆引用、安全摘要与单个正式安全锚点
+- **系统处理**：返回任务头部、时间线、成果、正式引用、记忆引用、安全摘要与单个正式安全锚点
 - **入参**：任务 ID
 - **出参**：任务详情对象
 
@@ -1515,6 +1515,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `security_summary.pending_authorizations` 在任务详情中收敛为 `0 | 1`，仅反映当前 task 是否存在这一个活跃安全锚点。
 - `security_summary.latest_restore_point` 的正式类型为 `RecoveryPoint | null`。
 - 对屏幕感知类任务，任务详情应通过正式 `artifact`、事件和交付对象回看截图证据、OCR 摘要和授权过程，而不是直接渲染平台采样结果或裸 worker 输出。
+- 若任务存在正式视觉或上下文引用，`citations` 应返回稳定 `citation` 对象列表，用于区分截图证据、OCR 摘要等正式引用，而不是把引用信息混进 artifact 扩展字段或裸 tool output。
 
 ### agent.task.detail.get 入参说明
 
@@ -1546,6 +1547,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.task`              | 任务基础信息   |
 | `data.timeline`          | 步骤时间线     |
 | `data.artifacts`         | 产出物列表     |
+| `data.citations`         | 正式引用列表   |
 | `data.mirror_references` | 命中的镜子记忆 |
 | `data.approval_request`  | 当前任务的正式安全锚点 |
 | `data.security_summary`  | 安全摘要       |

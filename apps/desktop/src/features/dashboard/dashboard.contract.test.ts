@@ -435,6 +435,7 @@ function createDetail(overrides: Partial<AgentTaskDetailGetResult> = {}): AgentT
   return {
     approval_request: createApprovalRequest(),
     artifacts: [],
+    citations: [],
     mirror_references: [],
     runtime_summary: {
       active_steering_count: 0,

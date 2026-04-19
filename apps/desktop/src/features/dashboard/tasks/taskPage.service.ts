@@ -11,7 +11,7 @@ import type {
   TaskRuntimeSummary,
 } from "@cialloclaw/protocol";
 import { controlTask, getTaskDetail, listTaskEvents, listTasks, steerTask } from "@/rpc/methods";
-import { isActiveApprovalRequest, isApprovalRequest, isArtifact, isBinaryPendingAuthorizations, isMirrorReference, isRecoveryPoint, isTask, isTaskEvent, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
+import { isActiveApprovalRequest, isApprovalRequest, isArtifact, isBinaryPendingAuthorizations, isCitation, isMirrorReference, isRecoveryPoint, isTask, isTaskEvent, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@/rpc/protocolEnumerations";
 import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskEventFilters, TaskEventPageData, TaskEventTimeRange, TaskExperience, TaskListItem } from "./taskPage.types";
@@ -95,6 +95,7 @@ function createFallbackTaskDetail(task: Task): AgentTaskDetailGetResult {
   return {
     approval_request: null,
     artifacts: [],
+    citations: [],
     mirror_references: [],
     runtime_summary: {
       active_steering_count: 0,
@@ -248,6 +249,7 @@ export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): Age
   const approvalRequest = normalizeNullable(detail.approval_request, isApprovalRequest, "task detail payload approval_request");
   const latestRestorePoint = normalizeNullable(detail.security_summary.latest_restore_point, isRecoveryPoint, "task detail payload restore point");
   const artifacts = normalizeArray(detail.artifacts, isArtifact, "task detail payload artifacts");
+  const citations = normalizeArray(detail.citations, isCitation, "task detail payload citations");
   const mirrorReferences = normalizeArray(detail.mirror_references, isMirrorReference, "task detail payload mirror_references");
   const timeline = normalizeArray(detail.timeline, (value): value is (typeof detail.timeline)[number] => isTaskStep(value, taskStepStatuses), "task detail payload timeline");
 
@@ -278,6 +280,7 @@ export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): Age
   return {
     approval_request: approvalRequest,
     artifacts,
+    citations,
     mirror_references: mirrorReferences,
     runtime_summary: runtimeSummary,
     security_summary: {

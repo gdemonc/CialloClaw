@@ -532,6 +532,7 @@ function createDetail(
   return {
     approval_request: approvalRequest,
     artifacts,
+    citations: [],
     mirror_references: mirrorReferences,
     runtime_summary: {
       active_steering_count: 0,
