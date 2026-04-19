@@ -484,6 +484,9 @@ fn read_browser_url_via_uia(hwnd: HWND) -> Option<String> {
 }
 
 fn read_element_url_candidate(element: &IUIAutomationElement) -> Option<String> {
+    let name: BSTR = unsafe { element.CurrentName().ok()? };
+    let normalized_name = name.to_string().trim().to_string();
+
     let value_pattern: IUIAutomationValuePattern = unsafe { element.GetCurrentPatternAs(UIA_ValuePatternId).ok()? };
     let value = unsafe { value_pattern.CurrentValue().ok()? }.to_string();
     let trimmed_value = value.trim();
@@ -491,13 +494,29 @@ fn read_element_url_candidate(element: &IUIAutomationElement) -> Option<String> 
         return Some(trimmed_value.to_string());
     }
 
-    let name: BSTR = unsafe { element.CurrentName().ok()? };
-    let trimmed_name = name.to_string().trim().to_string();
-    if looks_like_url(&trimmed_name) {
-        return Some(trimmed_name);
+    if looks_like_address_bar_name(&normalized_name) && !trimmed_value.is_empty() {
+        return Some(trimmed_value.to_string());
+    }
+
+    if looks_like_url(&normalized_name) {
+        return Some(normalized_name);
     }
 
     None
+}
+
+fn looks_like_address_bar_name(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+
+    lower.contains("address and search bar")
+        || lower.contains("address bar")
+        || lower.contains("search bar")
+        || lower.contains("search or enter address")
+        || lower.contains("search google or type a url")
+        || value.contains("地址栏")
+        || value.contains("地址和搜索栏")
+        || value.contains("搜索栏")
+        || value.contains("输入网址")
 }
 
 fn looks_like_url(value: &str) -> bool {

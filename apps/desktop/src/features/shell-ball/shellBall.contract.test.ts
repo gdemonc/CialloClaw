@@ -4728,9 +4728,11 @@ test("shell-ball window command stays local and replies with active window conte
   assert.match(coordinatorSource, /shouldHandleShellBallWindowCommand\(/);
   assert.match(coordinatorSource, /const context = await getActiveWindowContext\(\);/);
   assert.match(coordinatorSource, /createShellBallWindowContextReply\(context\.app_name, context\.title, context\.url\)/);
+  assert.match(coordinatorSource, /URL: get failed/);
   assert.match(windowContextPlatformSource, /invoke<DesktopWindowContextPayload \| null>\("desktop_get_active_window_context"\)/);
   assert.match(windowContextHostSource, /BROWSER_KIND_CHROME \| BROWSER_KIND_EDGE \| BROWSER_KIND_OTHER_BROWSER => \{/);
   assert.doesNotMatch(windowContextHostSource, /read_chrome_url_via_mcp/);
+  assert.match(windowContextHostSource, /looks_like_address_bar_name/);
 });
 
 test("shell-ball file drops queue pending attachments instead of starting a task immediately", () => {

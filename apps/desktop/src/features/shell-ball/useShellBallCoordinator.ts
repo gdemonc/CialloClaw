@@ -1646,6 +1646,8 @@ function shouldHandleShellBallWindowCommand(input: {
  */
 function createShellBallWindowContextReply(appName: string, title: string | null, url: string | null) {
   const lines = [`App: ${appName}`];
+  const normalizedAppName = appName.toLowerCase();
+  const isBrowser = ["chrome", "msedge", "firefox", "opera", "brave", "vivaldi"].includes(normalizedAppName);
 
   if (title && title.trim() !== "") {
     lines.push(`Title: ${title}`);
@@ -1653,6 +1655,8 @@ function createShellBallWindowContextReply(appName: string, title: string | null
 
   if (url && url.trim() !== "") {
     lines.push(`URL: ${url}`);
+  } else if (isBrowser) {
+    lines.push("URL: get failed");
   }
 
   return lines.join("\n");
