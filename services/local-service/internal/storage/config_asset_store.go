@@ -3,8 +3,10 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -140,6 +142,9 @@ func (s *inMemoryPromptTemplateVersionStore) ListPromptTemplateVersions(_ contex
 type SQLiteSkillManifestStore struct{ db *sql.DB }
 
 func NewSQLiteSkillManifestStore(databasePath string) (*SQLiteSkillManifestStore, error) {
+	if strings.TrimSpace(databasePath) == "" {
+		return nil, errors.New("sqlite config asset database path is required")
+	}
 	db, err := openSQLiteDatabase(databasePath)
 	if err != nil {
 		return nil, err
@@ -193,6 +198,9 @@ func (s *SQLiteSkillManifestStore) initialize(ctx context.Context) error {
 type SQLiteBlueprintDefinitionStore struct{ db *sql.DB }
 
 func NewSQLiteBlueprintDefinitionStore(databasePath string) (*SQLiteBlueprintDefinitionStore, error) {
+	if strings.TrimSpace(databasePath) == "" {
+		return nil, errors.New("sqlite config asset database path is required")
+	}
 	db, err := openSQLiteDatabase(databasePath)
 	if err != nil {
 		return nil, err
@@ -246,6 +254,9 @@ func (s *SQLiteBlueprintDefinitionStore) initialize(ctx context.Context) error {
 type SQLitePromptTemplateVersionStore struct{ db *sql.DB }
 
 func NewSQLitePromptTemplateVersionStore(databasePath string) (*SQLitePromptTemplateVersionStore, error) {
+	if strings.TrimSpace(databasePath) == "" {
+		return nil, errors.New("sqlite config asset database path is required")
+	}
 	db, err := openSQLiteDatabase(databasePath)
 	if err != nil {
 		return nil, err
