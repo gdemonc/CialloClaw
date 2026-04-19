@@ -712,7 +712,7 @@
 }
 
 .shell-ball-input-bar {
-  --shell-ball-input-accent: rgba(148, 148, 148, 0.38);
+  --shell-ball-input-accent: rgba(138, 138, 138, 0.42);
   align-items: end;
   background: transparent;
   border: 0;
@@ -739,11 +739,9 @@
 }
 
 .shell-ball-input-bar__field-shell {
-  align-items: end;
-  display: flex;
-  min-height: 2.75rem;
+  min-height: 44px;
   min-width: 0;
-  padding: 0.08rem 0.82rem 0.08rem 0;
+  padding: 0 0.82rem 0.08rem 0;
   position: relative;
 }
 
@@ -751,18 +749,19 @@
   appearance: none;
   background: transparent;
   border: 0;
-  caret-color: rgba(56, 56, 56, 0.92);
-  color: rgba(56, 56, 56, 0.94);
+  caret-color: rgba(35, 36, 42, 0.96);
+  color: rgba(35, 36, 42, 0.96);
   display: block;
   font: inherit;
+  letter-spacing: 0.05em;
   line-height: 1.42;
   max-width: min(32rem, calc(100vw - 6rem));
-  min-height: 2.75rem;
+  min-height: 44px;
   min-width: 11rem;
   outline: 0;
   overflow-x: hidden;
   overflow-y: hidden;
-  padding: 1.24rem 0.7rem 0.58rem 0.62rem;
+  padding: 20px 10px 10px;
   resize: none;
   scrollbar-color: rgba(124, 140, 160, 0.94) rgba(255, 255, 255, 0.14);
   scrollbar-width: thin;
@@ -776,11 +775,11 @@
 }
 
 .shell-ball-input-bar__field-label {
-  color: rgba(138, 138, 138, 0.74);
-  font-size: 0.95rem;
+  color: rgba(143, 143, 143, 0.74);
+  font-size: 1em;
   left: 0;
   letter-spacing: 0.05em;
-  padding: 1.24rem 0.62rem 0.58rem;
+  padding: 20px 10px 10px;
   pointer-events: none;
   position: absolute;
   top: 0;
@@ -793,9 +792,9 @@
 }
 
 .shell-ball-input-bar__field-line {
-  background: rgba(126, 126, 126, 0.34);
-  border-radius: 0.8rem;
-  bottom: 0.08rem;
+  background: rgba(128, 128, 128, 0.42);
+  border-radius: 4px;
+  bottom: 0;
   height: 2px;
   left: 0;
   pointer-events: none;
@@ -946,16 +945,16 @@
 .shell-ball-input-bar--interactive {
   background: transparent;
   box-shadow: none;
-  min-height: 2rem;
+  min-height: 44px;
   padding: 0.05rem 0.12rem 0.22rem 0.2rem;
 }
 
 .shell-ball-input-bar--interactive:focus-within {
   background: transparent;
-  border-radius: 1rem;
+  border-radius: 0;
   box-shadow: none;
-  min-height: 2.68rem;
-  padding: 0.28rem 0.36rem 0.28rem 0.62rem;
+  min-height: 44px;
+  padding: 0.05rem 0.12rem 0.22rem 0.2rem;
   transform: none;
 }
 
@@ -966,23 +965,23 @@
 .shell-ball-input-bar--interactive:focus-within .shell-ball-input-bar__field {
   caret-color: rgba(42, 42, 42, 0.96);
   color: rgba(42, 42, 42, 0.96);
-  min-height: 2.56rem;
+  min-height: 44px;
   text-shadow: none;
 }
 
 .shell-ball-input-bar__field-shell[data-filled="true"] .shell-ball-input-bar__field-label,
 .shell-ball-input-bar--interactive:focus-within .shell-ball-input-bar__field-label,
 .shell-ball-input-bar--readonly .shell-ball-input-bar__field-label {
-  color: rgba(110, 110, 110, 0.82);
-  font-size: 0.72rem;
-  transform: translateX(-0.34rem) translateY(-1.06rem);
+  color: rgba(128, 128, 128, 0.82);
+  font-size: 0.75em;
+  transform: translateX(-10px) translateY(-34px);
 }
 
 .shell-ball-input-bar__field-shell[data-filled="true"] .shell-ball-input-bar__field-line,
 .shell-ball-input-bar--interactive:focus-within .shell-ball-input-bar__field-line,
 .shell-ball-input-bar--readonly .shell-ball-input-bar__field-line {
-  background: rgba(128, 128, 128, 0.26);
-  height: calc(100% - 0.08rem);
+  background: rgba(128, 128, 128, 0.24);
+  height: 44px;
 }
 
 .shell-ball-input-bar--readonly {
@@ -990,12 +989,12 @@
   background: transparent;
   border: 0;
   box-shadow: none;
-  min-height: 2rem;
+  min-height: 44px;
   padding: 0.05rem 0.12rem 0.22rem 0.2rem;
 }
 
 .shell-ball-input-bar--readonly .shell-ball-input-bar__field {
-  color: rgba(24, 24, 24, 0.62);
+  color: rgba(35, 36, 42, 0.82);
 }
 
 .shell-ball-input-bar--readonly .shell-ball-input-bar__action--send {
