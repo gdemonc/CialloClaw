@@ -3,20 +3,28 @@ import { requestShellBallDashboardCloseTransition } from "./dashboardWindowTrans
 
 type HideOnCloseWindow = ReturnType<typeof getCurrentWindow>;
 
+const destroyOnCloseLabels = new Set(["control-panel"]);
+
 export function installHideOnCloseRequest(windowHandle: HideOnCloseWindow = getCurrentWindow()) {
   let hiding = false;
 
   return windowHandle.onCloseRequested(async (event) => {
-    event.preventDefault();
     if (hiding) {
       return;
     }
+
+    event.preventDefault();
 
     hiding = true;
 
     try {
       if (windowHandle.label === "dashboard") {
         await requestShellBallDashboardCloseTransition();
+      }
+
+      if (destroyOnCloseLabels.has(windowHandle.label)) {
+        await windowHandle.destroy();
+        return;
       }
 
       await windowHandle.hide();
