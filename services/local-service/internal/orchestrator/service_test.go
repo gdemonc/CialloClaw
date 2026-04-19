@@ -5359,6 +5359,15 @@ func TestServiceSecuritySummaryIncludesRuntimeTokenUsage(t *testing.T) {
 
 func TestServiceBudgetAutoDowngradeSwitchesWorkspaceDeliveryToBubble(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed downgrade output")
+	runtimeEvents := make([]map[string]any, 0)
+	unsubscribe := service.SubscribeRuntimeNotifications(func(taskID, method string, params map[string]any) {
+		runtimeEvents = append(runtimeEvents, map[string]any{
+			"task_id": taskID,
+			"method":  method,
+			"params":  cloneMap(params),
+		})
+	})
+	defer unsubscribe()
 
 	result, err := service.SubmitInput(map[string]any{
 		"session_id": "sess_budget_downgrade",
@@ -5425,6 +5434,17 @@ func TestServiceBudgetAutoDowngradeSwitchesWorkspaceDeliveryToBubble(t *testing.
 	}
 	if !foundDowngradeEvent {
 		t.Fatalf("expected one budget.downgrade.applied notification, got %+v", notifications)
+	}
+	foundLiveRuntimeEvent := false
+	for _, event := range runtimeEvents {
+		if event["method"] != "budget.downgrade.applied" {
+			continue
+		}
+		foundLiveRuntimeEvent = true
+		break
+	}
+	if !foundLiveRuntimeEvent {
+		t.Fatalf("expected live runtime subscribers to receive budget.downgrade.applied, got %+v", runtimeEvents)
 	}
 	if len(record.AuditRecords) == 0 || stringValue(record.AuditRecords[len(record.AuditRecords)-1], "action", "") != "budget_auto_downgrade.applied" {
 		t.Fatalf("expected budget downgrade audit record, got %+v", record.AuditRecords)
