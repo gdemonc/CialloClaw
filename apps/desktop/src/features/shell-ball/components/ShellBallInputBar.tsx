@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { ChangeEvent, CompositionEvent, KeyboardEvent } from "react";
 import styled from "styled-components";
 import { ArrowUp, Paperclip } from "lucide-react";
@@ -43,7 +43,7 @@ export function ShellBallInputBar({
   onCompositionStateChange = () => {},
   onTransientInputActivity = () => {},
 }: ShellBallInputBarProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const compositionActiveRef = useRef(false);
   const trimmedValue = value.trim();
   const isHidden = mode === "hidden";
@@ -52,6 +52,16 @@ export function ShellBallInputBar({
   const isVoice = mode === "voice";
   const buttonsDisabled = isHidden || isReadonly || isVoice;
   const submitDisabled = !isInteractive || (trimmedValue === "" && !hasPendingFiles);
+
+  useLayoutEffect(() => {
+    const field = inputRef.current;
+    if (field === null) {
+      return;
+    }
+
+    field.style.height = "0px";
+    field.style.height = `${Math.max(44, field.scrollHeight)}px`;
+  }, [value]);
 
   useEffect(() => {
     if (inputRef.current === null) {
@@ -71,7 +81,7 @@ export function ShellBallInputBar({
     }
   }, [focusToken, isInteractive, onFocusChange]);
 
-  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleChange(event: ChangeEvent<HTMLTextAreaElement>) {
     if (!isInteractive) {
       return;
     }
@@ -79,12 +89,12 @@ export function ShellBallInputBar({
     onValueChange(event.target.value);
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (!event.ctrlKey && !event.metaKey && !event.altKey && (event.key.length === 1 || event.key === "Enter")) {
       onTransientInputActivity();
     }
 
-    if (event.key !== "Enter" || submitDisabled) {
+    if (event.key !== "Enter" || event.shiftKey || submitDisabled) {
       return;
     }
 
@@ -92,13 +102,13 @@ export function ShellBallInputBar({
     onSubmit();
   }
 
-  function handleCompositionStart(_event: CompositionEvent<HTMLInputElement>) {
+  function handleCompositionStart(_event: CompositionEvent<HTMLTextAreaElement>) {
     compositionActiveRef.current = true;
     onTransientInputActivity();
     onCompositionStateChange(true);
   }
 
-  function handleCompositionEnd(_event: CompositionEvent<HTMLInputElement>) {
+  function handleCompositionEnd(_event: CompositionEvent<HTMLTextAreaElement>) {
     compositionActiveRef.current = false;
     onCompositionStateChange(false);
   }
@@ -113,10 +123,9 @@ export function ShellBallInputBar({
       data-voice-preview={voicePreview ?? undefined}
     >
       <div className="shell-ball-uiverse-inputbox">
-        <input
+        <textarea
           ref={inputRef}
           required
-          type="text"
           value={value}
           onChange={handleChange}
           onCompositionStart={handleCompositionStart}
@@ -134,6 +143,7 @@ export function ShellBallInputBar({
           tabIndex={isHidden || isVoice ? -1 : 0}
           aria-label="Shell-ball input"
           placeholder={isVoice ? "Voice capture is active" : ""}
+          rows={1}
         />
         <span>{SHELL_BALL_INPUT_LABEL}</span>
         <i />
@@ -181,7 +191,7 @@ const StyledInputBar = styled.div`
     width: 196px;
   }
 
-  .shell-ball-uiverse-inputbox input {
+  .shell-ball-uiverse-inputbox textarea {
     position: relative;
     width: 100%;
     padding: 20px 10px 10px;
@@ -193,6 +203,10 @@ const StyledInputBar = styled.div`
     color: rgba(255, 255, 255, 0.96);
     font-size: 1em;
     letter-spacing: 0.05em;
+    line-height: 1.4;
+    min-height: 44px;
+    overflow-y: auto;
+    resize: none;
     transition: 0.5s;
     z-index: 10;
   }
@@ -208,8 +222,8 @@ const StyledInputBar = styled.div`
     pointer-events: none;
   }
 
-  .shell-ball-uiverse-inputbox input:valid ~ span,
-  .shell-ball-uiverse-inputbox input:focus ~ span,
+  .shell-ball-uiverse-inputbox textarea:valid ~ span,
+  .shell-ball-uiverse-inputbox textarea:focus ~ span,
   &[data-filled="true"] .shell-ball-uiverse-inputbox span {
     color: rgba(128, 128, 128, 0.82);
     transform: translateX(-10px) translateY(-26px);
@@ -229,8 +243,8 @@ const StyledInputBar = styled.div`
     z-index: 9;
   }
 
-  .shell-ball-uiverse-inputbox input:valid ~ i,
-  .shell-ball-uiverse-inputbox input:focus ~ i,
+  .shell-ball-uiverse-inputbox textarea:valid ~ i,
+  .shell-ball-uiverse-inputbox textarea:focus ~ i,
   &[data-filled="true"] .shell-ball-uiverse-inputbox i {
     height: 44px;
     background: rgba(128, 128, 128, 0.24);
