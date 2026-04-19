@@ -20,7 +20,8 @@
 
 .shell-ball-window--input {
   gap: 0.42rem;
-  width: fit-content;
+  justify-items: start;
+  width: max-content;
 }
 
 .shell-ball-window--voice {
@@ -741,7 +742,7 @@
 .shell-ball-input-bar__field-shell {
   min-height: 44px;
   min-width: 0;
-  padding: 0 0.82rem 0.08rem 0;
+  padding: 0 0 0.08rem 0;
   position: relative;
 }
 
@@ -769,7 +770,7 @@
   outline: 0;
   overflow-x: hidden;
   overflow-y: hidden;
-  padding: 20px 10px 10px;
+  padding: 10px;
   resize: none;
   scrollbar-color: rgba(124, 140, 160, 0.94) rgba(255, 255, 255, 0.14);
   scrollbar-width: thin;
