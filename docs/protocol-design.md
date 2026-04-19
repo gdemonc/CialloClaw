@@ -692,10 +692,25 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `input.text`               | 当 `input.type = text_selection` 时传入，表示选中文本内容 |
 | `input.files`              | 当 `input.type = file` 时传入，表示拖入文件列表 |
 | `input.page_context`       | 与输入对象关联的页面上下文，按需传入 |
+| `input.page_context.title` | 当前页面标题，可用于页面级任务标题与上下文冻结 |
+| `input.page_context.url`   | 当前页面 URL |
+| `input.page_context.app_name` | 当前宿主应用名 |
+| `input.page_context.window_title` | 当前窗口标题 |
+| `input.page_context.visible_text` | 当前页面可见文本摘录 |
 | `context.selection.text`   | 当前选区补充文本，按需传入 |
 | `context.files`            | 补充文件上下文，按需传入 |
+| `context.screen.summary`   | 当前屏幕摘要，可用于视觉型任务上下文 |
+| `context.screen.visible_text` | 当前屏幕可见文本摘录 |
+| `context.behavior.last_action` | 最近行为信号，例如 `copy` |
+| `context.behavior.dwell_millis` | 当前场景停留时长 |
 | `delivery.preferred`       | 优先交付方式 |
 | `delivery.fallback`        | 兜底交付方式 |
+
+补充约束：
+
+- 当输入文本和 `page_context / screen / behavior` 同时表明用户想“查看当前页面/屏幕”时，后端可直接推断为受控视觉型任务，并继续走既有 `task -> approval_request -> event -> artifact / delivery_result` 链路。
+- 这类视觉型任务的 `task.source_type` 应返回 `screen_capture`，表示正式任务围绕当前屏幕采样展开，而不是普通 `hover_input` 文本处理。
+- 若客户端已显式提供 `intent.name = screen_analyze`，后端应复用同一条主链路；若客户端未显式提供 intent，也不应要求前端额外发明平行入口。
 
 ### agent.task.start 入参示例
 
@@ -780,6 +795,13 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
   }
 }
 ```
+
+---
+
+补充说明：
+
+- `task.source_type` 当前稳定取值至少包括 `voice`、`hover_input`、`selected_text`、`dragged_file`、`todo`、`error_signal`、`screen_capture`。
+- 其中 `screen_capture` 表示该任务虽然可能由自然语言触发，但其正式执行对象已经切换为“当前屏幕/页面采样证据”，因此后续会进入授权、artifact 证据和交付链。
 
 ---
 
@@ -1465,6 +1487,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - 该字段只服务当前 task 的详情承接，不替代 `agent.security.pending.list` 对全局待确认项的聚合查询。
 - `security_summary.pending_authorizations` 在任务详情中收敛为 `0 | 1`，仅反映当前 task 是否存在这一个活跃安全锚点。
 - `security_summary.latest_restore_point` 的正式类型为 `RecoveryPoint | null`。
+- 对屏幕感知类任务，任务详情应通过正式 `artifact`、事件和交付对象回看截图证据、OCR 摘要和授权过程，而不是直接渲染平台采样结果或裸 worker 输出。
 
 ### agent.task.detail.get 入参说明
 
