@@ -85,6 +85,13 @@ type DashboardTaskRuntimeSummary = {
   };
 };
 
+const emptyFocusRuntimeSummary: DashboardTaskRuntimeSummary["focusRuntimeSummary"] = {
+  active_steering_count: 0,
+  events_count: 0,
+  latest_event_type: null,
+  loop_stop_reason: null,
+};
+
 function createRequestMeta(scope: string): RequestMeta {
   return {
     client_time: new Date().toISOString(),
@@ -224,20 +231,31 @@ function getModuleSummaryNumber(result: AgentDashboardModuleGetResult | null | u
   return typeof value === "number" ? value : 0;
 }
 
-function getTaskModuleRuntimeSummary(result: AgentDashboardModuleGetResult | null | undefined): DashboardTaskRuntimeSummary {
+function getTaskModuleRuntimeSummary(
+  result: AgentDashboardModuleGetResult | null | undefined,
+  expectedFocusTaskId?: string | null,
+): DashboardTaskRuntimeSummary {
   const candidate = result?.summary?.focus_runtime_summary;
   const focusRuntimeSummary = candidate && typeof candidate === "object" ? (candidate as Record<string, unknown>) : null;
+  const focusTaskId = typeof result?.summary?.focus_task_id === "string" ? result.summary.focus_task_id : null;
+  const shouldUseFocusRuntimeSummary = !expectedFocusTaskId || (focusTaskId !== null && focusTaskId === expectedFocusTaskId);
 
   return {
     blockedTasks: getModuleSummaryNumber(result, "blocked_tasks"),
     processingTasks: getModuleSummaryNumber(result, "processing_tasks"),
     waitingAuthTasks: getModuleSummaryNumber(result, "waiting_auth_tasks"),
-    focusRuntimeSummary: {
-      active_steering_count: typeof focusRuntimeSummary?.active_steering_count === "number" ? focusRuntimeSummary.active_steering_count : 0,
-      events_count: typeof focusRuntimeSummary?.events_count === "number" ? focusRuntimeSummary.events_count : 0,
-      latest_event_type: typeof focusRuntimeSummary?.latest_event_type === "string" ? focusRuntimeSummary.latest_event_type : null,
-      loop_stop_reason: typeof focusRuntimeSummary?.loop_stop_reason === "string" ? focusRuntimeSummary.loop_stop_reason : null,
-    },
+    // Dashboard overview and module payloads are fetched independently. Only
+    // surface per-task runtime cues when both responses still point at the same
+    // focus task so mixed snapshots do not blend two different tasks together.
+    focusRuntimeSummary: shouldUseFocusRuntimeSummary
+      ? {
+          active_steering_count:
+            typeof focusRuntimeSummary?.active_steering_count === "number" ? focusRuntimeSummary.active_steering_count : 0,
+          events_count: typeof focusRuntimeSummary?.events_count === "number" ? focusRuntimeSummary.events_count : 0,
+          latest_event_type: typeof focusRuntimeSummary?.latest_event_type === "string" ? focusRuntimeSummary.latest_event_type : null,
+          loop_stop_reason: typeof focusRuntimeSummary?.loop_stop_reason === "string" ? focusRuntimeSummary.loop_stop_reason : null,
+        }
+      : emptyFocusRuntimeSummary,
   };
 }
 
@@ -283,7 +301,7 @@ function inferModuleFromRecommendation(item: RecommendationItem): DashboardHomeM
 
 function getTaskStateKey(overview: AgentDashboardOverviewGetResult, taskModule: AgentDashboardModuleGetResult) {
   const status = overview.overview.focus_summary?.status;
-  const runtimeSummary = getTaskModuleRuntimeSummary(taskModule).focusRuntimeSummary;
+  const runtimeSummary = getTaskModuleRuntimeSummary(taskModule, overview.overview.focus_summary?.task_id).focusRuntimeSummary;
   if (status === "confirming_intent") {
     return "task_completing";
   }
@@ -345,7 +363,7 @@ function buildTaskContext(
 ): DashboardHomeContextItem[] {
   const focusSummary = overview.overview.focus_summary;
   const highlights = getModuleHighlights(taskModule);
-  const taskRuntime = getTaskModuleRuntimeSummary(taskModule);
+  const taskRuntime = getTaskModuleRuntimeSummary(taskModule, focusSummary?.task_id);
   const runtimeSummary = taskRuntime.focusRuntimeSummary;
 
   if (!focusSummary) {
@@ -416,7 +434,7 @@ function buildTaskState(
 ) {
   const state = cloneStateData(dashboardHomeStates[stateKey]);
   const focusSummary = overview.overview.focus_summary;
-  const runtimeSummary = getTaskModuleRuntimeSummary(taskModule).focusRuntimeSummary;
+  const runtimeSummary = getTaskModuleRuntimeSummary(taskModule, focusSummary?.task_id).focusRuntimeSummary;
 
   if (!focusSummary) {
     const highlights = getModuleHighlights(taskModule);
@@ -710,7 +728,7 @@ function buildFocusLine(
   summonTemplates: Array<Omit<DashboardHomeSummonEvent, "id">>,
 ) {
   if (overview.overview.focus_summary) {
-    const runtimeSummary = getTaskModuleRuntimeSummary(taskModule).focusRuntimeSummary;
+    const runtimeSummary = getTaskModuleRuntimeSummary(taskModule, overview.overview.focus_summary.task_id).focusRuntimeSummary;
     return {
       headline: overview.overview.focus_summary.title,
       reason: [
