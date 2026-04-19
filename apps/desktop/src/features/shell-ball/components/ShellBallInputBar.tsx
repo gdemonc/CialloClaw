@@ -189,7 +189,8 @@ const StyledInputBar = styled.div`
     outline: none;
     box-shadow: none;
     border: none;
-    color: rgba(35, 36, 42, 0.96);
+    caret-color: rgba(255, 255, 255, 0.96);
+    color: rgba(255, 255, 255, 0.96);
     font-size: 1em;
     letter-spacing: 0.05em;
     transition: 0.5s;
