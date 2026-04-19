@@ -67,6 +67,19 @@ type Service struct {
 	taskStartTaps  map[uint64]func(taskID, sessionID, traceID string)
 }
 
+// budgetDowngradeDecision describes one real execution-time downgrade decision
+// so orchestrator can apply lighter execution paths instead of treating the
+// setting as a display-only summary field.
+type budgetDowngradeDecision struct {
+	Enabled        bool
+	Applied        bool
+	TriggerReason  string
+	TriggerStage   string
+	DegradeActions []string
+	Summary        string
+	Trace          map[string]any
+}
+
 // NewService wires the main orchestration dependencies.
 func NewService(
 	context *contextsvc.Service,
@@ -2172,6 +2185,12 @@ func (s *Service) listTasksFromStorage(group, sortBy, sortOrder string, limit, o
 	if s.storage == nil {
 		return nil, 0, false
 	}
+	if s.storage.TaskStore() != nil {
+		tasks, total, ok := s.listTasksFromStructuredStorage(group, sortBy, sortOrder, limit, offset)
+		if ok {
+			return tasks, total, true
+		}
+	}
 	records, err := s.storage.TaskRunStore().LoadTaskRuns(context.Background())
 	if err != nil || len(records) == 0 {
 		return nil, 0, false
@@ -2196,9 +2215,45 @@ func (s *Service) listTasksFromStorage(group, sortBy, sortOrder string, limit, o
 	return tasks[offset:end], total, true
 }
 
+func (s *Service) listTasksFromStructuredStorage(group, sortBy, sortOrder string, limit, offset int) ([]runengine.TaskRecord, int, bool) {
+	records, total, err := s.storage.TaskStore().ListTasks(context.Background(), 0, 0)
+	if err != nil || len(records) == 0 {
+		return nil, 0, false
+	}
+	tasks := make([]runengine.TaskRecord, 0, len(records))
+	for _, record := range records {
+		task, ok := s.structuredTaskRecordToRuntime(record)
+		if !ok {
+			continue
+		}
+		if !matchesTaskGroup(task, group) {
+			continue
+		}
+		tasks = append(tasks, task)
+	}
+	if len(tasks) == 0 {
+		return nil, 0, false
+	}
+	runengineSortTaskRecords(tasks, sortBy, sortOrder)
+	total = len(tasks)
+	if offset >= total {
+		return []runengine.TaskRecord{}, total, true
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return tasks[offset:end], total, true
+}
+
 func (s *Service) loadAllTasksFromStorage() []runengine.TaskRecord {
 	if s.storage == nil {
 		return nil
+	}
+	if s.storage.TaskStore() != nil {
+		if tasks := s.loadAllTasksFromStructuredStorage(); len(tasks) > 0 {
+			return tasks
+		}
 	}
 	records, err := s.storage.TaskRunStore().LoadTaskRuns(context.Background())
 	if err != nil || len(records) == 0 {
@@ -2207,6 +2262,22 @@ func (s *Service) loadAllTasksFromStorage() []runengine.TaskRecord {
 	tasks := make([]runengine.TaskRecord, 0, len(records))
 	for _, record := range records {
 		tasks = append(tasks, taskRecordFromStorage(record))
+	}
+	return tasks
+}
+
+func (s *Service) loadAllTasksFromStructuredStorage() []runengine.TaskRecord {
+	records, _, err := s.storage.TaskStore().ListTasks(context.Background(), 0, 0)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	tasks := make([]runengine.TaskRecord, 0, len(records))
+	for _, record := range records {
+		task, ok := s.structuredTaskRecordToRuntime(record)
+		if !ok {
+			continue
+		}
+		tasks = append(tasks, task)
 	}
 	return tasks
 }
@@ -2315,6 +2386,11 @@ func (s *Service) taskDetailFromStorage(taskID string) (runengine.TaskRecord, bo
 	if s.storage == nil || strings.TrimSpace(taskID) == "" {
 		return runengine.TaskRecord{}, false
 	}
+	if s.storage.TaskStore() != nil {
+		if task, ok := s.taskDetailFromStructuredStorage(taskID); ok {
+			return task, true
+		}
+	}
 	records, err := s.storage.TaskRunStore().LoadTaskRuns(context.Background())
 	if err != nil {
 		return runengine.TaskRecord{}, false
@@ -2325,6 +2401,17 @@ func (s *Service) taskDetailFromStorage(taskID string) (runengine.TaskRecord, bo
 		}
 	}
 	return runengine.TaskRecord{}, false
+}
+
+func (s *Service) taskDetailFromStructuredStorage(taskID string) (runengine.TaskRecord, bool) {
+	record, err := s.storage.TaskStore().GetTask(context.Background(), taskID)
+	if err != nil {
+		if storage.IsTaskRecordNotFound(err) {
+			return runengine.TaskRecord{}, false
+		}
+		return runengine.TaskRecord{}, false
+	}
+	return s.structuredTaskRecordToRuntime(record)
 }
 
 func (s *Service) attachSensitiveSettingAvailability(settings map[string]any) (map[string]any, error) {
@@ -2517,6 +2604,157 @@ func taskRecordFromStorage(record storage.TaskRunRecord) runengine.TaskRecord {
 		SteeringMessages:  append([]string(nil), record.SteeringMessages...),
 		CurrentStepStatus: record.CurrentStepStatus,
 	}
+}
+
+// structuredTaskRecordToRuntime hydrates one task-centric read model from the
+// new first-class tasks/task_steps tables while still honoring snapshot_json as
+// the compatibility bridge during the migration away from task_runs-only reads.
+func (s *Service) structuredTaskRecordToRuntime(record storage.TaskRecord) (runengine.TaskRecord, bool) {
+	if strings.TrimSpace(record.SnapshotJSON) != "" {
+		snapshot, err := storageTaskRunRecordFromSnapshotJSON(record.SnapshotJSON)
+		if err == nil {
+			runtime := taskRecordFromStorage(snapshot)
+			if len(runtime.Timeline) == 0 {
+				runtime.Timeline = s.taskTimelineFromStructuredStorage(record.TaskID)
+			}
+			return runtime, true
+		}
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, record.StartedAt)
+	if err != nil {
+		return runengine.TaskRecord{}, false
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, record.UpdatedAt)
+	if err != nil {
+		return runengine.TaskRecord{}, false
+	}
+	var finishedAt *time.Time
+	if strings.TrimSpace(record.FinishedAt) != "" {
+		parsedFinishedAt, err := time.Parse(time.RFC3339Nano, record.FinishedAt)
+		if err == nil {
+			finishedAt = &parsedFinishedAt
+		}
+	}
+	intentArguments := map[string]any{}
+	if strings.TrimSpace(record.IntentArgumentsJSON) != "" {
+		if err := json.Unmarshal([]byte(record.IntentArgumentsJSON), &intentArguments); err != nil {
+			intentArguments = map[string]any{}
+		}
+	}
+	runtime := runengine.TaskRecord{
+		TaskID:            record.TaskID,
+		SessionID:         record.SessionID,
+		RunID:             record.RunID,
+		Title:             record.Title,
+		SourceType:        record.SourceType,
+		Status:            record.Status,
+		Intent:            map[string]any{"name": record.IntentName, "arguments": intentArguments},
+		PreferredDelivery: record.PreferredDelivery,
+		FallbackDelivery:  record.FallbackDelivery,
+		CurrentStep:       record.CurrentStep,
+		RiskLevel:         record.RiskLevel,
+		StartedAt:         startedAt,
+		UpdatedAt:         updatedAt,
+		FinishedAt:        finishedAt,
+		Timeline:          s.taskTimelineFromStructuredStorage(record.TaskID),
+		CurrentStepStatus: record.CurrentStepStatus,
+	}
+	s.hydrateStructuredTaskGovernance(&runtime)
+	return runtime, true
+}
+
+// hydrateStructuredTaskGovernance rebuilds the task-facing governance fields
+// from first-class stores when the snapshot bridge is unavailable.
+func (s *Service) hydrateStructuredTaskGovernance(task *runengine.TaskRecord) {
+	if s == nil || s.storage == nil || task == nil {
+		return
+	}
+	securitySummary := cloneMap(task.SecuritySummary)
+	if securitySummary == nil {
+		securitySummary = map[string]any{}
+	}
+	if approvalRequest := s.pendingApprovalRequestFromStorage(task.TaskID, task.RiskLevel); approvalRequest != nil {
+		task.ApprovalRequest = approvalRequest
+		securitySummary["pending_authorizations"] = 1
+		if strings.TrimSpace(stringValue(approvalRequest, "risk_level", "")) != "" {
+			securitySummary["security_status"] = "pending_confirmation"
+		}
+	} else if task.Status == "waiting_auth" {
+		securitySummary["pending_authorizations"] = 0
+	}
+	if latestRestorePoint := s.latestRestorePointFromStorage(task.TaskID); latestRestorePoint != nil {
+		securitySummary["latest_restore_point"] = latestRestorePoint
+	}
+	task.SecuritySummary = securitySummary
+}
+
+func (s *Service) pendingApprovalRequestFromStorage(taskID, fallbackRiskLevel string) map[string]any {
+	if s == nil || s.storage == nil || s.storage.ApprovalRequestStore() == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	records, _, err := s.storage.ApprovalRequestStore().ListApprovalRequests(context.Background(), taskID, 0, 0)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	for _, record := range records {
+		approvalRequest := normalizeTaskDetailApprovalRequest(taskID, fallbackRiskLevel, approvalRequestRecordToMap(record))
+		if approvalRequest != nil {
+			return approvalRequest
+		}
+	}
+	return nil
+}
+
+func approvalRequestRecordToMap(record storage.ApprovalRequestRecord) map[string]any {
+	result := map[string]any{
+		"approval_id":    record.ApprovalID,
+		"task_id":        record.TaskID,
+		"operation_name": record.OperationName,
+		"risk_level":     record.RiskLevel,
+		"target_object":  record.TargetObject,
+		"reason":         record.Reason,
+		"status":         record.Status,
+		"created_at":     record.CreatedAt,
+		"updated_at":     record.UpdatedAt,
+	}
+	if strings.TrimSpace(record.ImpactScopeJSON) != "" {
+		var scope map[string]any
+		if err := json.Unmarshal([]byte(record.ImpactScopeJSON), &scope); err == nil && len(scope) > 0 {
+			result["impact_scope"] = scope
+		}
+	}
+	return result
+}
+
+func (s *Service) taskTimelineFromStructuredStorage(taskID string) []runengine.TaskStepRecord {
+	if s.storage == nil || s.storage.TaskStepStore() == nil {
+		return nil
+	}
+	records, _, err := s.storage.TaskStepStore().ListTaskSteps(context.Background(), taskID, 0, 0)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	result := make([]runengine.TaskStepRecord, 0, len(records))
+	for _, step := range records {
+		result = append(result, runengine.TaskStepRecord{
+			StepID:        step.StepID,
+			TaskID:        step.TaskID,
+			Name:          step.Name,
+			Status:        step.Status,
+			OrderIndex:    step.OrderIndex,
+			InputSummary:  step.InputSummary,
+			OutputSummary: step.OutputSummary,
+		})
+	}
+	return result
+}
+
+func storageTaskRunRecordFromSnapshotJSON(payload string) (storage.TaskRunRecord, error) {
+	var record storage.TaskRunRecord
+	if err := json.Unmarshal([]byte(payload), &record); err != nil {
+		return storage.TaskRunRecord{}, err
+	}
+	return record, nil
 }
 
 func timelineFromStorage(timeline []storage.TaskStepSnapshot) []runengine.TaskStepRecord {
@@ -4392,6 +4630,176 @@ func previewTextForDeliveryType(deliveryType string) string {
 	return "\u5df2\u4e3a\u4f60\u5199\u5165\u6587\u6863\u5e76\u6253\u5f00"
 }
 
+// evaluateBudgetAutoDowngrade decides whether the visible budget setting should
+// become a real execution downgrade before the task reaches model/tool work.
+// The first P1 slice keeps the trigger set intentionally small and auditable:
+// provider/API-key unavailability and token/cost pressure on the current task.
+func (s *Service) evaluateBudgetAutoDowngrade(task runengine.TaskRecord, taskIntent map[string]any) budgetDowngradeDecision {
+	dataLogSettings := mapValue(s.runEngine.Settings(), "data_log")
+	if !boolValue(dataLogSettings, "budget_auto_downgrade", true) {
+		return budgetDowngradeDecision{}
+	}
+	policy := budgetPolicySettings(dataLogSettings)
+	decision := budgetDowngradeDecision{
+		Enabled:      true,
+		TriggerStage: "execution_preflight",
+	}
+	provider := providerFromSettings(dataLogSettings, model.OpenAIResponsesProvider)
+	if !supportsBudgetProvider(provider) {
+		decision.Applied = true
+		decision.TriggerReason = "provider_unavailable"
+		decision.DegradeActions = budgetDegradeActionsForReason(policy, "provider_unavailable")
+		decision.Summary = "预算降级已生效：当前模型提供方不可用，任务改走轻量交付路径。"
+		decision.Trace = buildBudgetDecisionTrace(task, decision, policy, 0, 0)
+		return decision
+	}
+	failureSignals := recentBudgetFailureCount(task)
+	if failureSignals >= intValue(policy, "failure_signal_window", 2) {
+		decision.Applied = true
+		decision.TriggerReason = "failure_pressure"
+		decision.DegradeActions = budgetDegradeActionsForReason(policy, "failure_pressure")
+		decision.Summary = "预算降级已生效：最近出现模型/提供方失败，任务改走轻量保守执行路径。"
+		decision.Trace = buildBudgetDecisionTrace(task, decision, policy, failureSignals, 0)
+		return decision
+	}
+	totalTokens := intValueFromAny(task.TokenUsage["total_tokens"])
+	estimatedCost := floatValueFromAny(task.TokenUsage["estimated_cost"])
+	if totalTokens >= intValue(policy, "token_pressure_threshold", 64) || estimatedCost >= floatValueFromAny(policy["cost_pressure_threshold"]) {
+		decision.Applied = true
+		decision.TriggerReason = "budget_pressure"
+		decision.DegradeActions = budgetDegradeActionsForReason(policy, "budget_pressure")
+		decision.Summary = "预算降级已生效：当前任务命中 token/成本压力，改为轻量交付并压缩上下文。"
+		decision.Trace = buildBudgetDecisionTrace(task, decision, policy, failureSignals, map[string]any{"total_tokens": totalTokens, "estimated_cost": estimatedCost})
+	}
+	return decision
+}
+
+// applyBudgetAutoDowngrade mutates the execution request shape so the downgrade
+// decision changes the real path instead of only updating settings summaries.
+func (s *Service) applyBudgetAutoDowngrade(task runengine.TaskRecord, snapshot contextsvc.TaskContextSnapshot, taskIntent map[string]any, decision budgetDowngradeDecision) (runengine.TaskRecord, contextsvc.TaskContextSnapshot, map[string]any) {
+	if !decision.Applied {
+		return task, snapshot, taskIntent
+	}
+	updatedTask := task
+	updatedTask.PreferredDelivery = "bubble"
+	updatedTask.FallbackDelivery = "bubble"
+	updatedIntent := cloneMap(taskIntent)
+	arguments := cloneMap(mapValue(updatedIntent, "arguments"))
+	if len(arguments) > 0 {
+		if containsString(decision.DegradeActions, "skip_expensive_tools") {
+			arguments["disable_tool_calls"] = true
+		}
+		arguments["budget_auto_downgrade_applied"] = true
+		updatedIntent["arguments"] = arguments
+	}
+	updatedSnapshot := snapshot
+	if containsString(decision.DegradeActions, "shrink_context") {
+		updatedSnapshot.Text = truncateText(updatedSnapshot.Text, 160)
+		updatedSnapshot.SelectionText = truncateText(updatedSnapshot.SelectionText, 160)
+	}
+	updatedTask.SecuritySummary = mergeBudgetDowngradeSummary(updatedTask.SecuritySummary, decision)
+	return updatedTask, updatedSnapshot, updatedIntent
+}
+
+func mergeBudgetDowngradeSummary(current map[string]any, decision budgetDowngradeDecision) map[string]any {
+	updated := cloneMap(current)
+	if updated == nil {
+		updated = map[string]any{}
+	}
+	updated["budget_auto_downgrade_applied"] = decision.Applied
+	updated["budget_auto_downgrade_reason"] = decision.TriggerReason
+	updated["budget_auto_downgrade_actions"] = append([]string(nil), decision.DegradeActions...)
+	updated["budget_auto_downgrade_summary"] = decision.Summary
+	updated["budget_auto_downgrade_trace"] = cloneMap(decision.Trace)
+	return updated
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func supportsBudgetProvider(provider string) bool {
+	switch strings.TrimSpace(provider) {
+	case "", model.OpenAIResponsesProvider:
+		return true
+	default:
+		return false
+	}
+}
+
+func budgetPolicySettings(dataLogSettings map[string]any) map[string]any {
+	policy := cloneMap(mapValue(dataLogSettings, "budget_policy"))
+	if policy == nil {
+		policy = map[string]any{}
+	}
+	if _, ok := policy["planner_retry_budget"]; !ok {
+		policy["planner_retry_budget"] = 1
+	}
+	if _, ok := policy["failure_signal_window"]; !ok {
+		policy["failure_signal_window"] = 2
+	}
+	if _, ok := policy["token_pressure_threshold"]; !ok {
+		policy["token_pressure_threshold"] = 64
+	}
+	if _, ok := policy["cost_pressure_threshold"]; !ok {
+		policy["cost_pressure_threshold"] = 0.05
+	}
+	if _, ok := policy["expensive_tool_categories"]; !ok {
+		policy["expensive_tool_categories"] = []string{"command", "browser_mutation", "media_heavy"}
+	}
+	return policy
+}
+
+func budgetDegradeActionsForReason(policy map[string]any, reason string) []string {
+	actions := []string{"lightweight_delivery"}
+	switch reason {
+	case "provider_unavailable", "failure_pressure":
+		actions = append(actions, "skip_expensive_tools", "shrink_context")
+	case "budget_pressure":
+		actions = append(actions, "shrink_context")
+	}
+	if len(stringSliceValue(policy["expensive_tool_categories"])) > 0 && !containsString(actions, "skip_expensive_tools") && reason != "budget_pressure" {
+		actions = append(actions, "skip_expensive_tools")
+	}
+	return actions
+}
+
+func buildBudgetDecisionTrace(task runengine.TaskRecord, decision budgetDowngradeDecision, policy map[string]any, failureSignals int, pressure any) map[string]any {
+	return map[string]any{
+		"task_id":                   task.TaskID,
+		"run_id":                    task.RunID,
+		"trigger_reason":            decision.TriggerReason,
+		"trigger_stage":             decision.TriggerStage,
+		"degrade_actions":           append([]string(nil), decision.DegradeActions...),
+		"failure_signal_count":      failureSignals,
+		"planner_retry_budget":      intValue(policy, "planner_retry_budget", 1),
+		"failure_signal_window":     intValue(policy, "failure_signal_window", 2),
+		"token_pressure_threshold":  intValue(policy, "token_pressure_threshold", 64),
+		"cost_pressure_threshold":   floatValueFromAny(policy["cost_pressure_threshold"]),
+		"expensive_tool_categories": stringSliceValue(policy["expensive_tool_categories"]),
+		"pressure":                  pressure,
+	}
+}
+
+func recentBudgetFailureCount(task runengine.TaskRecord) int {
+	count := 0
+	for _, record := range task.AuditRecords {
+		if stringValue(record, "category", "") != "budget_auto_downgrade" {
+			continue
+		}
+		if stringValue(record, "result", "") != "failed" {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 func firstNonEmptyString(primary, fallback string) string {
 	if primary != "" {
 		return primary
@@ -4550,11 +4958,20 @@ func intValue(values map[string]any, key string, fallback int) int {
 	if !ok {
 		return fallback
 	}
-	value, ok := rawValue.(float64)
-	if !ok {
+	switch value := rawValue.(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float32:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
 		return fallback
 	}
-	return int(value)
 }
 
 // truncateText trims text to a fixed length for recommendation and memory
@@ -4573,6 +4990,11 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 	if !ok {
 		return runengine.TaskRecord{}, nil, nil, nil, ErrTaskNotFound
 	}
+	budgetDecision := s.evaluateBudgetAutoDowngrade(processingTask, taskIntent)
+	processingTask, snapshot, taskIntent = s.applyBudgetAutoDowngrade(processingTask, snapshot, taskIntent, budgetDecision)
+	if budgetDecision.Applied {
+		_, _ = s.runEngine.UpdateSecuritySummary(processingTask.TaskID, processingTask.SecuritySummary)
+	}
 
 	resultTitle, _, resultBubbleText := resultSpecFromIntent(taskIntent)
 	deliveryType := resolveTaskDeliveryType(processingTask, taskIntent)
@@ -4587,7 +5009,9 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		)
 		artifacts := delivery.EnsureArtifactIdentifiers(processingTask.TaskID, s.delivery.BuildArtifact(processingTask.TaskID, resultTitle, deliveryResult))
 		resultBubble := s.delivery.BuildBubbleMessage(processingTask.TaskID, "result", resultBubbleText, processingTask.UpdatedAt.Format(dateTimeLayout))
-		processingTask = s.appendAuditData(processingTask, compactAuditRecords(s.audit.BuildDeliveryAudit(processingTask.TaskID, processingTask.RunID, deliveryResult)), nil)
+		auditRecords := compactAuditRecords(s.audit.BuildDeliveryAudit(processingTask.TaskID, processingTask.RunID, deliveryResult), s.buildBudgetDowngradeAudit(processingTask, budgetDecision))
+		processingTask = s.appendAuditData(processingTask, auditRecords, nil)
+		processingTask = s.recordBudgetDowngradeEvent(processingTask, budgetDecision)
 		traceCapture, traceErr := s.captureExecutionTrace(processingTask, snapshot, taskIntent, execution.Result{
 			Content:        previewTextForDeliveryType(deliveryType),
 			DeliveryResult: deliveryResult,
@@ -4621,6 +5045,15 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		ApprovalGranted:      processingTask.Authorization != nil,
 		ApprovedOperation:    approvedOperation,
 		ApprovedTargetObject: approvedTargetObject,
+		BudgetDowngrade: map[string]any{
+			"enabled":         budgetDecision.Enabled,
+			"applied":         budgetDecision.Applied,
+			"trigger_reason":  budgetDecision.TriggerReason,
+			"trigger_stage":   budgetDecision.TriggerStage,
+			"degrade_actions": append([]string(nil), budgetDecision.DegradeActions...),
+			"summary":         budgetDecision.Summary,
+			"trace":           cloneMap(budgetDecision.Trace),
+		},
 	})
 	processingTask = s.recordExecutionToolCalls(processingTask, executionResult.ToolCalls)
 	auditDeliveryResult := executionResult.DeliveryResult
@@ -4628,7 +5061,12 @@ func (s *Service) executeTask(task runengine.TaskRecord, snapshot contextsvc.Tas
 		auditDeliveryResult = nil
 	}
 	executionAuditRecords, executionTokenUsage := s.buildExecutionAudit(processingTask, executionResult.ToolCalls, auditDeliveryResult)
+	if len(executionResult.BudgetFailure) > 0 {
+		executionAuditRecords = append(executionAuditRecords, cloneMap(executionResult.BudgetFailure))
+	}
+	executionAuditRecords = append(executionAuditRecords, s.buildBudgetDowngradeAudit(processingTask, budgetDecision))
 	processingTask = s.appendAuditData(processingTask, executionAuditRecords, executionTokenUsage)
+	processingTask = s.recordBudgetDowngradeEvent(processingTask, budgetDecision)
 	traceCapture, traceErr := s.captureExecutionTrace(processingTask, snapshot, taskIntent, executionResult, err)
 	if traceErr != nil {
 		failedTask, failureBubble := s.failExecutionTask(processingTask, taskIntent, executionResult, traceErr)
@@ -4891,7 +5329,8 @@ func (s *Service) failExecutionTask(task runengine.TaskRecord, taskIntent map[st
 		return task, bubble
 	}
 	auditRecord := s.writeGovernanceAuditRecord(updatedTask.TaskID, updatedTask.RunID, auditType, auditAction, bubbleText, auditTarget, auditResult)
-	updatedTask = s.appendAuditData(updatedTask, compactAuditRecords(auditRecord), nil)
+	budgetFailureAudit := s.buildBudgetFailureAudit(updatedTask, err)
+	updatedTask = s.appendAuditData(updatedTask, compactAuditRecords(auditRecord, budgetFailureAudit), nil)
 	return updatedTask, bubble
 }
 
@@ -4940,6 +5379,77 @@ func (s *Service) appendAuditData(task runengine.TaskRecord, auditRecords []map[
 		return task
 	}
 	updatedTask, ok := s.runEngine.AppendAuditData(task.TaskID, auditRecords, tokenUsage)
+	if !ok {
+		return task
+	}
+	return updatedTask
+}
+
+func (s *Service) buildBudgetDowngradeAudit(task runengine.TaskRecord, decision budgetDowngradeDecision) map[string]any {
+	if !decision.Applied {
+		return nil
+	}
+	return map[string]any{
+		"audit_record_id": fmt.Sprintf("audit_budget_%s_%d", task.TaskID, time.Now().UnixNano()),
+		"task_id":         task.TaskID,
+		"run_id":          task.RunID,
+		"category":        "budget_auto_downgrade",
+		"action":          "budget_auto_downgrade.applied",
+		"result":          "applied",
+		"reason":          decision.TriggerReason,
+		"created_at":      time.Now().Format(dateTimeLayout),
+		"details": map[string]any{
+			"trigger_stage":   decision.TriggerStage,
+			"degrade_actions": append([]string(nil), decision.DegradeActions...),
+			"summary":         decision.Summary,
+			"trace":           cloneMap(decision.Trace),
+		},
+	}
+}
+
+func (s *Service) buildBudgetFailureAudit(task runengine.TaskRecord, executionErr error) map[string]any {
+	if executionErr == nil {
+		return nil
+	}
+	if !errors.Is(executionErr, model.ErrClientNotConfigured) && !errors.Is(executionErr, model.ErrToolCallingNotSupported) && !errors.Is(executionErr, model.ErrModelProviderUnsupported) && !errors.Is(executionErr, model.ErrSecretNotFound) && !errors.Is(executionErr, model.ErrSecretSourceFailed) {
+		return nil
+	}
+	return map[string]any{
+		"audit_record_id": fmt.Sprintf("audit_budget_failure_%s_%d", task.TaskID, time.Now().UnixNano()),
+		"task_id":         task.TaskID,
+		"run_id":          task.RunID,
+		"category":        "budget_auto_downgrade",
+		"action":          "budget_auto_downgrade.failure_signal",
+		"result":          "failed",
+		"reason":          executionErr.Error(),
+		"created_at":      time.Now().Format(dateTimeLayout),
+	}
+}
+
+func (s *Service) recordBudgetDowngradeEvent(task runengine.TaskRecord, decision budgetDowngradeDecision) runengine.TaskRecord {
+	if !decision.Applied {
+		return task
+	}
+	s.publishRuntimeNotification(task.TaskID, "budget.downgrade.applied", map[string]any{
+		"task_id":          task.TaskID,
+		"run_id":           task.RunID,
+		"trigger_reason":   decision.TriggerReason,
+		"trigger_stage":    decision.TriggerStage,
+		"degrade_actions":  append([]string(nil), decision.DegradeActions...),
+		"summary":          decision.Summary,
+		"trace":            cloneMap(decision.Trace),
+		"budget_auto_down": true,
+	})
+	updatedTask, ok := s.runEngine.EmitRuntimeNotification(task.TaskID, "budget.downgrade.applied", map[string]any{
+		"task_id":          task.TaskID,
+		"run_id":           task.RunID,
+		"trigger_reason":   decision.TriggerReason,
+		"trigger_stage":    decision.TriggerStage,
+		"degrade_actions":  append([]string(nil), decision.DegradeActions...),
+		"summary":          decision.Summary,
+		"trace":            cloneMap(decision.Trace),
+		"budget_auto_down": true,
+	})
 	if !ok {
 		return task
 	}

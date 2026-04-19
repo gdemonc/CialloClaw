@@ -728,3 +728,14 @@ export interface MirrorOverviewUpdatedNotification {
   revision: number;
   source?: string;
 }
+
+export interface TaskSteeredNotification {
+  task_id: string;
+  message: string;
+}
+
+export interface TaskRuntimeNotification {
+  task_id: string;
+  event: TaskEvent;
+  stop_reason?: string;
+}
