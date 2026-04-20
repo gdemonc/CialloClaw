@@ -57,6 +57,13 @@ type ShellBallGlobalAnchor = {
   y: number;
 };
 
+type ShellBallRelativeFrame = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 type ShellBallWindowFrame = ShellBallWindowSize & {
   x: number;
   y: number;
@@ -465,6 +472,7 @@ export function useShellBallWindowMetrics({
   const helperWindowFrameRef = useRef<ShellBallResolvedHelperFrame | null>(null);
   const appliedWindowSizeRef = useRef<ShellBallWindowSize | null>(null);
   const measuredAnchorOffsetRef = useRef<ShellBallAnchorOffset | null>(null);
+  const measuredMascotFrameRef = useRef<ShellBallRelativeFrame | null>(null);
   const appliedAnchorOffsetRef = useRef<ShellBallAnchorOffset | null>(null);
   const globalAnchorRef = useRef<ShellBallGlobalAnchor | null>(null);
   const helperWindowMoveAnimationFrameRef = useRef<number | null>(null);
@@ -538,9 +546,27 @@ export function useShellBallWindowMetrics({
       return;
     }
 
+    const helperGeometry = (() => {
+      const mascotFrame = measuredMascotFrameRef.current;
+
+      if (mascotFrame === null) {
+        return geometry;
+      }
+
+      return {
+        ...geometry,
+        ballFrame: {
+          x: geometry.ballFrame.x + mascotFrame.x,
+          y: geometry.ballFrame.y + mascotFrame.y,
+          width: mascotFrame.width,
+          height: mascotFrame.height,
+        },
+      } satisfies ShellBallWindowGeometry;
+    })();
+
     await Promise.all(
       visibleHelperRoles.map((helperRole) =>
-        currentWindow.emitTo(shellBallWindowLabels[helperRole], shellBallWindowSyncEvents.geometry, geometry)
+        currentWindow.emitTo(shellBallWindowLabels[helperRole], shellBallWindowSyncEvents.geometry, helperGeometry)
       ),
     );
   }, [role]);
@@ -886,6 +912,12 @@ export function useShellBallWindowMetrics({
           measuredAnchorOffsetRef.current = {
             x: mascotRect.left - rootRect.left,
             y: mascotRect.top - rootRect.top,
+          };
+          measuredMascotFrameRef.current = {
+            x: mascotRect.left - rootRect.left,
+            y: mascotRect.top - rootRect.top,
+            width: mascotRect.width,
+            height: mascotRect.height,
           };
         }
       }
