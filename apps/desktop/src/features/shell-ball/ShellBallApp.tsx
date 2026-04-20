@@ -6,10 +6,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEventListener } from "ahooks";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, monitorFromPoint } from "@tauri-apps/api/window";
 import { ShellBallSurface, shouldAcceptShellBallTextDrop } from "./ShellBallSurface";
 import { ShellBallAttachmentTray } from "./components/ShellBallAttachmentTray";
-import { ShellBallBubbleZone } from "./components/ShellBallBubbleZone";
 import { ShellBallInputBar } from "./components/ShellBallInputBar";
 import { ShellBallVoiceHints } from "./components/ShellBallVoiceHints";
 import type { ShellBallSelectionSnapshot } from "./selection/selection.types";
@@ -17,8 +16,8 @@ import { useShellBallInteraction } from "./useShellBallInteraction";
 import { getShellBallMotionConfig } from "./shellBall.motion";
 import type { ShellBallVisualState } from "./shellBall.types";
 import { useShellBallCoordinator } from "./useShellBallCoordinator";
+import { useShellBallWindowMetrics } from "./useShellBallWindowMetrics";
 import {
-  getShellBallVisibleBubbleItems,
   shellBallWindowSyncEvents,
   type ShellBallClipboardSnapshotPayload,
   type ShellBallSelectionSnapshotPayload,
@@ -32,7 +31,6 @@ import {
   showShellBallWindow,
 } from "../../platform/shellBallWindowController";
 import { openOrFocusDesktopWindow } from "../../platform/windowController";
-import { startShellBallDragging } from "../../platform/shellBallWindow";
 
 type ShellBallAppProps = {
   isDev?: boolean;
@@ -40,10 +38,14 @@ type ShellBallAppProps = {
 
 type ShellBallDashboardTransitionPhase = "idle" | "opening" | "hidden" | "closing";
 
+type ShellBallWindowAnchor = {
+  x: number;
+  y: number;
+};
+
 const SHELL_BALL_DASHBOARD_TRANSITION_DURATION_MS = 260;
 const SHELL_BALL_SELECTION_PROMPT_CLEAR_DELAY_MS = 240;
 const SHELL_BALL_CLIPBOARD_PROMPT_WINDOW_MS = 10_000;
-const SHELL_BALL_STATIC_WINDOW_FRAME = Object.freeze({ width: 800, height: 800 });
 
 type ShellBallClipboardPrompt = {
   text: string;
@@ -125,6 +127,49 @@ export function isShellBallClipboardPromptActive(
   return prompt !== null && prompt.expiresAt > now;
 }
 
+function easeShellBallDashboardTransition(progress: number) {
+  return 1 - Math.pow(1 - progress, 3);
+}
+
+async function resolveShellBallDashboardTransitionTarget(input: {
+  width: number;
+  height: number;
+}) {
+  const currentWindow = getCurrentWindow();
+  const outerPosition = await currentWindow.outerPosition();
+  const scaleFactor = await currentWindow.scaleFactor();
+  const logicalPosition = outerPosition.toLogical(scaleFactor);
+  const monitor = await monitorFromPoint(outerPosition.x, outerPosition.y);
+
+  if (monitor === null) {
+    return {
+      anchor: {
+        x: logicalPosition.x,
+        y: logicalPosition.y,
+      },
+      center: {
+        x: logicalPosition.x,
+        y: logicalPosition.y,
+      },
+    };
+  }
+
+  const monitorPosition = monitor.position.toLogical(monitor.scaleFactor);
+  const monitorSize = monitor.size.toLogical(monitor.scaleFactor);
+  const dashboardTargetYOffset = Math.round(Math.min(42, Math.max(22, monitorSize.height * 0.032)));
+
+  return {
+    anchor: {
+      x: logicalPosition.x,
+      y: logicalPosition.y,
+    },
+    center: {
+      x: Math.round(monitorPosition.x + (monitorSize.width - input.width) / 2),
+      y: Math.round(monitorPosition.y + (monitorSize.height - input.height) / 2 + dashboardTargetYOffset),
+    },
+  };
+}
+
 async function resolveShellBallDashboardTransitionFrame(windowFrame: { width: number; height: number } | null) {
   if (windowFrame !== null) {
     return windowFrame;
@@ -139,6 +184,31 @@ async function resolveShellBallDashboardTransitionFrame(windowFrame: { width: nu
     width: logicalSize.width,
     height: logicalSize.height,
   };
+}
+
+async function animateShellBallDashboardWindow(input: {
+  from: ShellBallWindowAnchor;
+  to: ShellBallWindowAnchor;
+  durationMs: number;
+}) {
+  const currentWindow = getCurrentWindow();
+  const startTime = performance.now();
+
+  while (true) {
+    const elapsed = performance.now() - startTime;
+    const progress = Math.min(elapsed / input.durationMs, 1);
+    const easedProgress = easeShellBallDashboardTransition(progress);
+    const nextX = Math.round(input.from.x + (input.to.x - input.from.x) * easedProgress);
+    const nextY = Math.round(input.from.y + (input.to.y - input.from.y) * easedProgress);
+
+    await currentWindow.setPosition(createShellBallLogicalPosition(nextX, nextY));
+
+    if (progress >= 1) {
+      return;
+    }
+
+    await waitForAnimationFrame();
+  }
 }
 
 export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
@@ -179,8 +249,8 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   const [textDragActive, setTextDragActive] = useState(false);
   const [selectionPrompt, setSelectionPrompt] = useState<ShellBallSelectionSnapshot | null>(null);
   const [clipboardPrompt, setClipboardPrompt] = useState<ShellBallClipboardPrompt | null>(null);
+  const anchorRef = useRef<ShellBallWindowAnchor | null>(null);
   const mascotRef = useRef<HTMLDivElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
   const dashboardTransitionPhaseRef = useRef<ShellBallDashboardTransitionPhase>("idle");
   const clipboardPromptClearTimeoutRef = useRef<number | null>(null);
   const selectionPromptClearTimeoutRef = useRef<number | null>(null);
@@ -197,8 +267,6 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     handleDroppedFiles: handleCoordinatorDroppedFiles,
     handleSelectedTextPrompt: handleCoordinatorSelectedTextPrompt,
     handlePrimaryAction: handleCoordinatorPrimaryAction,
-    handleBubbleAction: handleCoordinatorBubbleAction,
-    handleBubbleHoverChange: handleCoordinatorBubbleHoverChange,
     handleInputHoverChange: handleCoordinatorInputHoverChange,
     handleInputFocusChange: handleCoordinatorInputFocusChange,
     handleRegionEnter: handleCoordinatorRegionEnter,
@@ -227,8 +295,21 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     onAttachFile: handleAttachFile,
     onPrimaryClick: handlePrimaryClick,
   });
-  const windowFrame = SHELL_BALL_STATIC_WINDOW_FRAME;
-  const visibleBubbleItems = getShellBallVisibleBubbleItems(snapshot.bubbleItems);
+  const {
+    beginBallWindowPointerDrag,
+    endBallWindowPointerDrag,
+    freezeBallWindowPointerDrag,
+    rootRef,
+    updateBallWindowPointerDrag,
+    windowFrame,
+  } = useShellBallWindowMetrics({
+    role: "ball",
+    helperVisibility: {
+      bubble: true,
+      input: false,
+      voice: false,
+    },
+  });
   dragDropHandlersRef.current = {
     handleDroppedFiles: handleCoordinatorDroppedFiles,
   };
@@ -265,11 +346,11 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
     // Voice gestures should operate against a stationary orb once capture starts.
     if (!wasVoiceActive && isVoiceActive) {
-      return;
+      void freezeBallWindowPointerDrag();
     }
 
     previousVisualStateRef.current = visualState;
-  }, [visualState]);
+  }, [freezeBallWindowPointerDrag, visualState]);
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
@@ -291,9 +372,16 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
         return;
       }
 
-      await resolveShellBallDashboardTransitionFrame(windowFrame);
+      const transitionFrame = await resolveShellBallDashboardTransitionFrame(windowFrame);
+      const transitionTarget = await resolveShellBallDashboardTransitionTarget(transitionFrame);
+      anchorRef.current = transitionTarget.anchor;
       applyDashboardTransitionPhase("opening");
       await waitForAnimationFrame();
+      await animateShellBallDashboardWindow({
+        from: transitionTarget.anchor,
+        to: transitionTarget.center,
+        durationMs: SHELL_BALL_DASHBOARD_TRANSITION_DURATION_MS,
+      });
       applyDashboardTransitionPhase("hidden");
       await hideShellBallWindow("ball");
     }
@@ -310,12 +398,22 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
         return;
       }
 
-      await resolveShellBallDashboardTransitionFrame(windowFrame);
+      const transitionFrame = await resolveShellBallDashboardTransitionFrame(windowFrame);
+      const transitionTarget = await resolveShellBallDashboardTransitionTarget(transitionFrame);
+      const center = transitionTarget.center;
+      const anchor = anchorRef.current ?? transitionTarget.anchor;
+
+      await currentWindow.setPosition(createShellBallLogicalPosition(center.x, center.y));
       applyDashboardTransitionPhase("hidden");
       await showShellBallWindow("ball");
       await waitForAnimationFrame();
       await waitForAnimationFrame();
       applyDashboardTransitionPhase("closing");
+      await animateShellBallDashboardWindow({
+        from: center,
+        to: anchor,
+        durationMs: SHELL_BALL_DASHBOARD_TRANSITION_DURATION_MS,
+      });
       applyDashboardTransitionPhase("idle");
 
       if (requestId !== undefined) {
@@ -624,30 +722,6 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
         fileDropActive,
       })}
       overlayContent={snapshot.visibility.voice ? <div className="shell-ball-voice-window"><ShellBallVoiceHints hintMode={snapshot.voiceHintMode} voicePreview={snapshot.voicePreview} /></div> : null}
-      topContent={snapshot.visibility.bubble && visibleBubbleItems.length > 0 ? (
-        <div
-          className="shell-ball-window shell-ball-window--bubble"
-          data-shell-ball-interactive="true"
-          data-visibility-phase={snapshot.bubbleRegion.visibilityPhase}
-          onPointerEnter={() => {
-            handleCoordinatorBubbleHoverChange(true);
-          }}
-          onPointerLeave={() => {
-            handleCoordinatorBubbleHoverChange(false);
-          }}
-        >
-          <ShellBallBubbleZone
-            visualState={snapshot.visualState}
-            bubbleItems={visibleBubbleItems}
-            onDeleteBubble={(bubbleId) => {
-              handleCoordinatorBubbleAction({ action: "delete", bubbleId, source: "bubble" });
-            }}
-            onPinBubble={(bubbleId) => {
-              handleCoordinatorBubbleAction({ action: "pin", bubbleId, source: "bubble" });
-            }}
-          />
-        </div>
-      ) : null}
       bottomContent={snapshot.visibility.input ? (
         <div
           className="shell-ball-window shell-ball-window--input"
@@ -689,12 +763,30 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       voicePreview={voicePreview}
       voiceHoldProgress={voiceHoldProgress}
       motionConfig={motionConfig}
-      onDragStart={() => {
-        void startShellBallDragging();
+      onDragStart={(event) => {
+        beginBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
       }}
-      onDragMove={() => {}}
-      onDragEnd={() => {}}
-      onDragCancel={() => {}}
+      onDragMove={(event) => {
+        updateBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
+      }}
+      onDragEnd={(event) => {
+        void endBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
+      }}
+      onDragCancel={(event) => {
+        void endBallWindowPointerDrag({
+          x: event.screenX,
+          y: event.screenY,
+        });
+      }}
       onPrimaryClick={handleMascotPrimaryAction}
       onDoubleClick={handleDoubleClick}
       onRegionEnter={handleCoordinatorRegionEnter}
