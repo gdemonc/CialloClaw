@@ -11,7 +11,7 @@ import type {
   TaskRuntimeSummary,
 } from "@cialloclaw/protocol";
 import { controlTask, getTaskDetail, listTaskEvents, listTasks, steerTask } from "@/rpc/methods";
-import { isActiveApprovalRequest, isApprovalRequest, isArtifact, isBinaryPendingAuthorizations, isMirrorReference, isRecoveryPoint, isTask, isTaskEvent, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
+import { isActiveApprovalRequest, isApprovalRequest, isArtifact, isBinaryPendingAuthorizations, isCitation, isMirrorReference, isRecoveryPoint, isTask, isTaskEvent, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@/rpc/protocolEnumerations";
 import { getMockTaskBuckets, getMockTaskDetail, getTaskExperience, runMockTaskControl } from "./taskPage.mock";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskEventFilters, TaskEventPageData, TaskEventTimeRange, TaskExperience, TaskListItem } from "./taskPage.types";
@@ -95,12 +95,17 @@ function createFallbackTaskDetail(task: Task): AgentTaskDetailGetResult {
   return {
     approval_request: null,
     artifacts: [],
+    citations: [],
     mirror_references: [],
     runtime_summary: {
       active_steering_count: 0,
       events_count: 0,
+      latest_failure_code: null,
+      latest_failure_category: null,
+      latest_failure_summary: null,
       latest_event_type: null,
       loop_stop_reason: null,
+      observation_signals: [],
     },
     security_summary: {
       latest_restore_point: null,
@@ -131,8 +136,12 @@ function createFallbackRuntimeSummary(): AgentTaskDetailGetResult["runtime_summa
   return {
     active_steering_count: 0,
     events_count: 0,
+    latest_failure_code: null,
+    latest_failure_category: null,
+    latest_failure_summary: null,
     latest_event_type: null,
     loop_stop_reason: null,
+    observation_signals: [],
   };
 }
 
@@ -145,8 +154,12 @@ function normalizeRuntimeSummary(detail: AgentTaskDetailGetResult): AgentTaskDet
   return {
     active_steering_count: typeof candidate.active_steering_count === "number" ? candidate.active_steering_count : 0,
     events_count: typeof candidate.events_count === "number" ? candidate.events_count : 0,
+    latest_failure_code: typeof candidate.latest_failure_code === "string" ? candidate.latest_failure_code : null,
+    latest_failure_category: typeof candidate.latest_failure_category === "string" ? candidate.latest_failure_category : null,
+    latest_failure_summary: typeof candidate.latest_failure_summary === "string" ? candidate.latest_failure_summary : null,
     latest_event_type: typeof candidate.latest_event_type === "string" ? candidate.latest_event_type : null,
     loop_stop_reason: typeof candidate.loop_stop_reason === "string" ? candidate.loop_stop_reason : null,
+    observation_signals: Array.isArray(candidate.observation_signals) ? candidate.observation_signals.filter((item): item is string => typeof item === "string") : [],
   };
 }
 
@@ -211,8 +224,12 @@ function isValidRuntimeSummary(summary: Partial<TaskRuntimeSummary> | null | und
       Number.isFinite(summary.events_count) &&
       typeof summary.active_steering_count === "number" &&
       Number.isFinite(summary.active_steering_count) &&
+      (typeof summary.latest_failure_code === "string" || summary.latest_failure_code === null || typeof summary.latest_failure_code === "undefined") &&
+      (typeof summary.latest_failure_category === "string" || summary.latest_failure_category === null || typeof summary.latest_failure_category === "undefined") &&
+      (typeof summary.latest_failure_summary === "string" || summary.latest_failure_summary === null || typeof summary.latest_failure_summary === "undefined") &&
       (typeof summary.latest_event_type === "string" || summary.latest_event_type === null || typeof summary.latest_event_type === "undefined") &&
-      (typeof summary.loop_stop_reason === "string" || summary.loop_stop_reason === null || typeof summary.loop_stop_reason === "undefined"),
+      (typeof summary.loop_stop_reason === "string" || summary.loop_stop_reason === null || typeof summary.loop_stop_reason === "undefined") &&
+      (Array.isArray(summary.observation_signals) ? summary.observation_signals.every((item) => typeof item === "string") : typeof summary.observation_signals === "undefined"),
   );
 }
 
@@ -248,6 +265,7 @@ export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): Age
   const approvalRequest = normalizeNullable(detail.approval_request, isApprovalRequest, "task detail payload approval_request");
   const latestRestorePoint = normalizeNullable(detail.security_summary.latest_restore_point, isRecoveryPoint, "task detail payload restore point");
   const artifacts = normalizeArray(detail.artifacts, isArtifact, "task detail payload artifacts");
+  const citations = normalizeArray(detail.citations, isCitation, "task detail payload citations");
   const mirrorReferences = normalizeArray(detail.mirror_references, isMirrorReference, "task detail payload mirror_references");
   const timeline = normalizeArray(detail.timeline, (value): value is (typeof detail.timeline)[number] => isTaskStep(value, taskStepStatuses), "task detail payload timeline");
 
@@ -278,6 +296,7 @@ export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): Age
   return {
     approval_request: approvalRequest,
     artifacts,
+    citations,
     mirror_references: mirrorReferences,
     runtime_summary: runtimeSummary,
     security_summary: {
@@ -319,6 +338,12 @@ function recoverTaskDetailFromInvalidCollections(detail: AgentTaskDetailGetResul
         ...candidate,
         artifacts: [],
       };
+    } else if (/citations/i.test(currentError.message)) {
+      warnings.push("任务引用信息暂时无法完整展示，已先隐藏格式不符合要求的正式引用。");
+      candidate = {
+        ...candidate,
+        citations: [],
+      };
     } else if (/mirror/i.test(currentError.message)) {
       warnings.push("镜子命中信息暂时无法完整展示，已先隐藏格式不符合要求的上下文引用。");
       candidate = {
@@ -336,11 +361,14 @@ function recoverTaskDetailFromInvalidCollections(detail: AgentTaskDetailGetResul
       };
     } catch (nextError) {
       const hasRecoveredArtifacts = Array.isArray(candidate.artifacts) && candidate.artifacts.length === 0;
+      const hasRecoveredCitations = Array.isArray(candidate.citations) && candidate.citations.length === 0;
       const hasRecoveredMirrors = Array.isArray(candidate.mirror_references) && candidate.mirror_references.length === 0;
 
       if (
         nextError instanceof Error &&
-        ((/artifacts/i.test(nextError.message) && hasRecoveredArtifacts) || (/mirror/i.test(nextError.message) && hasRecoveredMirrors))
+        ((/artifacts/i.test(nextError.message) && hasRecoveredArtifacts) ||
+          (/citations/i.test(nextError.message) && hasRecoveredCitations) ||
+          (/mirror/i.test(nextError.message) && hasRecoveredMirrors))
       ) {
         throw nextError;
       }

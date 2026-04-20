@@ -6,6 +6,7 @@ import type {
   Artifact,
   AuditRecord,
   BubbleMessage,
+  Citation,
   DeliveryPayload,
   DeliveryResult,
   DeliveryType,
@@ -339,12 +340,17 @@ export interface TaskRuntimeSummary {
   events_count: number;
   latest_event_type?: string | null;
   active_steering_count: number;
+  latest_failure_code?: string | null;
+  latest_failure_category?: string | null;
+  latest_failure_summary?: string | null;
+  observation_signals: string[];
 }
 
 export interface AgentTaskDetailGetResult {
   task: Task;
   timeline: TaskStep[];
   artifacts: Artifact[];
+  citations: Citation[];
   mirror_references: MirrorReference[];
   approval_request: ApprovalRequest | null;
   security_summary: SecuritySummary;

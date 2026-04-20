@@ -1,5 +1,5 @@
 import { APPROVAL_STATUSES, RISK_LEVELS, TASK_SOURCE_TYPES, TASK_STATUSES } from "@cialloclaw/protocol";
-import type { ApprovalRequest, Artifact, MirrorReference, RecoveryPoint, Task, TaskEvent, TaskStep } from "@cialloclaw/protocol";
+import type { ApprovalRequest, Artifact, Citation, MirrorReference, RecoveryPoint, Task, TaskEvent, TaskStep } from "@cialloclaw/protocol";
 
 type Guard<T> = (value: unknown) => value is T;
 const approvalStatuses = new Set<string>(APPROVAL_STATUSES);
@@ -87,6 +87,22 @@ export function isArtifact(value: unknown): value is Artifact {
     typeof candidate.title === "string" &&
     typeof candidate.path === "string" &&
     typeof candidate.mime_type === "string"
+  );
+}
+
+export function isCitation(value: unknown): value is Citation {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<Citation>;
+  return (
+    typeof candidate.citation_id === "string" &&
+    typeof candidate.task_id === "string" &&
+    typeof candidate.run_id === "string" &&
+    (candidate.source_type === "file" || candidate.source_type === "web" || candidate.source_type === "context") &&
+    typeof candidate.source_ref === "string" &&
+    typeof candidate.label === "string"
   );
 }
 

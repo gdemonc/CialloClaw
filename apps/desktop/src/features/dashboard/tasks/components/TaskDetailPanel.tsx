@@ -82,6 +82,12 @@ export function TaskDetailPanel({
   const shouldDeferSecuritySummary = detailData.source === "fallback" || detailState !== "ready";
   const canSteerTask = !ended && task.status !== "cancelled";
   const runtimeSummary = detail.runtime_summary;
+  const evidenceItems = detail.citations;
+  // Evidence artifacts stay task-centric by following the formal citation links
+  // instead of treating every task artifact as screen evidence.
+  const evidenceArtifactRefs = new Set(evidenceItems.map((citation) => citation.source_ref));
+  const evidenceArtifacts = artifactItems.filter((artifact) => evidenceArtifactRefs.has(artifact.artifact_id) || evidenceArtifactRefs.has(artifact.path));
+  const outputArtifacts = artifactItems.filter((artifact) => !evidenceArtifactRefs.has(artifact.artifact_id) && !evidenceArtifactRefs.has(artifact.path));
 
   useEffect(() => {
     if (steeringPending) {
@@ -217,6 +223,62 @@ export function TaskDetailPanel({
               <p className="task-detail-current-card__text">{runtimeSummary.active_steering_count}</p>
             </div>
           </article>
+          <article className="task-detail-current-card">
+            <AlertTriangle className="h-4 w-4" />
+            <div>
+              <p className="task-detail-current-card__label">Latest failure</p>
+              <p className="task-detail-current-card__text">{runtimeSummary.latest_failure_summary ?? "当前没有失败摘要"}</p>
+            </div>
+          </article>
+        </div>
+        {runtimeSummary.observation_signals.length > 0 ? <p className="task-detail-card__hint">Observation: {runtimeSummary.observation_signals.join(" / ")}</p> : null}
+      </section>
+    );
+  }
+
+  function renderEvidenceSection() {
+    return (
+      <section className="task-detail-card">
+        <div className="task-detail-card__header">
+          <div>
+            <p className="task-detail-card__eyebrow">Evidence Chain</p>
+            <h3 className="task-detail-card__title">截图证据与正式引用</h3>
+          </div>
+        </div>
+        <p className="task-detail-card__hint">该区域只消费正式 `artifact` 与 `citation`，用于回看屏幕截图、OCR 摘要和引用标记。</p>
+        <div className="task-detail-output-list">
+          {evidenceItems.length > 0
+            ? evidenceItems.map((citation) => (
+                <article key={citation.citation_id} className="task-detail-output-item">
+                  <AlertTriangle className="h-4 w-4" />
+                  <div>
+                    <p className="task-detail-output-item__title">{citation.label}</p>
+                    <p className="task-detail-output-item__path">{citation.source_ref}</p>
+                  </div>
+                </article>
+              ))
+            : null}
+          {evidenceArtifacts.length > 0
+            ? evidenceArtifacts.map((artifact) => (
+                <article key={`evidence_${artifact.artifact_id}`} className="task-detail-output-item">
+                  <FolderOutput className="h-4 w-4" />
+                  <div>
+                    <p className="task-detail-output-item__title">{artifact.title}</p>
+                    <p className="task-detail-output-item__path">{artifact.path}</p>
+                  </div>
+                  <button
+                    className="task-detail-card__action"
+                    disabled={artifactActionPendingId === artifact.artifact_id}
+                    onClick={() => onOpenArtifact(artifact.artifact_id)}
+                    type="button"
+                  >
+                    <ArrowUpRight className="h-4 w-4" />
+                    {artifactActionPendingId === artifact.artifact_id ? "打开中..." : "打开证据"}
+                  </button>
+                </article>
+              ))
+            : null}
+          {evidenceItems.length === 0 && evidenceArtifacts.length === 0 ? <p className="task-detail-card__empty">当前没有可展示的正式证据链。</p> : null}
         </div>
       </section>
     );
@@ -373,6 +435,8 @@ export function TaskDetailPanel({
 
               {renderRuntimeSummarySection()}
 
+              {renderEvidenceSection()}
+
               <TaskContextBlock detailData={detailData} />
 
               <section className="task-detail-card">
@@ -414,9 +478,9 @@ export function TaskDetailPanel({
                 </div>
                 <div className="task-detail-output-list">
                   {artifactErrorMessage ? <p className="task-detail-card__hint">{artifactErrorMessage}</p> : null}
-                  {artifactLoading && artifactItems.length === 0 ? <p className="task-detail-card__empty">正在同步成果列表...</p> : null}
-                  {artifactItems.length > 0 ? (
-                    artifactItems.map((artifact) => (
+                  {artifactLoading && outputArtifacts.length === 0 ? <p className="task-detail-card__empty">正在同步成果列表...</p> : null}
+                  {outputArtifacts.length > 0 ? (
+                    outputArtifacts.map((artifact) => (
                       <article key={artifact.artifact_id} className="task-detail-output-item">
                         <FolderOutput className="h-4 w-4" />
                         <div>
@@ -510,6 +574,8 @@ export function TaskDetailPanel({
 
               {renderRuntimeSummarySection()}
 
+              {renderEvidenceSection()}
+
               {renderRuntimeEventsSection()}
 
               <section className="task-detail-card">
@@ -525,9 +591,9 @@ export function TaskDetailPanel({
                 </div>
                 <div className="task-detail-output-list">
                   {artifactErrorMessage ? <p className="task-detail-card__hint">{artifactErrorMessage}</p> : null}
-                  {artifactLoading && artifactItems.length === 0 ? <p className="task-detail-card__empty">正在同步成果列表...</p> : null}
-                  {artifactItems.length > 0 ? (
-                    artifactItems.map((artifact) => (
+                  {artifactLoading && outputArtifacts.length === 0 ? <p className="task-detail-card__empty">正在同步成果列表...</p> : null}
+                  {outputArtifacts.length > 0 ? (
+                    outputArtifacts.map((artifact) => (
                       <article key={artifact.artifact_id} className="task-detail-output-item">
                         <FolderOutput className="h-4 w-4" />
                         <div>
