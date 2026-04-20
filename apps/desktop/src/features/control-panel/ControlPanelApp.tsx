@@ -1,9 +1,21 @@
 /**
- * Control panel editing flow keeps a local draft so desktop settings can be
- * reviewed and persisted without mutating the last loaded snapshot in place.
+ * ControlPanelApp renders the desktop settings surface with a sidebar-driven
+ * layout while preserving the existing draft, inspection, and save flows.
  */
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { GripHorizontal, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Bot,
+  BrainCircuit,
+  GripHorizontal,
+  Save,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Workflow,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { Button, Heading, SegmentedControl, Slider, Switch, Text, TextArea, TextField } from "@radix-ui/themes";
 import isEqual from "react-fast-compare";
 import {
@@ -13,37 +25,132 @@ import {
   type ControlPanelData,
 } from "@/services/controlPanelService";
 import { requestCurrentDesktopWindowClose, startCurrentDesktopWindowDragging } from "@/platform/desktopWindowFrame";
+import "./controlPanel.css";
 
-type PanelTone = "blush" | "warm" | "mist" | "leaf";
+type ControlPanelSectionId = "general" | "desktop" | "memory" | "automation" | "models" | "actions";
 
-type SectionHeaderProps = {
-  titleId: string;
+type NavigationGroup = {
+  label: string;
+  items: ControlPanelSectionId[];
+};
+
+type SectionMeta = {
+  description: string;
+  group: string;
+  helper: string;
+  icon: LucideIcon;
+  navLabel: string;
+  summary: string;
+  title: string;
+};
+
+type StatusPillProps = {
+  children: ReactNode;
+  tone: "live" | "mock" | "pending" | "synced";
+};
+
+type SidebarItemProps = {
+  active: boolean;
+  item: SectionMeta;
+  onSelect: () => void;
+};
+
+type SettingsCardProps = {
+  children: ReactNode;
+  description?: string;
   title: string;
 };
 
 type ControlLineProps = {
-  label: string;
-  hint?: string;
   children: ReactNode;
-  tone?: PanelTone;
   className?: string;
+  hint?: string;
+  label: string;
 };
 
 type ToggleLineProps = {
-  label: string;
-  description?: string;
   checked: boolean;
+  description?: string;
+  label: string;
   onCheckedChange: (checked: boolean) => void;
-  tone?: PanelTone;
-  className?: string;
 };
 
 type InfoRowProps = {
   label: string;
   value: ReactNode;
-  tone?: PanelTone;
-  className?: string;
 };
+
+const SECTION_META: Record<ControlPanelSectionId, SectionMeta> = {
+  actions: {
+    description: "集中查看当前快照状态、巡检结果与保存结果。",
+    group: "治理与应用",
+    helper: "在保存前再次确认来源、恢复点和关键反馈。",
+    icon: Save,
+    navLabel: "保存与操作",
+    summary: "把当前草稿、巡检反馈与正式保存动作收束到一个稳定出口。",
+    title: "保存与操作",
+  },
+  automation: {
+    description: "管理任务来源、巡检频率和提醒节奏。",
+    group: "协作策略",
+    helper: "推荐先确认来源列表，再决定哪些提醒要常驻启用。",
+    icon: Workflow,
+    navLabel: "任务巡检",
+    summary: "决定 Agent 何时主动巡视任务、何时提醒你接管和推进。",
+    title: "任务与巡检",
+  },
+  desktop: {
+    description: "控制悬浮球的在场感、尺寸和停靠方式。",
+    group: "基础控制",
+    helper: "保持克制的品牌感，优先突出常驻入口的存在方式。",
+    icon: Sparkles,
+    navLabel: "桌面入口",
+    summary: "让悬浮球在显眼与安静之间找到合适平衡，不打断你的桌面流。",
+    title: "外观与桌面入口",
+  },
+  general: {
+    description: "语言、主题和工作区等高频基础设置。",
+    group: "基础控制",
+    helper: "默认首屏，优先放置影响整个桌面体验的高频项。",
+    icon: Settings2,
+    navLabel: "通用设置",
+    summary: "统一操作面板、仪表盘和桌面入口的基础偏好。",
+    title: "通用设置",
+  },
+  memory: {
+    description: "配置镜子记忆的开关、节奏和保留策略。",
+    group: "协作策略",
+    helper: "把镜子解释成协作连续性，而不是抽象参数。",
+    icon: BrainCircuit,
+    navLabel: "镜子记忆",
+    summary: "决定长期协作信息保留多久、如何总结，以及多久刷新一次用户画像。",
+    title: "记忆设置",
+  },
+  models: {
+    description: "查看模型路由、安全摘要与预算约束。",
+    group: "治理与应用",
+    helper: "保留正式安全状态和预算信息，不把它们降级成纯展示文案。",
+    icon: ShieldCheck,
+    navLabel: "模型与安全",
+    summary: "把 provider、模型、预算和待授权状态放在同一个可信任边界里。",
+    title: "模型与安全",
+  },
+};
+
+const NAVIGATION_GROUPS: NavigationGroup[] = [
+  {
+    label: "基础控制",
+    items: ["general", "desktop"],
+  },
+  {
+    label: "协作策略",
+    items: ["memory", "automation"],
+  },
+  {
+    label: "治理与应用",
+    items: ["models", "actions"],
+  },
+];
 
 /**
  * Maps the current data source into a presentational badge for the control
@@ -57,14 +164,14 @@ function getSourceCopy(source: ControlPanelData["source"]) {
     return {
       badge: "LIVE",
       label: "JSON-RPC",
-      color: "green" as const,
+      tone: "live" as const,
     };
   }
 
   return {
     badge: "MOCK",
     label: "本地快照",
-    color: "amber" as const,
+    tone: "mock" as const,
   };
 }
 
@@ -73,10 +180,11 @@ function getSourceCopy(source: ControlPanelData["source"]) {
  *
  * @param applyMode Backend apply mode returned by the settings snapshot.
  * @param needRestart Whether the current change set requires an app restart.
+ * @param source Control-panel data source mode.
  * @returns User-facing save feedback copy.
  */
 function getApplyModeCopy(applyMode: string, needRestart: boolean, source: ControlPanelData["source"]) {
-  const localSnapshotSuffix = source === "mock" ? " 当前仍在使用本地快照，不会写入后端。": "";
+  const localSnapshotSuffix = source === "mock" ? " 当前仍在使用本地快照，不会写入后端。" : "";
 
   if (needRestart) {
     return `部分设置需要重启桌面端后生效。${localSnapshotSuffix}`;
@@ -89,90 +197,108 @@ function getApplyModeCopy(applyMode: string, needRestart: boolean, source: Contr
   return `设置已即时生效。${localSnapshotSuffix}`;
 }
 
-/**
- * Renders the visual section header used by control panel setting groups.
- *
- * @param props Heading metadata for the current section.
- * @returns A stylized heading row for the section.
- */
-function SectionHeader({ titleId, title }: SectionHeaderProps) {
-  return (
-    <div className="control-panel-page__section-header">
-      <Heading id={titleId} size="4" className="control-panel-page__section-title">
-        {title}
-      </Heading>
+function StatusPill({ children, tone }: StatusPillProps) {
+  return <span className={`control-panel-shell__status-pill control-panel-shell__status-pill--${tone}`}>{children}</span>;
+}
 
-      <div className="control-panel-page__section-ornament" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
-    </div>
+function SidebarItem({ active, item, onSelect }: SidebarItemProps) {
+  const Icon = item.icon;
+
+  return (
+    <button
+      type="button"
+      className="control-panel-shell__nav-item"
+      data-active={active ? "true" : "false"}
+      onClick={onSelect}
+    >
+      <span className="control-panel-shell__nav-icon" aria-hidden="true">
+        <Icon size={17} strokeWidth={1.85} />
+      </span>
+      <span className="control-panel-shell__nav-copy">
+        <span className="control-panel-shell__nav-label">{item.navLabel}</span>
+        <span className="control-panel-shell__nav-description">{item.description}</span>
+      </span>
+    </button>
   );
 }
 
-function ControlLine({ label, hint, children, tone = "blush", className }: ControlLineProps) {
-  const classes = ["control-panel-page__control-line", `control-panel-page__tone-surface--${tone}`, className]
-    .filter(Boolean)
-    .join(" ");
-
+function SettingsCard({ children, description, title }: SettingsCardProps) {
   return (
-    <div className={classes}>
-      <div className="control-panel-page__control-copy">
-        <Text as="p" size="2" weight="medium" className="control-panel-page__field-label">
-          {label}
-        </Text>
-        {hint ? (
-          <Text as="p" size="1" className="control-panel-page__field-hint">
-            {hint}
-          </Text>
-        ) : null}
-      </div>
-      <div className="control-panel-page__control-field">{children}</div>
-    </div>
-  );
-}
-
-function ToggleLine({ label, description, checked, onCheckedChange, tone = "warm", className }: ToggleLineProps) {
-  const classes = ["control-panel-page__toggle-line", `control-panel-page__tone-surface--${tone}`, className]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    <div className={classes}>
-      <div className="control-panel-page__control-copy">
-        <Text as="p" size="2" weight="medium" className="control-panel-page__field-label">
-          {label}
-        </Text>
+    <section className="control-panel-shell__card">
+      <div className="control-panel-shell__card-header">
+        <Heading as="h2" size="4" className="control-panel-shell__card-title">
+          {title}
+        </Heading>
         {description ? (
-          <Text as="p" size="1" className="control-panel-page__field-hint">
+          <Text as="p" size="2" className="control-panel-shell__card-description">
             {description}
           </Text>
         ) : null}
       </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
+      <div className="control-panel-shell__card-body">{children}</div>
+    </section>
   );
 }
 
-function InfoRow({ label, value, tone = "mist", className }: InfoRowProps) {
-  const classes = ["control-panel-page__info-row", `control-panel-page__tone-surface--${tone}`, className]
-    .filter(Boolean)
-    .join(" ");
+function ControlLine({ children, className, hint, label }: ControlLineProps) {
+  const classes = ["control-panel-shell__row", className].filter(Boolean).join(" ");
 
   return (
     <div className={classes}>
-      <Text as="span" size="1" className="control-panel-page__info-label">
-        {label}
-      </Text>
-      <Text as="span" size="2" weight="medium" className="control-panel-page__info-value">
-        {value}
-      </Text>
+      <div className="control-panel-shell__row-copy">
+        <Text as="p" size="2" weight="medium" className="control-panel-shell__row-label">
+          {label}
+        </Text>
+        {hint ? (
+          <Text as="p" size="2" className="control-panel-shell__row-hint">
+            {hint}
+          </Text>
+        ) : null}
+      </div>
+      <div className="control-panel-shell__row-field">{children}</div>
     </div>
   );
 }
 
+function ToggleLine({ checked, description, label, onCheckedChange }: ToggleLineProps) {
+  return (
+    <div className="control-panel-shell__row control-panel-shell__row--toggle">
+      <div className="control-panel-shell__row-copy">
+        <Text as="p" size="2" weight="medium" className="control-panel-shell__row-label">
+          {label}
+        </Text>
+        {description ? (
+          <Text as="p" size="2" className="control-panel-shell__row-hint">
+            {description}
+          </Text>
+        ) : null}
+      </div>
+      <div className="control-panel-shell__row-field control-panel-shell__row-field--inline">
+        <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: InfoRowProps) {
+  return (
+    <div className="control-panel-shell__info-row">
+      <Text as="span" size="2" className="control-panel-shell__info-label">
+        {label}
+      </Text>
+      <div className="control-panel-shell__info-value">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * ControlPanelApp renders the desktop settings surface with a sidebar-driven
+ * layout while keeping the current settings data model untouched.
+ *
+ * @returns The desktop control panel window.
+ */
 export function ControlPanelApp() {
+  const [activeSection, setActiveSection] = useState<ControlPanelSectionId>("general");
   const [panelData, setPanelData] = useState<ControlPanelData | null>(null);
   const [draft, setDraft] = useState<ControlPanelData | null>(null);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
@@ -188,14 +314,13 @@ export function ControlPanelApp() {
   }, []);
 
   const sourceCopy = useMemo(() => (draft ? getSourceCopy(draft.source) : null), [draft]);
-
   const hasChanges = !isEqual(draft, panelData);
 
   if (!draft || !panelData || !sourceCopy) {
     return (
-      <main className="app-shell control-panel-page">
-        <div className="control-panel-page__loading">
-          <Text size="2" className="control-panel-page__loading-copy">
+      <main className="app-shell control-panel-shell">
+        <div className="control-panel-shell__loading">
+          <Text size="2" className="control-panel-shell__loading-copy">
             正在载入控制面板…
           </Text>
         </div>
@@ -203,6 +328,7 @@ export function ControlPanelApp() {
     );
   }
 
+  const activeMeta = SECTION_META[activeSection];
   const latestRestorePoint = draft.securitySummary.latest_restore_point?.summary ?? "暂无恢复点";
   const inspectionInterval = `${draft.inspector.inspection_interval.value}${draft.inspector.inspection_interval.unit}`;
   const workSummaryCadence = `${draft.settings.memory.work_summary_interval.value}${draft.settings.memory.work_summary_interval.unit}`;
@@ -212,36 +338,22 @@ export function ControlPanelApp() {
     draft.source === "rpc"
       ? "通过 JSON-RPC `agent.settings.update` 提交；只写入后端 Stronghold，不会回显明文。"
       : "当前为本地快照模式：不会写入后端 Stronghold，也不会在桌面端保存明文 API key。";
+
   const sourceValue = (
-    <span className="control-panel-page__value-cluster">
-      <span
-        className={`control-panel-page__value-badge ${
-          draft.source === "rpc"
-            ? "control-panel-page__value-badge--live"
-            : "control-panel-page__value-badge--mock"
-        }`}
-      >
-        {sourceCopy.badge}
-      </span>
-      <span className="control-panel-page__value-text">{sourceCopy.label}</span>
+    <span className="control-panel-shell__value-cluster">
+      <StatusPill tone={sourceCopy.tone}>{sourceCopy.badge}</StatusPill>
+      <span className="control-panel-shell__value-text">{sourceCopy.label}</span>
     </span>
   );
-  const saveStateValue = (
-    <span
-      className={`control-panel-page__value-badge ${
-        hasChanges ? "control-panel-page__value-badge--pending" : "control-panel-page__value-badge--synced"
-      }`}
-    >
-      {hasChanges ? "待保存" : "已同步"}
-    </span>
-  );
+
+  const saveStateValue = hasChanges ? <StatusPill tone="pending">待保存</StatusPill> : <StatusPill tone="synced">已同步</StatusPill>;
 
   const updateSettings = (updater: (current: ControlPanelData) => ControlPanelData) => {
     setDraft((current) => (current ? updater(current) : current));
   };
 
-  // The top bar doubles as the drag region, but interactive controls inside it
-  // must keep their own pointer behavior instead of starting a window move.
+  // The custom titlebar is draggable, but embedded controls must keep their own
+  // pointer behavior instead of starting a native window move.
   const handleTopbarPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
 
@@ -257,14 +369,17 @@ export function ControlPanelApp() {
     void startCurrentDesktopWindowDragging();
   };
 
-  // Stop the close button press from bubbling into the drag region before
-  // the click handler requests the native close flow.
   const handleWindowClosePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
   };
 
   const handleWindowCloseClick = () => {
     void requestCurrentDesktopWindowClose();
+  };
+
+  const handleReset = () => {
+    setDraft(panelData);
+    setSaveFeedback("已恢复为上次载入的设置快照。");
   };
 
   const handleSave = async () => {
@@ -308,557 +423,640 @@ export function ControlPanelApp() {
     }
   };
 
-  return (
-    <main className="app-shell control-panel-page">
-      <div className="control-panel-page__frame">
-        <section
-          className="control-panel-page__topbar control-panel-page__tone-surface--warm"
-          aria-label="控制面板窗口操作"
-          onPointerDown={handleTopbarPointerDown}
-        >
-          <div className="control-panel-page__page-copy">
-            <Text as="p" size="1" className="control-panel-page__meta-label">
-              Desktop Control Surface
-            </Text>
-            <Heading size="6" className="control-panel-page__page-title">
-              控制面板
-            </Heading>
-            <Text as="p" size="2" className="control-panel-page__meta-text">
-              拖动顶部区域可以移动窗口，按 Esc 或右上角按钮可以关闭。
-            </Text>
-          </div>
+  const renderSectionContent = () => {
+    switch (activeSection) {
+      case "general":
+        return (
+          <>
+            <SettingsCard title="界面偏好" description="优先保留最常用的基础设置，让切换语言和主题的路径更直接。">
+              <ControlLine label="语言" hint="统一控制仪表盘与操作面板界面语言。">
+                <TextField.Root
+                  className="control-panel-shell__input"
+                  value={draft.settings.general.language}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        general: { ...current.settings.general, language: event.target.value },
+                      },
+                    }))
+                  }
+                />
+              </ControlLine>
 
-          <div className="control-panel-page__topbar-side">
-            <div className="control-panel-page__meta-grid">
-              <div className="control-panel-page__meta-item">
-                <Text as="p" size="1" className="control-panel-page__meta-label">
-                  数据来源
-                </Text>
-                <div className="control-panel-page__meta-value">{sourceValue}</div>
-              </div>
+              <ControlLine label="主题" hint="支持跟随系统或直接指定浅色、深色。">
+                <SegmentedControl.Root
+                  value={draft.settings.general.theme_mode}
+                  onValueChange={(value) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        general: { ...current.settings.general, theme_mode: value as typeof current.settings.general.theme_mode },
+                      },
+                    }))
+                  }
+                  className="control-panel-shell__selector"
+                >
+                  <SegmentedControl.Item value="follow_system">跟随系统</SegmentedControl.Item>
+                  <SegmentedControl.Item value="light">浅色</SegmentedControl.Item>
+                  <SegmentedControl.Item value="dark">深色</SegmentedControl.Item>
+                </SegmentedControl.Root>
+              </ControlLine>
+            </SettingsCard>
 
-              <div className="control-panel-page__meta-item">
-                <Text as="p" size="1" className="control-panel-page__meta-label">
-                  保存状态
-                </Text>
-                <div className="control-panel-page__meta-value">{saveStateValue}</div>
-              </div>
+            <SettingsCard title="系统行为" description="这些设置会影响桌面端的常驻方式和提醒风格。">
+              <ToggleLine
+                label="开机自启"
+                description="仅影响下次系统启动时是否自动运行。"
+                checked={draft.settings.general.auto_launch}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      general: { ...current.settings.general, auto_launch: checked },
+                    },
+                  }))
+                }
+              />
 
-              <div className="control-panel-page__meta-item">
-                <Text as="p" size="1" className="control-panel-page__meta-label">
-                  最近恢复点
-                </Text>
-                <Text as="p" size="2" className="control-panel-page__meta-text">
-                  {latestRestorePoint}
-                </Text>
-              </div>
-            </div>
+              <ToggleLine
+                label="语音通知"
+                description="控制应用内语音提示和音效反馈。"
+                checked={draft.settings.general.voice_notification_enabled}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      general: { ...current.settings.general, voice_notification_enabled: checked },
+                    },
+                  }))
+                }
+              />
+            </SettingsCard>
 
-            <div className="control-panel-page__window-actions">
-              <button
-                type="button"
-                className="control-panel-page__frame-button control-panel-page__frame-button--drag"
-                aria-label="拖动控制面板窗口"
-                onPointerDown={handleWindowDragPointerDown}
-              >
-                <GripHorizontal className="control-panel-page__frame-button-icon" />
-                <span>拖动窗口</span>
-              </button>
-
-              <button
-                type="button"
-                className="control-panel-page__frame-button control-panel-page__frame-button--close"
-                aria-label="关闭控制面板"
-                onClick={handleWindowCloseClick}
-                onPointerDown={handleWindowClosePointerDown}
-              >
-                <X className="control-panel-page__frame-button-icon" />
-              </button>
-            </div>
-          </div>
-        </section>
-        <div className="control-panel-page__columns" aria-label="控制面板设置分组">
-          <div className="control-panel-page__column">
-            <section className="control-panel-page__panel control-panel-page__tone-surface--blush" aria-labelledby="control-panel-general-title">
-              <SectionHeader titleId="control-panel-general-title" title="通用" />
-
-              <div className="control-panel-page__stack">
-                <ControlLine label="语言" tone="blush">
-                  <TextField.Root
-                    className="control-panel-page__input"
-                    value={draft.settings.general.language}
-                    onChange={(event) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          general: { ...current.settings.general, language: event.target.value },
+            <SettingsCard title="工作区与下载" description="路径变更只影响后续文件，不迁移历史内容。">
+              <ControlLine label="工作区路径" hint="任务文档与生成文件默认写入的本地位置。">
+                <TextField.Root
+                  className="control-panel-shell__input"
+                  value={draft.settings.general.download.workspace_path}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        general: {
+                          ...current.settings.general,
+                          download: { ...current.settings.general.download, workspace_path: event.target.value },
                         },
-                      }))
-                    }
-                  />
-                </ControlLine>
-
-                <ControlLine label="工作区路径" tone="blush">
-                  <TextField.Root
-                    className="control-panel-page__input"
-                    value={draft.settings.general.download.workspace_path}
-                    onChange={(event) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          general: {
-                            ...current.settings.general,
-                            download: { ...current.settings.general.download, workspace_path: event.target.value },
-                          },
-                        },
-                      }))
-                    }
-                  />
-                </ControlLine>
-
-                <ToggleLine
-                  label="开机自启"
-                  checked={draft.settings.general.auto_launch}
-                  tone="blush"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      settings: {
-                        ...current.settings,
-                        general: { ...current.settings.general, auto_launch: checked },
                       },
                     }))
                   }
                 />
+              </ControlLine>
+            </SettingsCard>
+          </>
+        );
 
-                <ToggleLine
-                  label="语音通知"
-                  checked={draft.settings.general.voice_notification_enabled}
-                  tone="blush"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      settings: {
-                        ...current.settings,
-                        general: { ...current.settings.general, voice_notification_enabled: checked },
-                      },
-                    }))
-                  }
-                />
+      case "desktop":
+        return (
+          <>
+            <SettingsCard title="悬浮球状态" description="让桌面入口在显眼与克制之间保持平衡。">
+              <ToggleLine
+                label="自动贴边"
+                description="结束拖动后自动吸附到屏幕边缘。"
+                checked={draft.settings.floating_ball.auto_snap}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      floating_ball: { ...current.settings.floating_ball, auto_snap: checked },
+                    },
+                  }))
+                }
+              />
 
-                <ControlLine label="主题" tone="blush">
-                  <SegmentedControl.Root
-                    value={draft.settings.general.theme_mode}
-                    onValueChange={(value) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          general: { ...current.settings.general, theme_mode: value as typeof current.settings.general.theme_mode },
-                        },
-                      }))
-                    }
-                    className="control-panel-page__selector"
-                  >
-                    <SegmentedControl.Item value="follow_system">跟随系统</SegmentedControl.Item>
-                    <SegmentedControl.Item value="light">浅色</SegmentedControl.Item>
-                    <SegmentedControl.Item value="dark">深色</SegmentedControl.Item>
-                  </SegmentedControl.Root>
-                </ControlLine>
-              </div>
-            </section>
+              <ToggleLine
+                label="空闲半透明"
+                description="在无操作时降低存在感，减少桌面遮挡。"
+                checked={draft.settings.floating_ball.idle_translucent}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      floating_ball: { ...current.settings.floating_ball, idle_translucent: checked },
+                    },
+                  }))
+                }
+              />
+            </SettingsCard>
 
-            <section className="control-panel-page__panel control-panel-page__tone-surface--mist" aria-labelledby="control-panel-memory-title">
-              <SectionHeader titleId="control-panel-memory-title" title="记忆" />
-
-              <div className="control-panel-page__stack">
-                <div className="control-panel-page__info-list">
-                  <InfoRow label="工作总结间隔" value={workSummaryCadence} tone="mist" />
-                  <InfoRow label="画像刷新间隔" value={profileCadence} tone="mist" />
-                </div>
-
-                <ToggleLine
-                  label="启用记忆"
-                  checked={draft.settings.memory.enabled}
-                  tone="mist"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      settings: {
-                        ...current.settings,
-                        memory: { ...current.settings.memory, enabled: checked },
-                      },
-                    }))
-                  }
-                />
-
-                <ControlLine label="生命周期" tone="mist">
-                  <TextField.Root
-                    className="control-panel-page__input"
-                    value={draft.settings.memory.lifecycle}
-                    onChange={(event) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          memory: { ...current.settings.memory, lifecycle: event.target.value },
-                        },
-                      }))
-                    }
-                  />
-                </ControlLine>
-              </div>
-            </section>
-
-            <section className="control-panel-page__panel control-panel-page__tone-surface--warm" aria-labelledby="control-panel-floating-title">
-              <SectionHeader titleId="control-panel-floating-title" title="悬浮球" />
-
-              <div className="control-panel-page__stack">
-                <ToggleLine
-                  label="自动贴边"
-                  checked={draft.settings.floating_ball.auto_snap}
-                  tone="warm"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      settings: {
-                        ...current.settings,
-                        floating_ball: { ...current.settings.floating_ball, auto_snap: checked },
-                      },
-                    }))
-                  }
-                />
-
-                <ToggleLine
-                  label="空闲半透明"
-                  checked={draft.settings.floating_ball.idle_translucent}
-                  tone="warm"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      settings: {
-                        ...current.settings,
-                        floating_ball: { ...current.settings.floating_ball, idle_translucent: checked },
-                      },
-                    }))
-                  }
-                />
-
-                <ControlLine label="尺寸" tone="warm">
-                  <div className="control-panel-page__slider-stack">
-                    <Slider
-                      min={0}
-                      max={2}
-                      step={1}
-                      value={[draft.settings.floating_ball.size === "small" ? 0 : draft.settings.floating_ball.size === "medium" ? 1 : 2]}
-                      onValueChange={([value]) =>
-                        updateSettings((current) => ({
-                          ...current,
-                          settings: {
-                            ...current.settings,
-                            floating_ball: {
-                              ...current.settings.floating_ball,
-                              size: value === 0 ? "small" : value === 1 ? "medium" : "large",
-                            },
-                          },
-                        }))
-                      }
-                    />
-
-                    <div className="control-panel-page__slider-legend">
-                      <span>小</span>
-                      <span>中</span>
-                      <span>大</span>
-                    </div>
-                  </div>
-                </ControlLine>
-
-                <ControlLine label="停靠方式" tone="warm">
-                  <SegmentedControl.Root
-                    value={draft.settings.floating_ball.position_mode}
-                    onValueChange={(value) =>
+            <SettingsCard title="在场方式" description="沿用当前正式字段，不额外引入桌面端专属状态。">
+              <ControlLine label="尺寸" hint="在多窗口协作时决定悬浮球的可发现程度。">
+                <div className="control-panel-shell__slider-stack">
+                  <Slider
+                    min={0}
+                    max={2}
+                    step={1}
+                    value={[draft.settings.floating_ball.size === "small" ? 0 : draft.settings.floating_ball.size === "medium" ? 1 : 2]}
+                    onValueChange={([value]) =>
                       updateSettings((current) => ({
                         ...current,
                         settings: {
                           ...current.settings,
                           floating_ball: {
                             ...current.settings.floating_ball,
-                            position_mode: value as typeof current.settings.floating_ball.position_mode,
+                            size: value === 0 ? "small" : value === 1 ? "medium" : "large",
                           },
                         },
                       }))
                     }
-                    className="control-panel-page__selector"
-                  >
-                    <SegmentedControl.Item value="fixed">固定</SegmentedControl.Item>
-                    <SegmentedControl.Item value="draggable">拖动</SegmentedControl.Item>
-                  </SegmentedControl.Root>
-                </ControlLine>
-              </div>
-            </section>
-          </div>
-
-          <div className="control-panel-page__column">
-            <section className="control-panel-page__panel control-panel-page__tone-surface--leaf" aria-labelledby="control-panel-inspection-title">
-              <SectionHeader titleId="control-panel-inspection-title" title="巡检" />
-
-              <div className="control-panel-page__stack">
-                <div className="control-panel-page__info-list">
-                  <InfoRow label="任务来源" value={`${draft.inspector.task_sources.length} 项`} tone="leaf" />
-                  <InfoRow label="巡检频率" value={inspectionInterval} tone="leaf" />
+                  />
+                  <div className="control-panel-shell__slider-legend">
+                    <span>小</span>
+                    <span>中</span>
+                    <span>大</span>
+                  </div>
                 </div>
+              </ControlLine>
 
-                <ToggleLine
-                  label="开机巡检"
-                  checked={draft.inspector.inspect_on_startup}
-                  tone="leaf"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      inspector: { ...current.inspector, inspect_on_startup: checked },
-                    }))
-                  }
-                />
-
-                <ToggleLine
-                  label="文件变化时巡检"
-                  checked={draft.inspector.inspect_on_file_change}
-                  tone="leaf"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      inspector: { ...current.inspector, inspect_on_file_change: checked },
-                    }))
-                  }
-                />
-
-                <ToggleLine
-                  label="截止前提醒"
-                  checked={draft.inspector.remind_before_deadline}
-                  tone="leaf"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      inspector: { ...current.inspector, remind_before_deadline: checked },
-                    }))
-                  }
-                />
-
-                <ToggleLine
-                  label="陈旧任务提醒"
-                  checked={draft.inspector.remind_when_stale}
-                  tone="leaf"
-                  onCheckedChange={(checked) =>
-                    updateSettings((current) => ({
-                      ...current,
-                      inspector: { ...current.inspector, remind_when_stale: checked },
-                    }))
-                  }
-                />
-
-                <ControlLine
-                  label="任务来源列表"
-                  hint="每行一个路径或标签。"
-                  tone="leaf"
-                  className="control-panel-page__control-line--textarea"
-                >
-                  <TextArea
-                    className="control-panel-page__textarea"
-                    value={draft.inspector.task_sources.join("\n")}
-                    onChange={(event) =>
-                      updateSettings((current) => {
-                        const taskSources = event.target.value
-                          .split(/\r?\n/)
-                          .map((item) => item.trim())
-                          .filter(Boolean);
-
-                        return {
-                          ...current,
-                          inspector: { ...current.inspector, task_sources: taskSources },
-                        };
-                      })
-                    }
-                  />
-                </ControlLine>
-              </div>
-            </section>
-
-            <section className="control-panel-page__panel control-panel-page__tone-surface--warm" aria-labelledby="control-panel-budget-title">
-              <SectionHeader titleId="control-panel-budget-title" title="模型与路由" />
-
-              <div className="control-panel-page__stack">
-                <ControlLine label="Provider" tone="warm">
-                  <TextField.Root
-                    className="control-panel-page__input"
-                    value={draft.settings.models.provider}
-                    onChange={(event) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          models: { ...current.settings.models, provider: event.target.value },
-                        },
-                      }))
-                    }
-                  />
-                </ControlLine>
-
-                <ControlLine label="Base URL" tone="warm">
-                  <TextField.Root
-                    className="control-panel-page__input"
-                    value={draft.settings.models.base_url}
-                    onChange={(event) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          models: { ...current.settings.models, base_url: event.target.value },
-                        },
-                      }))
-                    }
-                  />
-                </ControlLine>
-
-                <ControlLine label="Model" tone="warm">
-                  <TextField.Root
-                    className="control-panel-page__input"
-                    value={draft.settings.models.model}
-                    onChange={(event) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          models: { ...current.settings.models, model: event.target.value },
-                        },
-                      }))
-                    }
-                  />
-                </ControlLine>
-
-                <ControlLine
-                  label="API Key"
-                  hint={providerApiKeyHint}
-                  tone="warm"
-                >
-                  <TextField.Root
-                    className="control-panel-page__input"
-                    type="password"
-                    value={draft.providerApiKeyInput}
-                    placeholder={draft.settings.models.provider_api_key_configured ? "已配置，如需更换请重新输入" : "输入新的 provider API key"}
-                    autoComplete="off"
-                    onChange={(event) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        providerApiKeyInput: event.target.value,
-                      }))
-                    }
-                  />
-                </ControlLine>
-
-                <ToggleLine
-                  label="预算自动降级"
-                  checked={draft.settings.models.budget_auto_downgrade}
-                  tone="warm"
-                  onCheckedChange={(checked) =>
+              <ControlLine label="停靠方式" hint="固定更稳定，可拖动更适合多屏与复杂工作区。">
+                <SegmentedControl.Root
+                  value={draft.settings.floating_ball.position_mode}
+                  onValueChange={(value) =>
                     updateSettings((current) => ({
                       ...current,
                       settings: {
                         ...current.settings,
-                        models: { ...current.settings.models, budget_auto_downgrade: checked },
+                        floating_ball: {
+                          ...current.settings.floating_ball,
+                          position_mode: value as typeof current.settings.floating_ball.position_mode,
+                        },
+                      },
+                    }))
+                  }
+                  className="control-panel-shell__selector"
+                >
+                  <SegmentedControl.Item value="fixed">固定</SegmentedControl.Item>
+                  <SegmentedControl.Item value="draggable">可拖动</SegmentedControl.Item>
+                </SegmentedControl.Root>
+              </ControlLine>
+            </SettingsCard>
+          </>
+        );
+
+      case "memory":
+        return (
+          <>
+            <SettingsCard title="镜子记忆" description="将长期理解解释成协作连续性，而不是抽象 AI 参数。">
+              <ToggleLine
+                label="启用记忆"
+                description="关闭后不再记录新的长期记忆。"
+                checked={draft.settings.memory.enabled}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      memory: { ...current.settings.memory, enabled: checked },
+                    },
+                  }))
+                }
+              />
+
+              <ControlLine label="生命周期" hint="控制镜子记忆默认保留周期。">
+                <TextField.Root
+                  className="control-panel-shell__input"
+                  value={draft.settings.memory.lifecycle}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        memory: { ...current.settings.memory, lifecycle: event.target.value },
                       },
                     }))
                   }
                 />
+              </ControlLine>
+            </SettingsCard>
 
-                <div className="control-panel-page__info-list">
-                  <InfoRow label="当前模型" value={draft.settings.models.model} tone="warm" />
-                  <InfoRow label="API Key 状态" value={providerApiKeyStatus} tone="warm" />
-                  <InfoRow label="安全状态" value={draft.securitySummary.security_status} tone="warm" />
-                  <InfoRow label="待确认授权" value={draft.securitySummary.pending_authorizations} tone="warm" />
-                  <InfoRow
-                    label="今日成本"
-                    value={`¥${draft.securitySummary.token_cost_summary.today_cost.toFixed(2)}`}
-                    tone="warm"
-                  />
-                  <InfoRow
-                    label="单任务上限"
-                    value={`${draft.securitySummary.token_cost_summary.single_task_limit.toLocaleString("zh-CN")} tokens`}
-                    tone="warm"
-                  />
-                  <InfoRow
-                    label="当日上限"
-                    value={`${draft.securitySummary.token_cost_summary.daily_limit.toLocaleString("zh-CN")} tokens`}
-                    tone="warm"
-                  />
+            <SettingsCard title="记忆节奏" description="保持总结与画像刷新频率透明可见。">
+              <InfoRow label="工作总结间隔" value={workSummaryCadence} />
+              <InfoRow label="画像刷新间隔" value={profileCadence} />
+            </SettingsCard>
+          </>
+        );
+
+      case "automation":
+        return (
+          <>
+            <SettingsCard title="巡检规则" description="巡检与提醒应服务主链路，而不是制造额外打扰。">
+              <InfoRow label="巡检频率" value={inspectionInterval} />
+
+              <ToggleLine
+                label="开机巡检"
+                description="应用启动后自动运行一次任务巡检。"
+                checked={draft.inspector.inspect_on_startup}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    inspector: { ...current.inspector, inspect_on_startup: checked },
+                  }))
+                }
+              />
+
+              <ToggleLine
+                label="文件变化时巡检"
+                description="监听任务文件变化并刷新巡检结果。"
+                checked={draft.inspector.inspect_on_file_change}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    inspector: { ...current.inspector, inspect_on_file_change: checked },
+                  }))
+                }
+              />
+
+              <ToggleLine
+                label="截止前提醒"
+                description="在任务接近截止前推送预警。"
+                checked={draft.inspector.remind_before_deadline}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    inspector: { ...current.inspector, remind_before_deadline: checked },
+                  }))
+                }
+              />
+
+              <ToggleLine
+                label="陈旧任务提醒"
+                description="对长时间未推进的任务发出提醒。"
+                checked={draft.inspector.remind_when_stale}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    inspector: { ...current.inspector, remind_when_stale: checked },
+                  }))
+                }
+              />
+            </SettingsCard>
+
+            <SettingsCard title="任务来源" description="每行一个路径或标签，保留真实巡检来源而不是演示数据。">
+              <InfoRow label="已配置来源" value={`${draft.inspector.task_sources.length} 项`} />
+
+              <ControlLine
+                label="任务来源列表"
+                hint="支持多个工作区路径或任务标签。"
+                className="control-panel-shell__row--stacked"
+              >
+                <TextArea
+                  className="control-panel-shell__textarea"
+                  value={draft.inspector.task_sources.join("\n")}
+                  onChange={(event) =>
+                    updateSettings((current) => {
+                      const taskSources = event.target.value
+                        .split(/\r?\n/)
+                        .map((item) => item.trim())
+                        .filter(Boolean);
+
+                      return {
+                        ...current,
+                        inspector: { ...current.inspector, task_sources: taskSources },
+                      };
+                    })
+                  }
+                />
+              </ControlLine>
+            </SettingsCard>
+          </>
+        );
+
+      case "models":
+        return (
+          <>
+            <SettingsCard title="模型路由" description="provider、base URL 与 model 的修改都保留在正式设置边界里。">
+              <ControlLine label="Provider" hint="当前任务默认使用的模型提供商。">
+                <TextField.Root
+                  className="control-panel-shell__input"
+                  value={draft.settings.models.provider}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        models: { ...current.settings.models, provider: event.target.value },
+                      },
+                    }))
+                  }
+                />
+              </ControlLine>
+
+              <ControlLine label="Base URL" hint="用于接入托管服务或兼容接口。">
+                <TextField.Root
+                  className="control-panel-shell__input"
+                  value={draft.settings.models.base_url}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        models: { ...current.settings.models, base_url: event.target.value },
+                      },
+                    }))
+                  }
+                />
+              </ControlLine>
+
+              <ControlLine label="Model" hint="主链路默认优先选择的模型名。">
+                <TextField.Root
+                  className="control-panel-shell__input"
+                  value={draft.settings.models.model}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        models: { ...current.settings.models, model: event.target.value },
+                      },
+                    }))
+                  }
+                />
+              </ControlLine>
+
+              <ControlLine label="API Key" hint={providerApiKeyHint} className="control-panel-shell__row--stacked">
+                <TextField.Root
+                  className="control-panel-shell__input"
+                  type="password"
+                  value={draft.providerApiKeyInput}
+                  placeholder={draft.settings.models.provider_api_key_configured ? "已配置，如需更换请重新输入" : "输入新的 provider API key"}
+                  autoComplete="off"
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      providerApiKeyInput: event.target.value,
+                    }))
+                  }
+                />
+              </ControlLine>
+
+              <ToggleLine
+                label="预算自动降级"
+                description="预算接近上限时自动降级模型或交付强度。"
+                checked={draft.settings.models.budget_auto_downgrade}
+                onCheckedChange={(checked) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      models: { ...current.settings.models, budget_auto_downgrade: checked },
+                    },
+                  }))
+                }
+              />
+            </SettingsCard>
+
+            <SettingsCard title="安全与预算摘要" description="保留正式安全状态、成本和待授权统计的可见性。">
+              <InfoRow label="当前模型" value={draft.settings.models.model} />
+              <InfoRow label="API Key 状态" value={providerApiKeyStatus} />
+              <InfoRow label="安全状态" value={draft.securitySummary.security_status} />
+              <InfoRow label="待确认授权" value={draft.securitySummary.pending_authorizations} />
+              <InfoRow label="今日成本" value={`¥${draft.securitySummary.token_cost_summary.today_cost.toFixed(2)}`} />
+              <InfoRow
+                label="单任务上限"
+                value={`${draft.securitySummary.token_cost_summary.single_task_limit.toLocaleString("zh-CN")} tokens`}
+              />
+              <InfoRow
+                label="当日上限"
+                value={`${draft.securitySummary.token_cost_summary.daily_limit.toLocaleString("zh-CN")} tokens`}
+              />
+            </SettingsCard>
+          </>
+        );
+
+      case "actions":
+        return (
+          <>
+            <SettingsCard title="当前快照" description="保存前再次核对来源、同步状态和最近恢复点。">
+              <InfoRow label="数据来源" value={sourceValue} />
+              <InfoRow label="保存状态" value={saveStateValue} />
+              <InfoRow label="巡检频率" value={inspectionInterval} />
+              <InfoRow label="最近恢复点" value={latestRestorePoint} />
+            </SettingsCard>
+
+            <SettingsCard title="即时反馈" description="巡检和保存反馈都保留在当前窗口会话内，便于快速判断结果。">
+              <div className="control-panel-shell__feedback-grid">
+                <div className="control-panel-shell__feedback-card">
+                  <Text as="p" size="1" className="control-panel-shell__feedback-label">
+                    巡检结果
+                  </Text>
+                  <Text as="p" size="2" className="control-panel-shell__feedback-text" aria-live="polite">
+                    {inspectionSummary ?? "手动巡检后显示结果。"}
+                  </Text>
+                </div>
+
+                <div className="control-panel-shell__feedback-card">
+                  <Text as="p" size="1" className="control-panel-shell__feedback-label">
+                    保存结果
+                  </Text>
+                  <Text as="p" size="2" className="control-panel-shell__feedback-text" aria-live="polite">
+                    {saveFeedback ?? "保存后显示结果。"}
+                  </Text>
                 </div>
               </div>
-            </section>
+            </SettingsCard>
+          </>
+        );
+    }
+  };
 
-            <section className="control-panel-page__panel control-panel-page__tone-surface--blush" aria-labelledby="control-panel-actions-title">
-              <SectionHeader titleId="control-panel-actions-title" title="操作" />
-
-              <div className="control-panel-page__stack">
-                <div className="control-panel-page__info-list">
-                  <InfoRow label="数据来源" value={sourceValue} tone="blush" />
-                  <InfoRow label="保存状态" value={saveStateValue} tone="blush" />
-                  <InfoRow label="巡检频率" value={inspectionInterval} tone="blush" />
-                  <InfoRow label="恢复点" value={latestRestorePoint} tone="blush" />
-                </div>
-
-                <div className="control-panel-page__button-row">
-                  <Button
-                    className="control-panel-page__button control-panel-page__button--secondary"
-                    variant="soft"
-                    onClick={() => void handleRunInspection()}
-                    disabled={isRunningInspection}
-                  >
-                    {isRunningInspection ? "巡检执行中…" : "立即巡检"}
-                  </Button>
-
-                  <Button
-                    className="control-panel-page__button control-panel-page__button--ghost"
-                    variant="soft"
-                    color="gray"
-                    onClick={() => setDraft(panelData)}
-                    disabled={!hasChanges || isSaving}
-                  >
-                    撤销修改
-                  </Button>
-
-                  <Button
-                    className="control-panel-page__button control-panel-page__button--primary"
-                    onClick={() => void handleSave()}
-                    disabled={!hasChanges || isSaving}
-                  >
-                    {isSaving ? "保存中…" : "保存设置"}
-                  </Button>
-                </div>
-
-                <div className="control-panel-page__feedback-list">
-                  <div className="control-panel-page__message control-panel-page__tone-surface--warm">
-                    <Text as="p" size="1" className="control-panel-page__meta-label">
-                      巡检结果
-                    </Text>
-                    <Text as="p" size="2" className="control-panel-page__message-text" aria-live="polite">
-                      {inspectionSummary ?? "手动巡检后显示结果。"}
-                    </Text>
-                  </div>
-
-                  <div className="control-panel-page__message control-panel-page__tone-surface--blush">
-                    <Text as="p" size="1" className="control-panel-page__meta-label">
-                      保存结果
-                    </Text>
-                    <Text as="p" size="2" className="control-panel-page__message-text" aria-live="polite">
-                      {saveFeedback ?? "保存后显示结果。"}
-                    </Text>
-                  </div>
-                </div>
-              </div>
-            </section>
+  return (
+    <main className="app-shell control-panel-shell">
+      <div className="control-panel-shell__titlebar" aria-label="控制面板窗口操作" onPointerDown={handleTopbarPointerDown}>
+        <div className="control-panel-shell__titlebar-copy">
+          <Text as="p" size="1" className="control-panel-shell__eyebrow">
+            Desktop Control Surface
+          </Text>
+          <div className="control-panel-shell__titlebar-heading">
+            <Heading size="5" className="control-panel-shell__titlebar-title">
+              控制面板
+            </Heading>
+            <Text as="p" size="2" className="control-panel-shell__titlebar-subtitle">
+              贴近系统设置页的结构，保留 CialloClaw 的正式状态与品牌强调。
+            </Text>
           </div>
         </div>
+
+        <div className="control-panel-shell__titlebar-actions">
+          <div className="control-panel-shell__titlebar-status">{sourceValue}</div>
+          <button
+            type="button"
+            className="control-panel-shell__window-button control-panel-shell__window-button--drag"
+            aria-label="拖动控制面板窗口"
+            onPointerDown={handleWindowDragPointerDown}
+          >
+            <GripHorizontal size={16} strokeWidth={1.85} />
+            <span>拖动窗口</span>
+          </button>
+          <button
+            type="button"
+            className="control-panel-shell__window-button control-panel-shell__window-button--close"
+            aria-label="关闭控制面板"
+            onClick={handleWindowCloseClick}
+            onPointerDown={handleWindowClosePointerDown}
+          >
+            <X size={16} strokeWidth={1.9} />
+          </button>
+        </div>
+      </div>
+
+      <div className="control-panel-shell__workspace">
+        <aside className="control-panel-shell__sidebar" aria-label="控制面板分组导航">
+          <button type="button" className="control-panel-shell__back-button" onClick={handleWindowCloseClick}>
+            <ArrowLeft size={16} strokeWidth={1.85} />
+            <span>返回应用</span>
+          </button>
+
+          <div className="control-panel-shell__sidebar-copy">
+            <Text as="p" size="1" className="control-panel-shell__sidebar-kicker">
+              设置分组
+            </Text>
+            <Text as="p" size="2" className="control-panel-shell__sidebar-summary">
+              按高频基础设置、协作策略和治理边界分层组织，避免把所有开关塞进一页。
+            </Text>
+          </div>
+
+          <div className="control-panel-shell__nav-groups">
+            {NAVIGATION_GROUPS.map((group) => (
+              <div key={group.label} className="control-panel-shell__nav-group">
+                <Text as="p" size="1" className="control-panel-shell__nav-group-label">
+                  {group.label}
+                </Text>
+                <div className="control-panel-shell__nav-list">
+                  {group.items.map((itemId) => (
+                    <SidebarItem
+                      key={itemId}
+                      active={activeSection === itemId}
+                      item={SECTION_META[itemId]}
+                      onSelect={() => setActiveSection(itemId)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="control-panel-shell__sidebar-footer">
+            <div className="control-panel-shell__sidebar-insight">
+              <div className="control-panel-shell__sidebar-insight-icon" aria-hidden="true">
+                <Bot size={18} strokeWidth={1.85} />
+              </div>
+              <div className="control-panel-shell__sidebar-insight-copy">
+                <Text as="p" size="1" className="control-panel-shell__sidebar-insight-label">
+                  当前协作快照
+                </Text>
+                <Text as="p" size="2" className="control-panel-shell__sidebar-insight-text">
+                  模型 {draft.settings.models.model}，待授权 {draft.securitySummary.pending_authorizations} 项。
+                </Text>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section className="control-panel-shell__content">
+          <header className="control-panel-shell__hero">
+            <Text as="p" size="1" className="control-panel-shell__eyebrow">
+              {activeMeta.group}
+            </Text>
+            <Heading size="8" className="control-panel-shell__hero-title">
+              {activeMeta.title}
+            </Heading>
+            <Text as="p" size="3" className="control-panel-shell__hero-summary">
+              {activeMeta.summary}
+            </Text>
+            <Text as="p" size="2" className="control-panel-shell__hero-helper">
+              {activeMeta.helper}
+            </Text>
+
+            <div className="control-panel-shell__hero-metrics">
+              <div className="control-panel-shell__metric-card">
+                <Text as="p" size="1" className="control-panel-shell__metric-label">
+                  数据来源
+                </Text>
+                <div className="control-panel-shell__metric-value">{sourceValue}</div>
+              </div>
+
+              <div className="control-panel-shell__metric-card">
+                <Text as="p" size="1" className="control-panel-shell__metric-label">
+                  保存状态
+                </Text>
+                <div className="control-panel-shell__metric-value">{saveStateValue}</div>
+              </div>
+
+              <div className="control-panel-shell__metric-card">
+                <Text as="p" size="1" className="control-panel-shell__metric-label">
+                  最近恢复点
+                </Text>
+                <Text as="p" size="2" className="control-panel-shell__metric-note">
+                  {latestRestorePoint}
+                </Text>
+              </div>
+            </div>
+          </header>
+
+          <div className="control-panel-shell__cards">{renderSectionContent()}</div>
+
+          <div className="control-panel-shell__action-bar">
+            <div className="control-panel-shell__action-summary">
+              <div className="control-panel-shell__action-summary-icon" aria-hidden="true">
+                <Save size={18} strokeWidth={1.9} />
+              </div>
+              <div className="control-panel-shell__action-summary-copy">
+                <Text as="p" size="1" className="control-panel-shell__action-summary-label">
+                  当前草稿
+                </Text>
+                <Text as="p" size="2" className="control-panel-shell__action-summary-text">
+                  {hasChanges ? "你有尚未保存的调整。" : "当前设置已与最近一次快照同步。"}
+                </Text>
+              </div>
+            </div>
+
+            <div className="control-panel-shell__action-buttons">
+              <Button
+                className="control-panel-shell__button control-panel-shell__button--secondary"
+                variant="soft"
+                onClick={() => void handleRunInspection()}
+                disabled={isRunningInspection}
+              >
+                {isRunningInspection ? "巡检执行中…" : "立即巡检"}
+              </Button>
+
+              <Button
+                className="control-panel-shell__button control-panel-shell__button--ghost"
+                variant="soft"
+                color="gray"
+                onClick={handleReset}
+                disabled={!hasChanges || isSaving}
+              >
+                撤销修改
+              </Button>
+
+              <Button
+                className="control-panel-shell__button control-panel-shell__button--primary"
+                onClick={() => void handleSave()}
+                disabled={!hasChanges || isSaving}
+              >
+                {isSaving ? "保存中…" : "保存设置"}
+              </Button>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
   );
