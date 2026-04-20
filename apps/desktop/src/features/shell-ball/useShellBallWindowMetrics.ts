@@ -27,6 +27,10 @@ export const SHELL_BALL_BUBBLE_DRAG_CLEARANCE_PX = 24;
 export const SHELL_BALL_BUBBLE_REPOSITION_DURATION_MS = 180;
 export const SHELL_BALL_INPUT_GAP_PX = 4;
 export const SHELL_BALL_COMPACT_WINDOW_SAFE_MARGIN_PX = 50;
+export const SHELL_BALL_FIXED_WINDOW_SIZE = Object.freeze({
+  width: 800,
+  height: 800,
+});
 
 type ShellBallContentSize = {
   width: number;
@@ -874,29 +878,16 @@ export function useShellBallWindowMetrics({
       }
 
       if (role === "ball") {
-        const rootRect = nextElement.getBoundingClientRect();
-        const mascotElement = nextElement.querySelector<HTMLElement>(".shell-ball-surface__mascot-shell");
-
-        if (mascotElement !== null) {
-          const mascotRect = mascotElement.getBoundingClientRect();
-
-          // The mascot top-left corner is the stable shell-ball anchor. Helper
-          // panels can expand around it, but this corner stays pinned in screen
-          // space across merged-window resizes.
-          measuredAnchorOffsetRef.current = {
-            x: mascotRect.left - rootRect.left,
-            y: mascotRect.top - rootRect.top,
-          };
-        }
+        setWindowFrame(SHELL_BALL_FIXED_WINDOW_SIZE);
+        return;
       }
 
-      const isBallWindow = role === "ball";
-      const includeScrollBounds = !isBallWindow && role !== "bubble";
+      const includeScrollBounds = role !== "bubble";
       const contentSize = measureShellBallContentSize(nextElement, includeScrollBounds);
       setWindowFrame(
         createShellBallWindowFrame(
           contentSize,
-          isBallWindow ? SHELL_BALL_COMPACT_WINDOW_SAFE_MARGIN_PX : SHELL_BALL_WINDOW_SAFE_MARGIN_PX,
+          SHELL_BALL_WINDOW_SAFE_MARGIN_PX,
         ),
       );
     }
