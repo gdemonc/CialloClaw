@@ -59,8 +59,13 @@ export function ShellBallInputBar({
       return;
     }
 
+    // Keep the decorative highlight layer aligned with the real textarea height
+    // so multiline growth and shrink stay visually locked together.
     field.style.height = "0px";
-    field.style.height = `${Math.max(44, field.scrollHeight)}px`;
+    const nextHeight = Math.max(44, field.scrollHeight);
+
+    field.style.height = `${nextHeight}px`;
+    field.parentElement?.style.setProperty("--shell-ball-input-height", `${nextHeight}px`);
   }, [value]);
 
   useEffect(() => {
@@ -125,6 +130,7 @@ export function ShellBallInputBar({
       <div className="shell-ball-uiverse-inputbox">
         <textarea
           ref={inputRef}
+          data-shell-ball-interactive="true"
           required
           value={value}
           onChange={handleChange}
@@ -140,7 +146,7 @@ export function ShellBallInputBar({
             onFocusChange(false);
           }}
           readOnly={isHidden || isReadonly || isVoice}
-          tabIndex={isHidden || isVoice ? -1 : 0}
+          tabIndex={isInteractive ? 0 : -1}
           aria-label="Shell-ball input"
           placeholder={isVoice ? "Voice capture is active" : ""}
           rows={1}
@@ -152,6 +158,7 @@ export function ShellBallInputBar({
         <button
           type="button"
           className="shell-ball-uiverse-action"
+          data-shell-ball-interactive="true"
           onClick={onAttachFile}
           disabled={buttonsDisabled}
           aria-label="Attach file"
@@ -161,6 +168,7 @@ export function ShellBallInputBar({
         <button
           type="button"
           className="shell-ball-uiverse-action shell-ball-uiverse-action--send"
+          data-shell-ball-interactive="true"
           onClick={onSubmit}
           disabled={submitDisabled}
           aria-label={isReadonly ? "Send disabled" : isVoice ? "Send unavailable during voice capture" : "Send request"}
@@ -187,6 +195,7 @@ const StyledInputBar = styled.div`
   }
 
   .shell-ball-uiverse-inputbox {
+    --shell-ball-input-height: 44px;
     position: relative;
     width: 196px;
   }
@@ -194,7 +203,7 @@ const StyledInputBar = styled.div`
   .shell-ball-uiverse-inputbox textarea {
     position: relative;
     width: 100%;
-    padding: 20px 10px 10px;
+    padding: 10px;
     background: transparent;
     outline: none;
     box-shadow: none;
@@ -220,7 +229,7 @@ const StyledInputBar = styled.div`
   .shell-ball-uiverse-inputbox span {
     position: absolute;
     left: 0;
-    padding: 20px 10px 10px;
+    padding: 10px;
     font-size: 1em;
     color: rgba(143, 143, 143, 0.74);
     letter-spacing: 0.05em;
@@ -252,7 +261,7 @@ const StyledInputBar = styled.div`
   .shell-ball-uiverse-inputbox textarea:valid ~ i,
   .shell-ball-uiverse-inputbox textarea:focus ~ i,
   &[data-filled="true"] .shell-ball-uiverse-inputbox i {
-    height: 44px;
+    height: var(--shell-ball-input-height);
     background: rgba(128, 128, 128, 0.24);
   }
 
