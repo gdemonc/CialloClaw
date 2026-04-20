@@ -144,7 +144,6 @@ export function measureShellBallContentSize(element: ShellBallMeasurableElement,
   const rect = element.getBoundingClientRect();
 
   if (element instanceof HTMLElement && element.classList.contains("shell-ball-surface")) {
-    const rootRect = element.getBoundingClientRect();
     const measuredRegions = [
       element.querySelector<HTMLElement>(".shell-ball-surface__mascot-shell"),
       element.querySelector<HTMLElement>(".shell-ball-surface__slot--bottom"),
@@ -163,8 +162,8 @@ export function measureShellBallContentSize(element: ShellBallMeasurableElement,
         const maxBottom = Math.max(...regionRects.map((regionRect) => regionRect.bottom));
 
         return {
-          width: Math.max(rootRect.width, maxRight - minLeft),
-          height: Math.max(rootRect.height, maxBottom - minTop),
+          width: maxRight - minLeft,
+          height: maxBottom - minTop,
         };
       }
 
