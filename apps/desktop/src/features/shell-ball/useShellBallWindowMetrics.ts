@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow, monitorFromPoint, type Monitor } from "@tauri-apps/api/window";
 import {
+  applyShellBallCurrentWindowFrame,
   createShellBallLogicalPosition,
   createShellBallLogicalSize,
   hideShellBallWindow,
@@ -25,7 +26,7 @@ export const SHELL_BALL_BUBBLE_GAP_PX = 6;
 export const SHELL_BALL_BUBBLE_DRAG_CLEARANCE_PX = 24;
 export const SHELL_BALL_BUBBLE_REPOSITION_DURATION_MS = 180;
 export const SHELL_BALL_INPUT_GAP_PX = 4;
-export const SHELL_BALL_COMPACT_WINDOW_SAFE_MARGIN_PX = 6;
+export const SHELL_BALL_COMPACT_WINDOW_SAFE_MARGIN_PX = 10;
 
 type ShellBallContentSize = {
   width: number;
@@ -47,6 +48,11 @@ type ShellBallWindowSize = {
 };
 
 type ShellBallAnchorOffset = {
+  x: number;
+  y: number;
+};
+
+type ShellBallGlobalAnchor = {
   x: number;
   y: number;
 };
@@ -460,6 +466,7 @@ export function useShellBallWindowMetrics({
   const appliedWindowSizeRef = useRef<ShellBallWindowSize | null>(null);
   const measuredAnchorOffsetRef = useRef<ShellBallAnchorOffset | null>(null);
   const appliedAnchorOffsetRef = useRef<ShellBallAnchorOffset | null>(null);
+  const globalAnchorRef = useRef<ShellBallGlobalAnchor | null>(null);
   const helperWindowMoveAnimationFrameRef = useRef<number | null>(null);
   const helperWindowMoveAnimationResolveRef = useRef<(() => void) | null>(null);
   const helperWindowMoveAnimationTokenRef = useRef(0);
@@ -598,6 +605,14 @@ export function useShellBallWindowMetrics({
     });
 
     geometryRef.current = geometry;
+    const currentAnchorOffset = appliedAnchorOffsetRef.current;
+
+    if (currentAnchorOffset !== null) {
+      globalAnchorRef.current = {
+        x: geometry.ballFrame.x + currentAnchorOffset.x,
+        y: geometry.ballFrame.y + currentAnchorOffset.y,
+      };
+    }
 
     if (input?.snapToBounds && (geometry.ballFrame.x !== logicalPosition.x || geometry.ballFrame.y !== logicalPosition.y)) {
       await currentWindow.setPosition(createShellBallLogicalPosition(geometry.ballFrame.x, geometry.ballFrame.y));
@@ -865,8 +880,8 @@ export function useShellBallWindowMetrics({
         if (mascotElement !== null) {
           const mascotRect = mascotElement.getBoundingClientRect();
 
-          // Preserve the orb anchor across merged-window resizes so helper
-          // panels can appear without shifting the mascot on screen.
+          // The mascot center is the stable shell-ball anchor. Helper panels can
+          // expand around it, but the anchor stays pinned in screen space.
           measuredAnchorOffsetRef.current = {
             x: mascotRect.left - rootRect.left + mascotRect.width / 2,
             y: mascotRect.top - rootRect.top + mascotRect.height / 2,
@@ -902,7 +917,7 @@ export function useShellBallWindowMetrics({
     };
   }, [role]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (windowFrame === null) {
       return;
     }
@@ -910,6 +925,12 @@ export function useShellBallWindowMetrics({
     if (
       appliedWindowSizeRef.current?.width === windowFrame.width
       && appliedWindowSizeRef.current?.height === windowFrame.height
+      && (role !== "ball"
+        || measuredAnchorOffsetRef.current === null
+        || (
+          appliedAnchorOffsetRef.current?.x === measuredAnchorOffsetRef.current.x
+          && appliedAnchorOffsetRef.current?.y === measuredAnchorOffsetRef.current.y
+        ))
     ) {
       return;
     }
@@ -921,21 +942,37 @@ export function useShellBallWindowMetrics({
         const currentWindow = getCurrentWindow();
 
         if (currentWindow.label === shellBallWindowLabels.ball) {
-          const previousAnchorOffset = appliedAnchorOffsetRef.current;
+          const outerPosition = await currentWindow.outerPosition();
+          const scaleFactor = await currentWindow.scaleFactor();
+          const logicalPosition = outerPosition.toLogical(scaleFactor);
 
-          if (previousAnchorOffset !== null && nextAnchorOffset !== null) {
-            const outerPosition = await currentWindow.outerPosition();
-            const scaleFactor = await currentWindow.scaleFactor();
-            const logicalPosition = outerPosition.toLogical(scaleFactor);
+          if (nextAnchorOffset !== null) {
+            const stableGlobalAnchor = globalAnchorRef.current ?? {
+              x: logicalPosition.x + nextAnchorOffset.x,
+              y: logicalPosition.y + nextAnchorOffset.y,
+            };
 
-            await currentWindow.setPosition(
-              createShellBallLogicalPosition(
-                logicalPosition.x + previousAnchorOffset.x - nextAnchorOffset.x,
-                logicalPosition.y + previousAnchorOffset.y - nextAnchorOffset.y,
-              ),
-            );
+            globalAnchorRef.current = stableGlobalAnchor;
+
+            await applyShellBallCurrentWindowFrame({
+              x: stableGlobalAnchor.x - nextAnchorOffset.x,
+              y: stableGlobalAnchor.y - nextAnchorOffset.y,
+              width: windowFrame.width,
+              height: windowFrame.height,
+            });
+          } else {
+            await applyShellBallCurrentWindowFrame({
+              x: logicalPosition.x,
+              y: logicalPosition.y,
+              width: windowFrame.width,
+              height: windowFrame.height,
+            });
           }
+        } else {
+          await setShellBallWindowSize(role, createShellBallLogicalSize(windowFrame.width, windowFrame.height));
         }
+      } else {
+        await setShellBallWindowSize(role, createShellBallLogicalSize(windowFrame.width, windowFrame.height));
       }
 
       appliedWindowSizeRef.current = {
@@ -943,8 +980,6 @@ export function useShellBallWindowMetrics({
         height: windowFrame.height,
       };
       appliedAnchorOffsetRef.current = nextAnchorOffset;
-
-      await setShellBallWindowSize(role, createShellBallLogicalSize(windowFrame.width, windowFrame.height));
     })();
   }, [role, windowFrame]);
 
@@ -1022,6 +1057,7 @@ export function useShellBallWindowMetrics({
       cancelBallWindowDragAnimation();
       appliedWindowSizeRef.current = null;
       appliedAnchorOffsetRef.current = null;
+      globalAnchorRef.current = null;
       measuredAnchorOffsetRef.current = null;
       ballDragSessionRef.current = null;
       pendingBallDragFrameRef.current = null;
