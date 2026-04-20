@@ -133,6 +133,7 @@ export function measureShellBallContentSize(element: ShellBallMeasurableElement,
   const rect = element.getBoundingClientRect();
 
   if (element instanceof HTMLElement && element.classList.contains("shell-ball-surface")) {
+    const rootRect = element.getBoundingClientRect();
     const measuredRegions = [
       element.querySelector<HTMLElement>(".shell-ball-surface__mascot-shell"),
       element.querySelector<HTMLElement>(".shell-ball-surface__slot--top"),
@@ -141,6 +142,22 @@ export function measureShellBallContentSize(element: ShellBallMeasurableElement,
     ].filter((region): region is HTMLElement => region !== null);
 
     if (measuredRegions.length > 0) {
+      const regionRects = measuredRegions
+        .map((region) => region.getBoundingClientRect())
+        .filter((regionRect) => regionRect.width > 0 && regionRect.height > 0);
+
+      if (regionRects.length > 0) {
+        const minLeft = Math.min(...regionRects.map((regionRect) => regionRect.left));
+        const minTop = Math.min(...regionRects.map((regionRect) => regionRect.top));
+        const maxRight = Math.max(...regionRects.map((regionRect) => regionRect.right));
+        const maxBottom = Math.max(...regionRects.map((regionRect) => regionRect.bottom));
+
+        return {
+          width: Math.max(rootRect.width, maxRight - minLeft),
+          height: Math.max(rootRect.height, maxBottom - minTop),
+        };
+      }
+
       return {
         width: Math.max(...measuredRegions.map((region) => Math.max(region.getBoundingClientRect().width, region.scrollWidth))),
         height: Math.max(...measuredRegions.map((region) => Math.max(region.getBoundingClientRect().height, region.scrollHeight))),
