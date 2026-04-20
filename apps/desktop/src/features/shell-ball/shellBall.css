@@ -2,10 +2,12 @@ html[data-app-window="shell-ball"],
 body[data-app-window="shell-ball"],
 #root[data-app-window="shell-ball"] {
   background: rgba(0, 0, 0, 0) !important;
+  height: 100%;
   margin: 0;
   overflow: hidden;
   padding: 0;
   pointer-events: none;
+  width: 100%;
 }
 
 [data-app-window="shell-ball"] [data-shell-ball-interactive="true"] {
