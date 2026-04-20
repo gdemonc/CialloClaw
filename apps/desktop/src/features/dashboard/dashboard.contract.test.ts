@@ -1926,6 +1926,19 @@ test("TaskDetailPanel keeps evidence artifacts scoped to formal citation links",
   assert.doesNotMatch(panelSource, /artifactItems\.map\(\(artifact\) => \(/);
 });
 
+test("TaskDetailPanel renders a formal screen governance section only for screen tasks with synced detail", () => {
+  const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
+
+  assert.match(panelSource, /const isScreenTask = task\.source_type === "screen_capture" \|\| detail\.task\.intent\?\.name === "screen_analyze"/);
+  assert.match(panelSource, /if \(!isScreenTask \|\| shouldDeferSecuritySummary\) \{/);
+  assert.match(panelSource, /Screen Governance/);
+  assert.match(panelSource, /屏幕授权、恢复与失败收口/);
+  assert.match(panelSource, /该区域只消费正式 `approval_request`、`recovery_point` 与 `runtime_summary` 字段/);
+  assert.match(panelSource, /runtimeSummary\.latest_failure_category/);
+  assert.match(panelSource, /detail\.approval_request/);
+  assert.match(panelSource, /detail\.security_summary\.latest_restore_point/);
+});
+
 test("TaskDetailPanel keeps runtime sections visible for ended tasks and preserves steering draft until success", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
   const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
