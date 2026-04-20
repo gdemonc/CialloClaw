@@ -441,6 +441,7 @@ function createDetail(overrides: Partial<AgentTaskDetailGetResult> = {}): AgentT
       active_steering_count: 0,
       events_count: 0,
       latest_failure_code: null,
+      latest_failure_category: null,
       latest_failure_summary: null,
       latest_event_type: null,
       loop_stop_reason: null,
@@ -1608,6 +1609,7 @@ test("task detail normalization rejects string restore points in rpc mode and ke
       active_steering_count: 0,
       events_count: 0,
       latest_failure_code: null,
+      latest_failure_category: null,
       latest_failure_summary: null,
       latest_event_type: null,
       loop_stop_reason: null,
@@ -1618,7 +1620,7 @@ test("task detail normalization rejects string restore points in rpc mode and ke
   });
 });
 
-test("task detail normalization recovers invalid artifacts but still rejects broken mirrors and timeline steps", () => {
+test("task detail normalization recovers invalid artifacts and citations but still rejects broken mirrors and timeline steps", () => {
   withDesktopAliasRuntime((requireFn) => {
     const service = requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js")) as {
       normalizeTaskDetailData: (detail: AgentTaskDetailGetResult) => { detailWarningMessage: string | null; detail: AgentTaskDetailGetResult };
@@ -1677,6 +1679,15 @@ test("task detail normalization recovers invalid artifacts but still rejects bro
     assert.equal(recovered.detail.artifacts.length, 0);
     assert.match(recovered.detailWarningMessage ?? "", /成果信息暂时无法完整展示/);
 
+    const recoveredCitation = service.normalizeTaskDetailData(
+      createDetail({
+        citations: [{ citation_id: "citation_1" } as never],
+      }),
+    );
+
+    assert.equal(recoveredCitation.detail.citations.length, 0);
+    assert.match(recoveredCitation.detailWarningMessage ?? "", /任务引用信息暂时无法完整展示/);
+
     const recoveredMirror = service.normalizeTaskDetailData(
       createDetail({
         mirror_references: [{ memory_id: "memory_1" } as never],
@@ -1689,13 +1700,16 @@ test("task detail normalization recovers invalid artifacts but still rejects bro
     const recoveredBoth = service.normalizeTaskDetailData(
       createDetail({
         artifacts: null as never,
+        citations: null as never,
         mirror_references: null as never,
       }),
     );
 
     assert.equal(recoveredBoth.detail.artifacts.length, 0);
+    assert.equal(recoveredBoth.detail.citations.length, 0);
     assert.equal(recoveredBoth.detail.mirror_references.length, 0);
     assert.match(recoveredBoth.detailWarningMessage ?? "", /成果信息暂时无法完整展示/);
+    assert.match(recoveredBoth.detailWarningMessage ?? "", /任务引用信息暂时无法完整展示/);
     assert.match(recoveredBoth.detailWarningMessage ?? "", /镜子命中信息暂时无法完整展示/);
 
     const recoveredRuntimeSummary = service.normalizeTaskDetailResult({
@@ -1705,6 +1719,7 @@ test("task detail normalization recovers invalid artifacts but still rejects bro
 
     assert.equal(recoveredRuntimeSummary.runtime_summary.events_count, 0);
     assert.equal(recoveredRuntimeSummary.runtime_summary.active_steering_count, 0);
+    assert.equal(recoveredRuntimeSummary.runtime_summary.latest_failure_category, null);
     assert.equal(recoveredRuntimeSummary.runtime_summary.latest_event_type, null);
     assert.equal(recoveredRuntimeSummary.runtime_summary.loop_stop_reason, null);
 
