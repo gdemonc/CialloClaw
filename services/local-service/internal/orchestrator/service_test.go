@@ -4753,12 +4753,104 @@ func TestServiceTaskDetailGetIncludesFailureSummaryForFailedScreenTask(t *testin
 		t.Fatalf("expected failed screen task to expose latest_failure_summary, got %+v", runtimeSummary)
 	}
 	observationSignals := runtimeSummary["observation_signals"].([]string)
-	if len(observationSignals) == 0 {
-		t.Fatalf("expected failed screen task to expose observation signals, got %+v", runtimeSummary)
+	if !reflect.DeepEqual(observationSignals, []string{"screen_summary", "visible_text", "page_title"}) {
+		t.Fatalf("expected failed screen task to expose stable observation signals, got %+v", runtimeSummary)
 	}
 	citations := detailResult["citations"].([]map[string]any)
 	if len(citations) != 1 || citations[0]["source_ref"] != "art_screen_failure_detail" {
 		t.Fatalf("expected failed screen task to retain formal citations, got %+v", citations)
+	}
+}
+
+func TestLatestTaskFailurePrefersStructuredFailureMetadataOverBudgetSignals(t *testing.T) {
+	task := runengine.TaskRecord{
+		TaskID: "task_failure_signal_priority",
+		Status: "failed",
+		RunID:  "run_failure_signal_priority",
+		AuditRecords: []map[string]any{{
+			"type":    "execution",
+			"action":  "execute_task",
+			"result":  "failed",
+			"summary": "OCR worker failed while analyzing the current screen.",
+			"metadata": map[string]any{
+				"failure_code":     "OCR_WORKER_FAILED",
+				"failure_category": "screen_ocr",
+			},
+		}, {
+			"category": "budget_auto_downgrade",
+			"action":   "budget_auto_downgrade.failure_signal",
+			"result":   "failed",
+			"reason":   model.ErrClientNotConfigured.Error(),
+		}},
+	}
+
+	failureCode, failureCategory, failureSummary := latestTaskFailure(task)
+	if failureCode != "OCR_WORKER_FAILED" {
+		t.Fatalf("expected latestTaskFailure to keep structured failure_code, got %q", failureCode)
+	}
+	if failureCategory != "screen_ocr" {
+		t.Fatalf("expected latestTaskFailure to keep structured failure_category, got %q", failureCategory)
+	}
+	if !strings.Contains(failureSummary, "OCR worker failed") {
+		t.Fatalf("expected latestTaskFailure to keep structured failure summary, got %q", failureSummary)
+	}
+}
+
+func TestBuildTaskCitationsPreservesDistinctFormalReferencesForSameArtifact(t *testing.T) {
+	task := runengine.TaskRecord{
+		TaskID: "task_screen_multi_citation",
+		RunID:  "run_screen_multi_citation",
+	}
+	artifacts := []map[string]any{{
+		"artifact_id":   "art_screen_multi_citation",
+		"task_id":       task.TaskID,
+		"artifact_type": "screen_capture",
+		"title":         "screen.png",
+		"path":          "workspace/screen.png",
+		"mime_type":     "image/png",
+	}}
+	toolCalls := []tools.ToolCallRecord{
+		{
+			Output: map[string]any{
+				"citation_seed": map[string]any{
+					"artifact_id":   "art_screen_multi_citation",
+					"artifact_type": "screen_capture",
+					"evidence_role": "error_evidence",
+					"ocr_excerpt":   "Fatal build error",
+				},
+			},
+		},
+		{
+			Output: map[string]any{
+				"citation_seed": map[string]any{
+					"artifact_id":   "art_screen_multi_citation",
+					"artifact_type": "screen_capture",
+					"evidence_role": "page_context",
+					"ocr_excerpt":   "Release dashboard",
+				},
+			},
+		},
+		{
+			Output: map[string]any{
+				"citation_seed": map[string]any{
+					"artifact_id":   "art_screen_multi_citation",
+					"artifact_type": "screen_capture",
+					"evidence_role": "error_evidence",
+					"ocr_excerpt":   "Fatal build error",
+				},
+			},
+		},
+	}
+
+	citations := buildTaskCitations(task, toolCalls, nil, nil, artifacts)
+	if len(citations) != 2 {
+		t.Fatalf("expected exact duplicate seeds to collapse but distinct formal references to remain, got %+v", citations)
+	}
+	if citations[0]["source_ref"] != "art_screen_multi_citation" || citations[1]["source_ref"] != "art_screen_multi_citation" {
+		t.Fatalf("expected both citations to reference the same artifact, got %+v", citations)
+	}
+	if citations[0]["citation_id"] == citations[1]["citation_id"] {
+		t.Fatalf("expected distinct formal references on the same artifact to keep unique citation ids, got %+v", citations)
 	}
 }
 
@@ -7474,7 +7566,12 @@ func TestServiceTaskDetailGetFallsBackToTaskRunCitationsForScreenTask(t *testing
 			"created_at":       "2026-04-20T10:06:00Z",
 		}},
 		Citations: []map[string]any{{
-			"citation_id": "cit_task_stored_screen_detail_art_stored_screen_detail",
+			"citation_id": "cit_task_stored_screen_detail_" + stableCitationIdentity("task_stored_screen_detail", "file", "art_stored_screen_detail", map[string]any{
+				"artifact_id":   "art_stored_screen_detail",
+				"artifact_type": "screen_capture",
+				"evidence_role": "error_evidence",
+				"ocr_excerpt":   "fatal build error",
+			}),
 			"task_id":     "task_stored_screen_detail",
 			"run_id":      "run_stored_screen_detail",
 			"source_type": "file",
@@ -7611,7 +7708,12 @@ func TestServiceTaskDetailGetStructuredFallbackBackfillsTaskRunEvidence(t *testi
 		UpdatedAt:   time.Date(2026, 4, 15, 13, 5, 0, 0, time.UTC),
 		FinishedAt:  timePointer(time.Date(2026, 4, 15, 13, 6, 0, 0, time.UTC)),
 		Citations: []map[string]any{{
-			"citation_id": "cit_task_structured_screen_evidence_art_structured_screen_evidence",
+			"citation_id": "cit_" + taskID + "_" + stableCitationIdentity(taskID, "file", "art_structured_screen_evidence", map[string]any{
+				"artifact_id":   "art_structured_screen_evidence",
+				"artifact_type": "screen_capture",
+				"evidence_role": "error_evidence",
+				"ocr_excerpt":   "fatal build error",
+			}),
 			"task_id":     taskID,
 			"run_id":      "run_structured_screen_evidence",
 			"source_type": "file",

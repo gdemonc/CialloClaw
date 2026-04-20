@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1076,13 +1077,29 @@ func (s *Service) buildTaskRuntimeSummary(task runengine.TaskRecord) map[string]
 }
 
 func latestTaskFailure(task runengine.TaskRecord) (string, string, string) {
+	var fallbackCode string
+	var fallbackCategory string
+	var fallbackSummary string
 	for index := len(task.AuditRecords) - 1; index >= 0; index-- {
 		record := task.AuditRecords[index]
 		if stringValue(record, "result", "") != "failed" {
 			continue
 		}
 		metadata := mapValue(record, "metadata")
-		return firstNonEmptyString(stringValue(metadata, "failure_code", ""), stringValue(record, "action", "")), firstNonEmptyString(stringValue(metadata, "failure_category", ""), stringValue(record, "type", "")), firstNonEmptyString(stringValue(record, "summary", ""), stringValue(record, "reason", ""))
+		failureCode := strings.TrimSpace(stringValue(metadata, "failure_code", ""))
+		failureCategory := strings.TrimSpace(stringValue(metadata, "failure_category", ""))
+		failureSummary := firstNonEmptyString(stringValue(record, "summary", ""), stringValue(record, "reason", ""))
+		if failureCode != "" || failureCategory != "" {
+			return firstNonEmptyString(failureCode, stringValue(record, "action", "")), firstNonEmptyString(failureCategory, firstNonEmptyString(stringValue(record, "type", ""), stringValue(record, "category", ""))), failureSummary
+		}
+		if fallbackCode == "" && fallbackCategory == "" && fallbackSummary == "" {
+			fallbackCode = firstNonEmptyString(stringValue(record, "action", ""), firstNonEmptyString(stringValue(record, "type", ""), stringValue(record, "category", "")))
+			fallbackCategory = firstNonEmptyString(stringValue(record, "type", ""), stringValue(record, "category", ""))
+			fallbackSummary = failureSummary
+		}
+	}
+	if fallbackCode != "" || fallbackCategory != "" || fallbackSummary != "" {
+		return fallbackCode, fallbackCategory, fallbackSummary
 	}
 	if task.Status == "failed" {
 		return firstNonEmptyString(task.CurrentStep, "execution_failed"), "task_execution", firstNonEmptyString(stringValue(task.BubbleMessage, "text", ""), "任务执行失败")
@@ -1091,13 +1108,21 @@ func latestTaskFailure(task runengine.TaskRecord) (string, string, string) {
 }
 
 func taskObservationSignals(task runengine.TaskRecord) []string {
-	result := make([]string, 0, 5)
-	for _, value := range []string{task.Snapshot.ScreenSummary, task.Snapshot.VisibleText, task.Snapshot.PageTitle, task.Snapshot.WindowTitle} {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
+	result := make([]string, 0, 4)
+	observationSources := []struct {
+		signal string
+		value  string
+	}{
+		{signal: "screen_summary", value: task.Snapshot.ScreenSummary},
+		{signal: "visible_text", value: task.Snapshot.VisibleText},
+		{signal: "page_title", value: task.Snapshot.PageTitle},
+		{signal: "window_title", value: task.Snapshot.WindowTitle},
+	}
+	for _, item := range observationSources {
+		if strings.TrimSpace(item.value) == "" {
 			continue
 		}
-		result = append(result, truncateText(trimmed, 48))
+		result = append(result, item.signal)
 	}
 	return uniqueTrimmedStrings(result)
 }
@@ -5778,8 +5803,9 @@ func citationFromSeed(task runengine.TaskRecord, seed map[string]any, artifactsB
 	if _, ok := artifactsByID[artifactID]; ok {
 		sourceType = "file"
 	}
+	identity := stableCitationIdentity(task.TaskID, sourceType, sourceRef, seed)
 	return map[string]any{
-		"citation_id": fmt.Sprintf("cit_%s_%s", task.TaskID, sanitizeCitationSuffix(sourceRef)),
+		"citation_id": fmt.Sprintf("cit_%s_%s", task.TaskID, identity),
 		"task_id":     task.TaskID,
 		"run_id":      task.RunID,
 		"source_type": sourceType,
@@ -5788,13 +5814,26 @@ func citationFromSeed(task runengine.TaskRecord, seed map[string]any, artifactsB
 	}
 }
 
-func sanitizeCitationSuffix(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
+// stableCitationIdentity derives a deterministic citation fingerprint from the
+// full formal seed so identical seeds collapse while distinct references on the
+// same artifact remain separately addressable.
+func stableCitationIdentity(taskID, sourceType, sourceRef string, seed map[string]any) string {
+	normalized := map[string]any{
+		"task_id":           taskID,
+		"source_type":       strings.TrimSpace(sourceType),
+		"source_ref":        strings.TrimSpace(sourceRef),
+		"artifact_id":       strings.TrimSpace(stringValue(seed, "artifact_id", "")),
+		"artifact_type":     strings.TrimSpace(stringValue(seed, "artifact_type", "")),
+		"evidence_role":     strings.TrimSpace(stringValue(seed, "evidence_role", "")),
+		"ocr_excerpt":       strings.TrimSpace(stringValue(seed, "ocr_excerpt", "")),
+		"screen_session_id": strings.TrimSpace(stringValue(seed, "screen_session_id", "")),
+	}
+	payload, err := json.Marshal(normalized)
+	if err != nil {
 		return "evidence"
 	}
-	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_", ".", "_")
-	return replacer.Replace(trimmed)
+	sum := sha256.Sum256(payload)
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 func executionAttemptIndex(previousTask, processingTask runengine.TaskRecord) int {
