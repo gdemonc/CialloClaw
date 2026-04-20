@@ -7978,6 +7978,47 @@ func TestServiceTaskDetailGetStructuredFallbackRehydratesAuthorizationAndAudit(t
 	}
 }
 
+func TestNormalizeTaskDetailAuthorizationRecordCoercesLegacyDecisions(t *testing.T) {
+	allowRecord := normalizeTaskDetailAuthorizationRecord("task_auth_detail", map[string]any{
+		"authorization_record_id": "auth_allow",
+		"task_id":                 "task_auth_detail",
+		"approval_id":             "appr_allow",
+		"decision":                "allow_always",
+		"remember_rule":           true,
+		"operator":                "user",
+		"created_at":              "2026-04-20T16:00:00Z",
+	})
+	if allowRecord == nil || allowRecord["decision"] != "allow_once" {
+		t.Fatalf("expected legacy allow decision to coerce to protocol enum, got %+v", allowRecord)
+	}
+
+	denyRecord := normalizeTaskDetailAuthorizationRecord("task_auth_detail", map[string]any{
+		"authorization_record_id": "auth_deny",
+		"task_id":                 "task_auth_detail",
+		"approval_id":             "appr_deny",
+		"decision":                "deny_always",
+		"remember_rule":           false,
+		"operator":                "user",
+		"created_at":              "2026-04-20T16:01:00Z",
+	})
+	if denyRecord == nil || denyRecord["decision"] != "deny_once" {
+		t.Fatalf("expected legacy deny decision to coerce to protocol enum, got %+v", denyRecord)
+	}
+
+	invalidRecord := normalizeTaskDetailAuthorizationRecord("task_auth_detail", map[string]any{
+		"authorization_record_id": "auth_invalid",
+		"task_id":                 "task_auth_detail",
+		"approval_id":             "appr_invalid",
+		"decision":                "manual_override",
+		"remember_rule":           false,
+		"operator":                "user",
+		"created_at":              "2026-04-20T16:02:00Z",
+	})
+	if invalidRecord != nil {
+		t.Fatalf("expected unsupported decision to be dropped from task detail, got %+v", invalidRecord)
+	}
+}
+
 func TestServiceSecuritySummaryCountsStructuredFallbackPendingAuthorizations(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "structured security summary pending auth")
 	if service.storage == nil {

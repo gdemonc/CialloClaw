@@ -4339,7 +4339,7 @@ func normalizeTaskDetailAuthorizationRecord(taskID string, authorizationRecord m
 	recordID := strings.TrimSpace(stringValue(authorizationRecord, "authorization_record_id", ""))
 	recordTaskID := strings.TrimSpace(stringValue(authorizationRecord, "task_id", ""))
 	approvalID := strings.TrimSpace(stringValue(authorizationRecord, "approval_id", ""))
-	decision := strings.TrimSpace(stringValue(authorizationRecord, "decision", ""))
+	decision := normalizeTaskDetailAuthorizationDecision(stringValue(authorizationRecord, "decision", ""))
 	operator := strings.TrimSpace(stringValue(authorizationRecord, "operator", ""))
 	createdAt := strings.TrimSpace(stringValue(authorizationRecord, "created_at", ""))
 	if recordID == "" || recordTaskID != taskID || approvalID == "" || decision == "" || operator == "" || createdAt == "" {
@@ -4354,6 +4354,17 @@ func normalizeTaskDetailAuthorizationRecord(taskID string, authorizationRecord m
 		"remember_rule":           boolValue(authorizationRecord, "remember_rule", false),
 		"operator":                operator,
 		"created_at":              createdAt,
+	}
+}
+
+func normalizeTaskDetailAuthorizationDecision(decision string) string {
+	switch strings.TrimSpace(decision) {
+	case "allow_once", "allow_always":
+		return "allow_once"
+	case "deny_once", "deny_always":
+		return "deny_once"
+	default:
+		return ""
 	}
 }
 
