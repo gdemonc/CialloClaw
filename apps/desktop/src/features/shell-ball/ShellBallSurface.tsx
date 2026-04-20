@@ -4,12 +4,16 @@ import type { ShellBallMotionConfig, ShellBallVisualState } from "./shellBall.ty
 import { ShellBallMascot } from "./components/ShellBallMascot";
 
 type ShellBallSurfaceProps = {
+  bottomContent?: ReactNode;
   children?: ReactNode;
   containerRef?: RefObject<HTMLDivElement>;
   dashboardTransitionPhase?: "idle" | "opening" | "hidden" | "closing";
   fileDropActive?: boolean;
+  mascotRef?: RefObject<HTMLDivElement>;
+  overlayContent?: ReactNode;
   textDropActive?: boolean;
   selectionIndicatorVisible?: boolean;
+  topContent?: ReactNode;
   visualState: ShellBallVisualState;
   voicePreview: ShellBallVoicePreview;
   voiceHoldProgress?: number;
@@ -75,12 +79,16 @@ export function extractShellBallDroppedText(dataTransfer: ShellBallDropDataTrans
 }
 
 export function ShellBallSurface({
+  bottomContent,
   children,
   containerRef,
   dashboardTransitionPhase = "idle",
   fileDropActive = false,
+  mascotRef,
+  overlayContent,
   textDropActive = false,
   selectionIndicatorVisible = false,
+  topContent,
   visualState,
   voicePreview,
   voiceHoldProgress = 0,
@@ -141,6 +149,7 @@ export function ShellBallSurface({
       onDropCapture={handleDrop}
     >
       <div className="shell-ball-surface__core">
+        {topContent ? <div className="shell-ball-surface__slot shell-ball-surface__slot--top">{topContent}</div> : null}
         <div className="shell-ball-surface__interaction-shell">
           <section
             aria-label="Shell-ball interaction zone"
@@ -166,7 +175,7 @@ export function ShellBallSurface({
                   value=""
                   onChange={() => {}}
                 />
-                <div className="shell-ball-surface__mascot-shell">
+                <div ref={mascotRef} className="shell-ball-surface__mascot-shell">
                   <ShellBallMascot
                     visualState={visualState}
                     voicePreview={voicePreview}
@@ -185,19 +194,22 @@ export function ShellBallSurface({
                     onPressCancel={onPressCancel}
                   />
                 </div>
+                {overlayContent ? <div className="shell-ball-surface__overlay">{overlayContent}</div> : null}
                 <button
                   aria-hidden={!showInputProxy}
                   className="shell-ball-surface__input-line-proxy"
+                  data-shell-ball-interactive="true"
                   data-visible={showInputProxy}
                   onClick={onInputProxyClick}
                   tabIndex={showInputProxy ? 0 : -1}
                   type="button"
                 />
               </div>
-          </section>
+            </section>
         </div>
+        {bottomContent ? <div className="shell-ball-surface__slot shell-ball-surface__slot--bottom">{bottomContent}</div> : null}
+        {children ? <div className="shell-ball-surface__stack">{children}</div> : null}
       </div>
-      {children}
     </div>
   );
 }
