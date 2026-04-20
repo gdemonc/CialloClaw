@@ -803,7 +803,6 @@ test("shell-ball desktop window controller and capabilities stay aligned", () =>
   assert.equal(shellBallWindowPermissions.includes("core:window:allow-set-position"), true);
   assert.equal(shellBallWindowPermissions.includes("core:window:allow-set-size"), true);
   assert.equal(shellBallWindowPermissions.includes("core:window:allow-start-dragging"), true);
-  assert.equal(shellBallWindowPermissions.includes("core:window:allow-set-ignore-cursor-events"), true);
 
   const capabilityConfig = readFileSync(
     resolve(desktopRoot, "src-tauri/capabilities/default.json"),
@@ -816,9 +815,6 @@ test("shell-ball desktop window controller and capabilities stay aligned", () =>
 
   assert.deepEqual(parsedCapabilityConfig.windows, [
     "shell-ball",
-    "shell-ball-bubble",
-    "shell-ball-input",
-    "shell-ball-voice",
     "shell-ball-bubble-pinned-*",
     "dashboard",
     "control-panel",
@@ -827,7 +823,6 @@ test("shell-ball desktop window controller and capabilities stay aligned", () =>
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-position"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-size"), true);
   assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-start-dragging"), true);
-  assert.equal(parsedCapabilityConfig.permissions.includes("core:window:allow-set-ignore-cursor-events"), true);
 
   const generatedCapabilitySchema = JSON.parse(
     readFileSync(resolve(desktopRoot, "src-tauri/gen/schemas/capabilities.json"), "utf8"),

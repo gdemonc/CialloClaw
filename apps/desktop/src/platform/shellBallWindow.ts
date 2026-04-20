@@ -1,11 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import type { ShellBallSelectionSnapshot } from "@/features/shell-ball/selection/selection.types";
-
-export type ShellBallMousePosition = {
-  client_x: number;
-  client_y: number;
-};
 
 export type ShellBallWindowBounds = {
   height: number;
@@ -42,30 +36,6 @@ export async function setShellBallShadow(enabled: boolean) {
   await currentWindow.setShadow(enabled);
 }
 
-export async function setShellBallIgnoreCursorEvents(ignore: boolean, forward = true) {
-  const currentWindow = getShellBallWindow();
-  if (!currentWindow) {
-    return;
-  }
-
-  try {
-    await invoke("shell_ball_set_ignore_cursor_events", {
-      forward,
-      ignore,
-    });
-  } catch {
-    await currentWindow.setIgnoreCursorEvents(ignore);
-  }
-}
-
-export async function getShellBallMousePosition() {
-  if (!isTauriWindowEnvironment()) {
-    return null;
-  }
-
-  return invoke<ShellBallMousePosition | null>("shell_ball_get_mouse_position");
-}
-
 /**
  * Reads the current native selection snapshot captured by the host platform
  * adapter.
@@ -78,6 +48,7 @@ export async function readShellBallSelectionSnapshot() {
     return null;
   }
 
+  const { invoke } = await import("@tauri-apps/api/core");
   return invoke<ShellBallSelectionSnapshot | null>("shell_ball_read_selection_snapshot");
 }
 

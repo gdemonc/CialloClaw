@@ -25,7 +25,6 @@ export const shellBallWindowPermissions = Object.freeze([
   "core:window:allow-set-size-constraints",
   "core:window:allow-set-focus",
   "core:window:allow-set-focusable",
-  "core:window:allow-set-ignore-cursor-events",
   "core:window:allow-set-always-on-top",
   "core:window:allow-start-dragging",
 ] as const);
