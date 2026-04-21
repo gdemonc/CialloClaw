@@ -70,6 +70,14 @@ export function shouldShowShellBallFileDropOverlay(input: {
   return input.fileDropActive;
 }
 
+function shouldPreviewShellBallWindowDrag(dataTransfer: DataTransfer | null) {
+  if (dataTransfer === null) {
+    return false;
+  }
+
+  return dataTransfer.files.length > 0 || dataTransfer.types.length > 0;
+}
+
 /**
  * Decides when the shell-ball should arm its text drop target without fighting
  * with file drop or voice-only states.
@@ -244,7 +252,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   } = useShellBallInteraction();
   const motionConfig = getShellBallMotionConfig(visualState);
   const [dashboardTransitionPhase, setDashboardTransitionPhase] = useState<ShellBallDashboardTransitionPhase>("idle");
-  const [dragGestureActive, setDragGestureActive] = useState(false);
+  const [dragPreviewActive, setDragPreviewActive] = useState(false);
   const [fileDropActive, setFileDropActive] = useState(false);
   const [inputFocusToken, setInputFocusToken] = useState(0);
   const [textDragActive, setTextDragActive] = useState(false);
@@ -521,6 +529,10 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     setTextDragActive(false);
   }, []);
 
+  const clearWindowDragPreviewState = useCallback(() => {
+    setDragPreviewActive(false);
+  }, []);
+
   const handleWindowTextDrag = useCallback((event: DragEvent) => {
     if (!shouldAcceptShellBallTextDrop(event.dataTransfer)) {
       clearTextDragState();
@@ -539,6 +551,24 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     setTextDragActive(true);
   }, [clearTextDragState, fileDropActive, visualState]);
 
+  const handleWindowDragPreview = useCallback((event: DragEvent) => {
+    if (!shouldPreviewShellBallWindowDrag(event.dataTransfer)) {
+      clearWindowDragPreviewState();
+      return;
+    }
+
+    setDragPreviewActive(true);
+  }, [clearWindowDragPreviewState]);
+
+  useEventListener("dragenter", handleWindowDragPreview, {
+    target: shellBallWindowTarget,
+    enable: shellBallWindowTarget !== undefined,
+  });
+  useEventListener("dragover", handleWindowDragPreview, {
+    target: shellBallWindowTarget,
+    enable: shellBallWindowTarget !== undefined,
+  });
+
   useEventListener("dragenter", handleWindowTextDrag, {
     target: shellBallWindowTarget,
     enable: shellBallWindowTarget !== undefined,
@@ -552,6 +582,14 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     enable: shellBallWindowTarget !== undefined,
   });
   useEventListener("drop", clearTextDragState, {
+    target: shellBallWindowTarget,
+    enable: shellBallWindowTarget !== undefined,
+  });
+  useEventListener("dragleave", clearWindowDragPreviewState, {
+    target: shellBallWindowTarget,
+    enable: shellBallWindowTarget !== undefined,
+  });
+  useEventListener("drop", clearWindowDragPreviewState, {
     target: shellBallWindowTarget,
     enable: shellBallWindowTarget !== undefined,
   });
@@ -569,7 +607,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       return;
     }
 
-    setDragGestureActive(false);
+    setDragPreviewActive(false);
   }, [fileDropActive]);
 
   useEffect(() => {
@@ -730,7 +768,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       dashboardTransitionPhase={dashboardTransitionPhase}
       mascotRef={mascotRef}
       fileDropActive={shouldShowShellBallFileDropOverlay({
-        fileDropActive: fileDropActive || dragGestureActive,
+        fileDropActive: fileDropActive || dragPreviewActive,
       })}
       overlayContent={snapshot.visibility.voice ? <div className="shell-ball-voice-window"><ShellBallVoiceHints hintMode={snapshot.voiceHintMode} voicePreview={snapshot.voicePreview} /></div> : null}
       bottomContent={shouldRenderInlineInput ? (
@@ -786,16 +824,13 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
           y: event.screenY,
         });
       }}
-      onDragGestureChange={setDragGestureActive}
       onDragEnd={(event) => {
-        setDragGestureActive(false);
         void endBallWindowPointerDrag({
           x: event.screenX,
           y: event.screenY,
         });
       }}
       onDragCancel={(event) => {
-        setDragGestureActive(false);
         void endBallWindowPointerDrag({
           x: event.screenX,
           y: event.screenY,

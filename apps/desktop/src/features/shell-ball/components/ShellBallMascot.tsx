@@ -20,7 +20,6 @@ type ShellBallMascotProps = {
   onHotspotDragMove?: (event: PointerEvent<HTMLButtonElement>) => void;
   onHotspotDragEnd?: (event: PointerEvent<HTMLButtonElement>) => void;
   onHotspotDragCancel?: (event: PointerEvent<HTMLButtonElement>) => void;
-  onHotspotDragGestureChange?: (active: boolean) => void;
   onPressStart?: (event: PointerEvent<HTMLButtonElement>) => void;
   onPressMove?: (event: PointerEvent<HTMLButtonElement>) => void;
   onPressEnd?: (event: PointerEvent<HTMLButtonElement>) => boolean;
@@ -109,7 +108,6 @@ export function ShellBallMascot({
   onHotspotDragMove = () => {},
   onHotspotDragEnd = () => {},
   onHotspotDragCancel = () => {},
-  onHotspotDragGestureChange = () => {},
   onPressStart = () => {},
   onPressMove = () => {},
   onPressEnd = () => false,
@@ -160,7 +158,6 @@ export function ShellBallMascot({
     draggingSequenceRef.current = false;
     pointerStartXRef.current = null;
     pointerStartYRef.current = null;
-    onHotspotDragGestureChange(false);
   }
 
   function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
@@ -208,7 +205,6 @@ export function ShellBallMascot({
     ) {
       draggingSequenceRef.current = true;
       suppressGestureRef.current = true;
-      onHotspotDragGestureChange(true);
     }
 
     onPressMove(event);
