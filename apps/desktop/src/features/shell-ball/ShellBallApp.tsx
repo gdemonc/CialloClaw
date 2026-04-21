@@ -50,6 +50,7 @@ type ShellBallWindowAnchor = {
 const SHELL_BALL_DASHBOARD_TRANSITION_DURATION_MS = 260;
 const SHELL_BALL_SELECTION_PROMPT_CLEAR_DELAY_MS = 240;
 const SHELL_BALL_CLIPBOARD_PROMPT_WINDOW_MS = 10_000;
+const SHELL_BALL_PASSTHROUGH_FALLBACK_POLL_MS = 120;
 const SHELL_BALL_INTERACTIVE_SELECTOR = [
   ".shell-ball-mascot__hotspot",
   ".shell-ball-uiverse-inputbox textarea",
@@ -615,6 +616,37 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     }
 
     let disposed = false;
+    let pollHandle: number | null = null;
+
+    const stopFallbackPolling = () => {
+      if (pollHandle !== null) {
+        window.clearInterval(pollHandle);
+        pollHandle = null;
+      }
+    };
+
+    const startFallbackPolling = () => {
+      if (pollHandle !== null) {
+        return;
+      }
+
+      // Windows forwarded mousemove should be the primary recovery path. This
+      // fallback only runs while the shell-ball is click-through so hotspot
+      // recovery still works when the forwarded path is unreliable.
+      pollHandle = window.setInterval(() => {
+        if (!interactivePassthroughRef.current) {
+          stopFallbackPolling();
+          return;
+        }
+
+        if (disposed) {
+          stopFallbackPolling();
+          return;
+        }
+
+        void syncShellBallCursorPassthroughFromNativePointer();
+      }, SHELL_BALL_PASSTHROUGH_FALLBACK_POLL_MS);
+    };
 
     const handleMouseMove = (event: MouseEvent) => {
       void syncShellBallCursorPassthrough(event.clientX, event.clientY);
@@ -626,6 +658,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       // the pointer is outside its true hotspots.
       interactivePassthroughRef.current = true;
       await setShellBallIgnoreCursorEvents(true, true);
+      startFallbackPolling();
 
       if (disposed) {
         return;
@@ -638,6 +671,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
     return () => {
       disposed = true;
+      stopFallbackPolling();
       window.removeEventListener("mousemove", handleMouseMove);
       void setShellBallIgnoreCursorEvents(false, false);
     };
