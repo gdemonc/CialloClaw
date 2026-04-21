@@ -1,9 +1,15 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardVoiceField } from "@/features/dashboard/home/components/DashboardVoiceField";
 import { getDashboardHomeFallbackData, loadDashboardHomeData, submitDashboardHomeRecommendationFeedback } from "@/features/dashboard/home/dashboardHome.service";
+import {
+  dashboardTaskDetailNavigationEvent,
+  navigateToDashboardTaskDetail,
+  type DashboardTaskDetailOpenRequest,
+} from "@/features/dashboard/shared/dashboardTaskDetailNavigation";
 import { resolveDashboardModuleRoutePath, resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { cn } from "@/utils/cn";
 import { DashboardHome } from "./DashboardHome";
@@ -73,6 +79,7 @@ function DashboardRoutes() {
   const queryClient = useQueryClient();
   const isOpening = useDashboardDomainExpansion();
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const handledTaskDetailRequestIdRef = useRef<string | null>(null);
   const dashboardHomeQuery = useQuery({
     queryKey: ["dashboard", "home"],
     queryFn: loadDashboardHomeData,
@@ -94,6 +101,38 @@ function DashboardRoutes() {
       console.warn("dashboard recommendation feedback failed", error);
     },
   });
+
+  useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | null = null;
+
+    void getCurrentWindow()
+      .listen<DashboardTaskDetailOpenRequest>(dashboardTaskDetailNavigationEvent, ({ payload }) => {
+        if (handledTaskDetailRequestIdRef.current === payload.request_id) {
+          return;
+        }
+
+        handledTaskDetailRequestIdRef.current = payload.request_id;
+        setVoiceOpen(false);
+        navigateToDashboardTaskDetail(navigate, payload.task_id);
+      })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+
+        cleanup = unlisten;
+      })
+      .catch((error) => {
+        console.warn("dashboard task-detail navigation listener failed", error);
+      });
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [navigate]);
 
   useEffect(() => {
     const clearTaskSubscription = subscribeTaskUpdated(() => {

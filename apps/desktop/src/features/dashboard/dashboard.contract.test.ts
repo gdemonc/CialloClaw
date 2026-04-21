@@ -78,6 +78,10 @@ function loadDashboardSafetyNavigationModule() {
   );
 }
 
+function loadDashboardTaskDetailNavigationSource() {
+  return readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardTaskDetailNavigation.ts"), "utf8");
+}
+
 function loadTaskPageQueryModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.query.js")) as {
@@ -139,6 +143,17 @@ function loadNotePageServiceModule(desktopLocalPath?: DashboardContractDesktopLo
         path: string | null;
         taskId: string | null;
         url: string | null;
+      }, options?: {
+        onOpenTaskDetail?: (input: {
+          plan: {
+            mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            feedback: string;
+            path: string | null;
+            taskId: string | null;
+            url: string | null;
+          };
+          taskId: string;
+        }) => Promise<string | void> | string | void;
       }) => Promise<string>;
     };
   }, undefined, desktopLocalPath);
@@ -168,6 +183,17 @@ function loadTaskOutputServiceModule(desktopLocalPath?: DashboardContractDesktop
         path: string | null;
         url: string | null;
         feedback: string;
+      }, options?: {
+        onOpenTaskDetail?: (input: {
+          plan: {
+            mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            taskId: string | null;
+            path: string | null;
+            url: string | null;
+            feedback: string;
+          };
+          taskId: string;
+        }) => Promise<string | void> | string | void;
       }) => Promise<string>;
     };
   }, undefined, desktopLocalPath);
@@ -1711,15 +1737,59 @@ test("note resource execution uses desktop local open handlers and keeps copy-pa
   assert.match(fallbackMessage, /workspace\/drafts\/spec\.md/);
 });
 
+test("task output execution delegates task-detail routing through the shared callback", async () => {
+  const outputService = loadTaskOutputServiceModule();
+  const openedTaskIds: string[] = [];
+
+  const feedback = await outputService.performTaskOpenExecution({
+    mode: "task_detail",
+    taskId: "task_dashboard_001",
+    path: null,
+    url: null,
+    feedback: "宸插畾浣嶅埌浠诲姟璇︽儏銆?",
+  }, {
+    onOpenTaskDetail: ({ taskId }) => {
+      openedTaskIds.push(taskId);
+      return "宸插湪浠〃鐩樹腑鎵撳紑浠诲姟璇︽儏銆?";
+    },
+  });
+
+  assert.deepEqual(openedTaskIds, ["task_dashboard_001"]);
+  assert.equal(feedback, "宸插湪浠〃鐩樹腑鎵撳紑浠诲姟璇︽儏銆?");
+});
+
+test("note resource execution delegates task-detail routing through the shared callback", async () => {
+  const noteService = loadNotePageServiceModule();
+  const openedTaskIds: string[] = [];
+
+  const feedback = await noteService.performNoteResourceOpenExecution({
+    mode: "task_detail",
+    feedback: "宸插畾浣嶅埌浠诲姟 Task detail銆?",
+    path: null,
+    taskId: "task_dashboard_001",
+    url: null,
+  }, {
+    onOpenTaskDetail: ({ taskId }) => {
+      openedTaskIds.push(taskId);
+      return "宸插湪浠〃鐩樹腑鎵撳紑 Task detail銆?";
+    },
+  });
+
+  assert.deepEqual(openedTaskIds, ["task_dashboard_001"]);
+  assert.equal(feedback, "宸插湪浠〃鐩樹腑鎵撳紑 Task detail銆?");
+});
+
 test("task page adopts rpc output helpers directly in the task detail panel", () => {
   const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
   const taskDetailSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
   const taskOutputSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskOutput.service.ts"), "utf8");
+  const taskDetailNavigationSource = loadDashboardTaskDetailNavigationSource();
 
   assert.match(taskPageSource, /buildDashboardTaskArtifactQueryKey/);
   assert.match(taskPageSource, /loadTaskArtifactPage/);
   assert.match(taskPageSource, /openTaskArtifactForTask/);
   assert.match(taskPageSource, /openTaskDeliveryForTask/);
+  assert.match(taskPageSource, /readDashboardTaskDetailRouteState/);
   assert.match(taskPageSource, /subscribeDeliveryReady\(\(payload\) =>/);
   assert.match(taskPageSource, /payload\.task_id/);
   assert.doesNotMatch(taskPageSource, /\["dashboard", "tasks", "artifacts"/);
@@ -1734,6 +1804,8 @@ test("task page adopts rpc output helpers directly in the task detail panel", ()
   assert.doesNotMatch(taskOutputSource, /isRpcChannelUnavailable/);
   assert.doesNotMatch(taskOutputSource, /logRpcMockFallback/);
   assert.match(taskOutputSource, /isAllowedTaskOpenUrl/);
+  assert.match(taskOutputSource, /onOpenTaskDetail/);
+  assert.match(taskDetailNavigationSource, /requestDashboardTaskDetailOpen/);
 });
 
 test("note page consumes note query helpers instead of inlining note bucket contracts", () => {

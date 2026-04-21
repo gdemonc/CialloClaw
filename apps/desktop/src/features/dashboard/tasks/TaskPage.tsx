@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { subscribeDeliveryReady, subscribeTask, subscribeTaskRuntime } from "@/rpc/subscriptions";
 import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
 import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
+import { readDashboardTaskDetailRouteState } from "@/features/dashboard/shared/dashboardTaskDetailNavigation";
 import { buildDashboardSafetyNavigationState } from "@/features/dashboard/shared/dashboardSafetyNavigation";
 import { resolveDashboardRoutePath } from "@/features/dashboard/shared/dashboardRouteTargets";
 import { dashboardModules } from "@/features/dashboard/shared/dashboardRoutes";
@@ -97,10 +98,10 @@ export function TaskPage() {
       return;
     }
 
-    const focusTaskId = (location.state as { focusTaskId?: string; openDetail?: boolean } | null)?.focusTaskId;
-    if (focusTaskId && allTasks.some((item) => item.task.task_id === focusTaskId)) {
-      setSelectedTaskId(focusTaskId);
-      if ((location.state as { openDetail?: boolean } | null)?.openDetail) {
+    const detailRouteState = readDashboardTaskDetailRouteState(location.state);
+    if (detailRouteState && allTasks.some((item) => item.task.task_id === detailRouteState.focusTaskId)) {
+      setSelectedTaskId(detailRouteState.focusTaskId);
+      if (detailRouteState.openDetail) {
         setDetailOpen(true);
       }
       navigate(location.pathname, { replace: true, state: null });
@@ -241,15 +242,13 @@ export function TaskPage() {
   async function handleResolvedOpen(result: Awaited<ReturnType<typeof openTaskArtifactForTask>> | Awaited<ReturnType<typeof openTaskDeliveryForTask>>) {
     const plan = resolveTaskOpenExecutionPlan(result);
     const openResultMessage = describeTaskOpenResultForCurrentTask(plan, selectedTaskId);
-
-    if (plan.mode === "task_detail" && plan.taskId) {
-      setSelectedTaskId(plan.taskId);
-      setDetailOpen(true);
-      showFeedback(openResultMessage ?? plan.feedback);
-      return;
-    }
-
-    showFeedback(await performTaskOpenExecution(plan));
+    showFeedback(await performTaskOpenExecution(plan, {
+      onOpenTaskDetail: ({ taskId }) => {
+        setSelectedTaskId(taskId);
+        setDetailOpen(true);
+        return openResultMessage ?? plan.feedback;
+      },
+    }));
   }
 
   const artifactOpenMutation = useMutation({

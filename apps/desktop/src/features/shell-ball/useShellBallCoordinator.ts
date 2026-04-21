@@ -23,6 +23,7 @@ import type { ShellBallInputSubmitResult } from "./useShellBallInteraction";
 import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import { readClipboardText } from "@/services/clipboardService";
 import { startTaskFromFiles } from "@/services/taskService";
+import { requestDashboardTaskDetailOpen } from "@/features/dashboard/shared/dashboardTaskDetailNavigation";
 import {
   createDefaultShellBallWindowSnapshot,
   createShellBallWindowSnapshot,
@@ -80,13 +81,27 @@ type ShellBallHelperSnapshotInput = {
 
 type ShellBallTaskOutputServiceModule = {
   openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source?: "rpc" | "mock") => Promise<unknown>;
-  performTaskOpenExecution: (plan: {
-    feedback: string;
-    mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
-    path: string | null;
-    taskId: string | null;
-    url: string | null;
-  }) => Promise<string>;
+  performTaskOpenExecution: (
+    plan: {
+      feedback: string;
+      mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+      path: string | null;
+      taskId: string | null;
+      url: string | null;
+    },
+    options?: {
+      onOpenTaskDetail?: (input: {
+        plan: {
+          feedback: string;
+          mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+          path: string | null;
+          taskId: string | null;
+          url: string | null;
+        };
+        taskId: string;
+      }) => Promise<string | void> | string | void;
+    },
+  ) => Promise<string>;
   resolveTaskOpenExecutionPlan: (result: unknown) => {
     feedback: string;
     mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
@@ -385,6 +400,7 @@ export function shouldAutoOpenShellBallDeliveryResult(
   }
 
   switch (deliveryResult.type) {
+    case "task_detail":
     case "workspace_document":
     case "open_file":
     case "reveal_in_folder":
@@ -669,7 +685,12 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
       const taskOutputService = await loadShellBallTaskOutputService();
       const openResult = await taskOutputService.openTaskDeliveryForTask(taskId, undefined, "rpc");
       const plan = taskOutputService.resolveTaskOpenExecutionPlan(openResult);
-      const feedback = await taskOutputService.performTaskOpenExecution(plan);
+      const feedback = await taskOutputService.performTaskOpenExecution(plan, {
+        onOpenTaskDetail: async ({ taskId: resolvedTaskId }) => {
+          await requestDashboardTaskDetailOpen(resolvedTaskId);
+          return plan.feedback;
+        },
+      });
 
       if (plan.mode === "copy_path" || feedback !== plan.feedback) {
         appendShellBallAutoOpenFeedback({
