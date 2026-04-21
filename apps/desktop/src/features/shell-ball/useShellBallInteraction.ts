@@ -751,7 +751,6 @@ export function useShellBallInteraction() {
   function handleRegionEnter() {
     regionActiveRef.current = true;
     setRegionActive(true);
-    dispatch("pointer_enter_hotspot", { regionActive: true, hoverRetained: false });
   }
 
   function handleRegionLeave() {
@@ -763,24 +762,16 @@ export function useShellBallInteraction() {
       setCurrentVoicePreview(null);
     }
 
-    dispatch("pointer_leave_region", {
-      regionActive: false,
-      hoverRetained: getHoverRetained(),
-    });
+    if (controllerRef.current?.getState() === "hover_input" && inputFocusedRef.current) {
+      dispatch("pointer_leave_region", {
+        regionActive: false,
+        hoverRetained: true,
+      });
+    }
   }
 
   function handleInputHoverChange(active: boolean) {
     inputHoveredRef.current = active;
-
-    if (active) {
-      dispatch("pointer_enter_hotspot", {
-        regionActive: regionActiveRef.current,
-        hoverRetained: true,
-      });
-      return;
-    }
-
-    syncHoverRetention();
   }
 
   async function handleSubmitText() {
