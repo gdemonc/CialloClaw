@@ -451,7 +451,9 @@ type TaskStepStore interface {
 	ListTaskSteps(ctx context.Context, taskID string, limit, offset int) ([]TaskStepRecord, int, error)
 }
 
-// LoopRuntimeStore defines normalized run/step/event/delivery_result persistence.
+// LoopRuntimeStore defines normalized run/step/event/delivery_result persistence
+// plus the task-facing citation snapshots that structured task detail can
+// rehydrate without relying on task_run compatibility rows.
 type LoopRuntimeStore interface {
 	SaveRun(ctx context.Context, record RunRecord) error
 	SaveSteps(ctx context.Context, records []StepRecord) error
@@ -459,6 +461,9 @@ type LoopRuntimeStore interface {
 	SaveDeliveryResult(ctx context.Context, record DeliveryResultRecord) error
 	GetRun(ctx context.Context, runID string) (RunRecord, error)
 	ListDeliveryResults(ctx context.Context, taskID string, limit, offset int) ([]DeliveryResultRecord, int, error)
+	ReplaceTaskCitations(ctx context.Context, taskID string, records []CitationRecord) error
+	GetLatestDeliveryResult(ctx context.Context, taskID string) (DeliveryResultRecord, bool, error)
+	ListTaskCitations(ctx context.Context, taskID string) ([]CitationRecord, error)
 	ListEvents(ctx context.Context, taskID, runID, eventType, createdAtFrom, createdAtTo string, limit, offset int) ([]EventRecord, int, error)
 }
 
