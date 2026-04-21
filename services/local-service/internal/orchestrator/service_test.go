@@ -500,6 +500,19 @@ func (s storageTestAdapter) SecretStorePath() string {
 }
 
 func newTestService() *Service {
+	toolRegistry := tools.NewRegistry()
+	if err := builtin.RegisterBuiltinTools(toolRegistry); err != nil {
+		panic(err)
+	}
+	if err := sidecarclient.RegisterPlaywrightTools(toolRegistry); err != nil {
+		panic(err)
+	}
+	if err := sidecarclient.RegisterOCRTools(toolRegistry); err != nil {
+		panic(err)
+	}
+	if err := sidecarclient.RegisterMediaTools(toolRegistry); err != nil {
+		panic(err)
+	}
 	return NewService(
 		contextsvc.NewService(),
 		intent.NewService(),
@@ -508,7 +521,7 @@ func newTestService() *Service {
 		memory.NewService(),
 		risk.NewService(),
 		model.NewService(modelConfig()),
-		tools.NewRegistry(),
+		toolRegistry,
 		plugin.NewService(),
 	)
 }
@@ -9230,8 +9243,27 @@ func TestServicePluginListReturnsStructuredCatalog(t *testing.T) {
 	if len(items) != 1 || items[0]["plugin_id"] != "ocr" {
 		t.Fatalf("expected plugin list to return filtered ocr plugin, got %+v", items)
 	}
-	if len(items[0]["capabilities"].([]map[string]any)) == 0 || len(items[0]["runtimes"].([]map[string]any)) == 0 {
-		t.Fatalf("expected plugin list item to expose capabilities and runtimes, got %+v", items[0])
+	runtime, ok := service.plugin.RuntimeState(plugin.RuntimeKindWorker, "ocr_worker")
+	if !ok {
+		t.Fatalf("expected ocr worker runtime to exist")
+	}
+	capabilities := items[0]["capabilities"].([]map[string]any)
+	if len(capabilities) != len(runtime.Capabilities) {
+		t.Fatalf("expected plugin list item to expose all registered capabilities, got %+v", capabilities)
+	}
+	for _, capability := range capabilities {
+		toolName := capability["tool_name"].(string)
+		tool, err := service.tools.Get(toolName)
+		if err != nil {
+			t.Fatalf("expected capability %q to resolve from registry: %v", toolName, err)
+		}
+		metadata := tool.Metadata()
+		if capability["display_name"] != metadata.DisplayName || capability["description"] != metadata.Description || capability["source"] != string(metadata.Source) || capability["risk_hint"] != metadata.RiskHint {
+			t.Fatalf("expected plugin list capability to mirror registry metadata for %q, got %+v", toolName, capability)
+		}
+	}
+	if len(items[0]["runtimes"].([]map[string]any)) == 0 {
+		t.Fatalf("expected plugin list item to expose runtimes, got %+v", items[0])
 	}
 	page := result["page"].(map[string]any)
 	if page["total"] != 1 || page["has_more"] != false {
@@ -9268,17 +9300,36 @@ func TestServicePluginDetailGetReturnsStructuredContracts(t *testing.T) {
 	if len(events) == 0 {
 		t.Fatalf("expected plugin detail events, got %+v", events)
 	}
+	runtime, ok := service.plugin.RuntimeState(plugin.RuntimeKindWorker, "ocr_worker")
+	if !ok {
+		t.Fatalf("expected ocr worker runtime to exist")
+	}
 	tools := result["tools"].([]map[string]any)
-	if len(tools) != 1 || tools[0]["tool_name"] != "ocr_image" {
-		t.Fatalf("expected plugin detail tools, got %+v", tools)
+	if len(tools) != len(runtime.Capabilities) {
+		t.Fatalf("expected plugin detail tools to match declared runtime capabilities, got %+v", tools)
 	}
-	inputContract := tools[0]["input_contract"].(map[string]any)
-	if inputContract["schema_ref"] != "tools/ocr_image/input" {
-		t.Fatalf("expected structured plugin input contract, got %+v", inputContract)
-	}
-	deliveryMapping := tools[0]["delivery_mapping"].(map[string]any)
-	if deliveryMapping["emits_tool_call"] != true {
-		t.Fatalf("expected delivery mapping to preserve tool call emission, got %+v", deliveryMapping)
+	for _, item := range tools {
+		toolName := item["tool_name"].(string)
+		tool, err := service.tools.Get(toolName)
+		if err != nil {
+			t.Fatalf("expected plugin detail tool %q to resolve from registry: %v", toolName, err)
+		}
+		metadata := tool.Metadata()
+		if item["display_name"] != metadata.DisplayName || item["description"] != metadata.Description || item["source"] != string(metadata.Source) || item["risk_hint"] != metadata.RiskHint || item["timeout_sec"] != metadata.TimeoutSec || item["supports_dry_run"] != metadata.SupportsDryRun {
+			t.Fatalf("expected plugin detail tool to mirror registry metadata for %q, got %+v", toolName, item)
+		}
+		inputContract := item["input_contract"].(map[string]any)
+		if inputContract["schema_ref"] != metadata.InputSchemaRef {
+			t.Fatalf("expected input contract schema ref to mirror registry metadata for %q, got %+v", toolName, inputContract)
+		}
+		outputContract := item["output_contract"].(map[string]any)
+		if outputContract["schema_ref"] != metadata.OutputSchemaRef {
+			t.Fatalf("expected output contract schema ref to mirror registry metadata for %q, got %+v", toolName, outputContract)
+		}
+		deliveryMapping := item["delivery_mapping"].(map[string]any)
+		if deliveryMapping["emits_tool_call"] != true {
+			t.Fatalf("expected delivery mapping to preserve tool call emission for %q, got %+v", toolName, deliveryMapping)
+		}
 	}
 }
 

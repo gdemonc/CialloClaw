@@ -3891,6 +3891,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `agent.plugin.detail.get` 是插件详情页的核心接口；当前阶段不单独拆 `agent.plugin.input.get`、`agent.plugin.output.get`。
 - `input_contract` 与 `output_contract` 由后端聚合整理后返回；前端不得解析后端源码或假设存在独立 schema 文件仓库。
 - `schema_ref` 作为后续正式 schema 文件化的兼容锚点保留；当前允许 `schema_json = null`。
+- 当后端仅冻结了 `ToolMetadata` 而尚未补齐字段级 schema 展开时，`input_contract.fields` 与 `output_contract.fields` 允许返回空数组，前端应优先消费 `schema_ref`、展示名、来源与风险信息。
 - `include_runtime`、`include_metrics`、`include_events` 省略时按 `true` 处理；若显式传 `false`，对应返回字段应保持空数组而不是缺字段。
 - 本接口只返回展示和合同信息，不允许前端借由详情页直接触发插件执行。
 
@@ -3943,10 +3944,10 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.tools[].supports_dry_run`                          | 是否支持 dry run |
 | `data.tools[].input_contract.schema_ref`                 | 输入合同 schema 引用 |
 | `data.tools[].input_contract.schema_json`                | 输入合同 schema JSON；当前可为 `null` |
-| `data.tools[].input_contract.fields`                     | 输入合同字段列表 |
+| `data.tools[].input_contract.fields`                     | 输入合同字段列表；若仅注册了 `schema_ref` 而未展开字段，可返回空数组 |
 | `data.tools[].output_contract.schema_ref`                | 输出合同 schema 引用 |
 | `data.tools[].output_contract.schema_json`               | 输出合同 schema JSON；当前可为 `null` |
-| `data.tools[].output_contract.fields`                    | 输出合同字段列表 |
+| `data.tools[].output_contract.fields`                    | 输出合同字段列表；若仅注册了 `schema_ref` 而未展开字段，可返回空数组 |
 | `data.tools[].delivery_mapping`                          | 该工具结果如何映射到 `tool_call / artifact / delivery_result` |
 | `meta.server_time`                                       | 服务端响应时间 |
 

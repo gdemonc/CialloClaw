@@ -2,9 +2,11 @@ package orchestrator
 
 import (
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/plugin"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
 )
 
 type pluginRuntimeRef struct {
@@ -55,18 +57,16 @@ type pluginToolContract struct {
 }
 
 type pluginCatalogEntry struct {
-	PluginID     string
-	Name         string
-	DisplayName  string
-	Summary      string
-	Version      string
-	Source       string
-	Entry        string
-	Enabled      bool
-	Permissions  []string
-	RuntimeRefs  []pluginRuntimeRef
-	Capabilities []pluginCapabilitySummary
-	Tools        []pluginToolContract
+	PluginID    string
+	Name        string
+	DisplayName string
+	Summary     string
+	Version     string
+	Source      string
+	Entry       string
+	Enabled     bool
+	Permissions []string
+	RuntimeRefs []pluginRuntimeRef
 }
 
 // PluginList returns the task-adjacent plugin catalog view documented by the
@@ -86,13 +86,14 @@ func (s *Service) PluginList(params map[string]any) (map[string]any, error) {
 	}
 
 	runtimeIndex := pluginRuntimeIndex(s.plugin)
+	toolIndex := pluginToolMetadataIndex(s.tools)
 	items := make([]map[string]any, 0)
 	for _, entry := range builtinPluginCatalog() {
 		runtimes := pluginRuntimesForEntry(entry, runtimeIndex)
 		if !matchesPluginListQuery(entry, runtimes, query, kinds, health) {
 			continue
 		}
-		items = append(items, pluginListItem(entry, runtimes))
+		items = append(items, pluginListItem(entry, runtimes, toolIndex))
 	}
 
 	total := len(items)
@@ -133,11 +134,11 @@ func (s *Service) PluginDetailGet(params map[string]any) (map[string]any, error)
 	events := pluginEventSlice(s.plugin)
 
 	result := map[string]any{
-		"plugin":        pluginManifestItem(entry),
+		"plugin":        pluginManifestItem(entry, runtimeIndex, s.tools),
 		"runtimes":      []map[string]any{},
 		"metrics":       []map[string]any{},
 		"recent_events": []map[string]any{},
-		"tools":         pluginToolItems(entry.Tools),
+		"tools":         pluginToolItems(pluginToolContractsForEntry(entry, runtimeIndex, s.tools)),
 	}
 	if includeRuntime {
 		result["runtimes"] = pluginRuntimeItems(pluginRuntimesForEntry(entry, runtimeIndex))
@@ -167,37 +168,6 @@ func builtinPluginCatalog() []pluginCatalogEntry {
 				{Name: "playwright_worker", Kind: plugin.RuntimeKindWorker},
 				{Name: "playwright_sidecar", Kind: plugin.RuntimeKindSidecar},
 			},
-			Capabilities: []pluginCapabilitySummary{
-				{ToolName: "page_read", DisplayName: "页面读取", Description: "Read visible page text and page metadata.", Source: "worker", RiskHint: "green"},
-				{ToolName: "page_search", DisplayName: "页面搜索", Description: "Search the current page for relevant strings.", Source: "worker", RiskHint: "green"},
-				{ToolName: "page_interact", DisplayName: "页面交互", Description: "Execute controlled browser interactions.", Source: "worker", RiskHint: "yellow"},
-				{ToolName: "structured_dom", DisplayName: "结构化 DOM", Description: "Capture structured DOM snapshots for downstream reasoning.", Source: "worker", RiskHint: "green"},
-			},
-			Tools: []pluginToolContract{
-				pluginToolContract{
-					ToolName:       "page_read",
-					DisplayName:    "页面读取",
-					Description:    "Read visible page text and metadata from the active browser page.",
-					Source:         "worker",
-					RiskHint:       "green",
-					TimeoutSec:     30,
-					SupportsDryRun: false,
-					InputContract: pluginDataContract{
-						SchemaRef: "tools/page_read/input",
-						Fields: []pluginContractField{
-							{Name: "url", Type: "string", Required: true, Description: "Target page URL.", Example: "https://example.com"},
-						},
-					},
-					OutputContract: pluginDataContract{
-						SchemaRef: "tools/page_read/output",
-						Fields: []pluginContractField{
-							{Name: "title", Type: "string", Required: true, Description: "Resolved page title."},
-							{Name: "text_content", Type: "string", Required: true, Description: "Visible page text."},
-						},
-					},
-					DeliveryMap: pluginDeliveryMapping{EmitsToolCall: true, ArtifactTypes: []string{}, DeliveryTypes: []string{"task_detail"}, CitationSourceTypes: []string{"web"}},
-				},
-			},
 		},
 		{
 			PluginID:    "ocr",
@@ -212,40 +182,6 @@ func builtinPluginCatalog() []pluginCatalogEntry {
 			RuntimeRefs: []pluginRuntimeRef{
 				{Name: "ocr_worker", Kind: plugin.RuntimeKindWorker},
 			},
-			Capabilities: []pluginCapabilitySummary{
-				{ToolName: "extract_text", DisplayName: "文本提取", Description: "Extract body text from files, images, and PDFs.", Source: "worker", RiskHint: "green"},
-				{ToolName: "ocr_image", DisplayName: "图片 OCR", Description: "Run OCR against one image.", Source: "worker", RiskHint: "green"},
-				{ToolName: "ocr_pdf", DisplayName: "PDF OCR", Description: "Extract text or OCR one PDF.", Source: "worker", RiskHint: "green"},
-			},
-			Tools: []pluginToolContract{
-				{
-					ToolName:       "ocr_image",
-					DisplayName:    "图片 OCR",
-					Description:    "通过 OCR worker 对图片执行文字识别",
-					Source:         "worker",
-					RiskHint:       "green",
-					TimeoutSec:     30,
-					SupportsDryRun: false,
-					InputContract: pluginDataContract{
-						SchemaRef: "tools/ocr_image/input",
-						Fields: []pluginContractField{
-							{Name: "path", Type: "string", Required: true, Description: "待识别图片路径", Example: "D:/workspace/invoice.png"},
-							{Name: "language", Type: "string", Required: false, Description: "OCR 语言提示", Example: "zh-CN"},
-						},
-					},
-					OutputContract: pluginDataContract{
-						SchemaRef: "tools/ocr_image/output",
-						Fields: []pluginContractField{
-							{Name: "path", Type: "string", Required: true, Description: "原始输入路径"},
-							{Name: "text", Type: "string", Required: true, Description: "识别后的正文文本"},
-							{Name: "language", Type: "string", Required: false, Description: "识别语言"},
-							{Name: "page_count", Type: "integer", Required: true, Description: "页数"},
-							{Name: "source", Type: "string", Required: true, Description: "来源运行时，默认 ocr_worker"},
-						},
-					},
-					DeliveryMap: pluginDeliveryMapping{EmitsToolCall: true, ArtifactTypes: []string{}, DeliveryTypes: []string{"task_detail"}, CitationSourceTypes: []string{}},
-				},
-			},
 		},
 		{
 			PluginID:    "media",
@@ -259,36 +195,6 @@ func builtinPluginCatalog() []pluginCatalogEntry {
 			Permissions: []string{"workspace:read", "workspace:write"},
 			RuntimeRefs: []pluginRuntimeRef{
 				{Name: "media_worker", Kind: plugin.RuntimeKindWorker},
-			},
-			Capabilities: []pluginCapabilitySummary{
-				{ToolName: "transcode_media", DisplayName: "媒体转码", Description: "Transcode media into a normalized output format.", Source: "worker", RiskHint: "yellow"},
-				{ToolName: "normalize_recording", DisplayName: "录音归一化", Description: "Normalize recorded audio for downstream use.", Source: "worker", RiskHint: "green"},
-				{ToolName: "extract_frames", DisplayName: "抽帧", Description: "Extract representative frames from one media file.", Source: "worker", RiskHint: "green"},
-			},
-			Tools: []pluginToolContract{
-				{
-					ToolName:       "extract_frames",
-					DisplayName:    "抽帧",
-					Description:    "Extract representative frames from one media file.",
-					Source:         "worker",
-					RiskHint:       "green",
-					TimeoutSec:     90,
-					SupportsDryRun: false,
-					InputContract: pluginDataContract{
-						SchemaRef: "tools/extract_frames/input",
-						Fields: []pluginContractField{
-							{Name: "path", Type: "string", Required: true, Description: "Source media path.", Example: "D:/workspace/demo.mp4"},
-						},
-					},
-					OutputContract: pluginDataContract{
-						SchemaRef: "tools/extract_frames/output",
-						Fields: []pluginContractField{
-							{Name: "output_paths", Type: "string[]", Required: true, Description: "Extracted frame file paths."},
-							{Name: "source", Type: "string", Required: true, Description: "Source runtime identifier."},
-						},
-					},
-					DeliveryMap: pluginDeliveryMapping{EmitsToolCall: true, ArtifactTypes: []string{"image"}, DeliveryTypes: []string{"task_detail"}, CitationSourceTypes: []string{"file"}},
-				},
 			},
 		},
 	}
@@ -454,13 +360,17 @@ func pluginRefKey(kind plugin.RuntimeKind, name string) string {
 	return string(kind) + "::" + strings.TrimSpace(name)
 }
 
-func pluginListItem(entry pluginCatalogEntry, runtimes []plugin.RuntimeState) map[string]any {
-	result := pluginManifestItem(entry)
+func pluginListItem(entry pluginCatalogEntry, runtimes []plugin.RuntimeState, toolIndex map[string]tools.ToolMetadata) map[string]any {
+	result := pluginManifestItemFromToolIndex(entry, pluginToolMetadataForEntry(entry, runtimes, toolIndex))
 	result["runtimes"] = pluginRuntimeItems(runtimes)
 	return result
 }
 
-func pluginManifestItem(entry pluginCatalogEntry) map[string]any {
+func pluginManifestItem(entry pluginCatalogEntry, runtimeIndex map[string]plugin.RuntimeState, registry *tools.Registry) map[string]any {
+	return pluginManifestItemFromToolIndex(entry, pluginToolMetadataForEntry(entry, pluginRuntimesForEntry(entry, runtimeIndex), pluginToolMetadataIndex(registry)))
+}
+
+func pluginManifestItemFromToolIndex(entry pluginCatalogEntry, metadata []tools.ToolMetadata) map[string]any {
 	return map[string]any{
 		"plugin_id":    entry.PluginID,
 		"name":         entry.Name,
@@ -471,8 +381,59 @@ func pluginManifestItem(entry pluginCatalogEntry) map[string]any {
 		"entry":        entry.Entry,
 		"enabled":      entry.Enabled,
 		"permissions":  append([]string(nil), entry.Permissions...),
-		"capabilities": pluginCapabilityItems(entry.Capabilities),
+		"capabilities": pluginCapabilityItems(pluginCapabilitySummaries(metadata)),
 	}
+}
+
+func pluginToolMetadataIndex(registry *tools.Registry) map[string]tools.ToolMetadata {
+	if registry == nil {
+		return map[string]tools.ToolMetadata{}
+	}
+	index := make(map[string]tools.ToolMetadata)
+	for _, item := range registry.List() {
+		index[item.Name] = item
+	}
+	return index
+}
+
+// pluginToolMetadataForEntry resolves one plugin's declared runtime capabilities
+// back to the registered tool metadata so query surfaces stay aligned with the
+// real execution registry.
+func pluginToolMetadataForEntry(entry pluginCatalogEntry, runtimes []plugin.RuntimeState, toolIndex map[string]tools.ToolMetadata) []tools.ToolMetadata {
+	names := make(map[string]struct{})
+	for _, runtime := range runtimes {
+		for _, capability := range runtime.Capabilities {
+			name := strings.TrimSpace(capability)
+			if name != "" {
+				names[name] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]tools.ToolMetadata, 0, len(names))
+	for name := range names {
+		if metadata, ok := toolIndex[name]; ok {
+			result = append(result, metadata)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+func pluginCapabilitySummaries(items []tools.ToolMetadata) []pluginCapabilitySummary {
+	result := make([]pluginCapabilitySummary, 0, len(items))
+	for _, item := range items {
+		result = append(result, pluginCapabilitySummary{
+			ToolName:    item.Name,
+			DisplayName: item.DisplayName,
+			Description: item.Description,
+			Source:      string(item.Source),
+			RiskHint:    item.RiskHint,
+		})
+	}
+	return result
 }
 
 func pluginCapabilityItems(items []pluginCapabilitySummary) []map[string]any {
@@ -487,6 +448,59 @@ func pluginCapabilityItems(items []pluginCapabilitySummary) []map[string]any {
 		})
 	}
 	return result
+}
+
+func pluginToolContractsForEntry(entry pluginCatalogEntry, runtimeIndex map[string]plugin.RuntimeState, registry *tools.Registry) []pluginToolContract {
+	metadata := pluginToolMetadataForEntry(entry, pluginRuntimesForEntry(entry, runtimeIndex), pluginToolMetadataIndex(registry))
+	result := make([]pluginToolContract, 0, len(metadata))
+	for _, item := range metadata {
+		result = append(result, pluginToolContract{
+			ToolName:       item.Name,
+			DisplayName:    item.DisplayName,
+			Description:    item.Description,
+			Source:         string(item.Source),
+			RiskHint:       item.RiskHint,
+			TimeoutSec:     item.TimeoutSec,
+			SupportsDryRun: item.SupportsDryRun,
+			InputContract:  pluginSchemaRefContract(item.InputSchemaRef),
+			OutputContract: pluginSchemaRefContract(item.OutputSchemaRef),
+			DeliveryMap:    pluginDeliveryMappingForMetadata(item),
+		})
+	}
+	return result
+}
+
+func pluginSchemaRefContract(schemaRef string) pluginDataContract {
+	return pluginDataContract{
+		SchemaRef:  strings.TrimSpace(schemaRef),
+		SchemaJSON: nil,
+		Fields:     nil,
+	}
+}
+
+// pluginDeliveryMappingForMetadata keeps the detail query payload honest about
+// the shared task/tool chain while limiting any non-registry assumptions to the
+// delivery surface that is not modeled in ToolMetadata yet.
+func pluginDeliveryMappingForMetadata(metadata tools.ToolMetadata) pluginDeliveryMapping {
+	mapping := pluginDeliveryMapping{
+		EmitsToolCall:       true,
+		ArtifactTypes:       []string{},
+		DeliveryTypes:       []string{"task_detail"},
+		CitationSourceTypes: []string{},
+	}
+	switch metadata.Name {
+	case "page_read", "page_search", "page_interact", "structured_dom":
+		mapping.CitationSourceTypes = []string{"web"}
+	case "extract_text", "ocr_image", "ocr_pdf":
+		mapping.CitationSourceTypes = []string{"file"}
+	case "transcode_media", "normalize_recording":
+		mapping.ArtifactTypes = []string{"generated_file"}
+		mapping.CitationSourceTypes = []string{"file"}
+	case "extract_frames":
+		mapping.ArtifactTypes = []string{"image"}
+		mapping.CitationSourceTypes = []string{"file"}
+	}
+	return mapping
 }
 
 func pluginToolItems(items []pluginToolContract) []map[string]any {

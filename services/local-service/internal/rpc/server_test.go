@@ -1423,7 +1423,7 @@ func TestDispatchReturnsPluginList(t *testing.T) {
 }
 
 func TestDispatchReturnsPluginDetail(t *testing.T) {
-	server := newTestServer()
+	server, toolRegistry, pluginService := newTestServerWithDependencies(nil)
 	response := server.dispatch(requestEnvelope{
 		JSONRPC: "2.0",
 		ID:      json.RawMessage(`"req-plugin-detail"`),
@@ -1440,8 +1440,24 @@ func TestDispatchReturnsPluginDetail(t *testing.T) {
 	if data["plugin"].(map[string]any)["plugin_id"] != "ocr" {
 		t.Fatalf("expected plugin detail query to resolve ocr plugin, got %+v", data)
 	}
-	if len(data["tools"].([]map[string]any)) == 0 {
-		t.Fatalf("expected plugin detail query to return tool contracts, got %+v", data)
+	runtime, ok := pluginService.RuntimeState(plugin.RuntimeKindWorker, "ocr_worker")
+	if !ok {
+		t.Fatalf("expected ocr worker runtime to exist")
+	}
+	toolItems := data["tools"].([]map[string]any)
+	if len(toolItems) != len(runtime.Capabilities) {
+		t.Fatalf("expected plugin detail query to return one contract per declared capability, got %+v", data)
+	}
+	for _, item := range toolItems {
+		toolName := item["tool_name"].(string)
+		tool, err := toolRegistry.Get(toolName)
+		if err != nil {
+			t.Fatalf("expected tool %q to exist in registry: %v", toolName, err)
+		}
+		metadata := tool.Metadata()
+		if item["display_name"] != metadata.DisplayName || item["source"] != string(metadata.Source) {
+			t.Fatalf("expected plugin detail payload to mirror registry metadata for %q, got %+v", toolName, item)
+		}
 	}
 }
 
@@ -1689,15 +1705,25 @@ func TestDispatchTaskSteerReturnsUpdatedTask(t *testing.T) {
 }
 
 func newTestServer() *Server {
-	return newTestServerWithModelClient(nil)
+	server, _, _ := newTestServerWithDependencies(nil)
+	return server
 }
 
 func newTestServerWithModelClient(client model.Client) *Server {
+	server, _, _ := newTestServerWithDependencies(client)
+	return server
+}
+
+func newTestServerWithDependencies(client model.Client) (*Server, *tools.Registry, *plugin.Service) {
 	toolRegistry := tools.NewRegistry()
 	_ = builtin.RegisterBuiltinTools(toolRegistry)
+	_ = sidecarclient.RegisterPlaywrightTools(toolRegistry)
+	_ = sidecarclient.RegisterOCRTools(toolRegistry)
+	_ = sidecarclient.RegisterMediaTools(toolRegistry)
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
 	pathPolicy, _ := platform.NewLocalPathPolicy(filepath.Join("workspace", "rpc-test"))
 	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
+	pluginService := plugin.NewService()
 	executionService := execution.NewService(
 		fileSystem,
 		stubExecutionCapability{result: tools.CommandExecutionResult{Stdout: "ok", ExitCode: 0}},
@@ -1711,7 +1737,7 @@ func newTestServerWithModelClient(client model.Client) *Server {
 		delivery.NewService(),
 		toolRegistry,
 		toolExecutor,
-		plugin.NewService(),
+		pluginService,
 	)
 	orch := orchestrator.NewService(
 		contextsvc.NewService(),
@@ -1726,7 +1752,7 @@ func newTestServerWithModelClient(client model.Client) *Server {
 			Endpoint: "https://api.openai.com/v1/responses",
 		}),
 		toolRegistry,
-		plugin.NewService(),
+		pluginService,
 	).WithExecutor(executionService)
 
 	server := NewServer(serviceconfig.RPCConfig{
@@ -1737,7 +1763,7 @@ func newTestServerWithModelClient(client model.Client) *Server {
 	server.now = func() time.Time {
 		return time.Date(2026, 4, 8, 10, 0, 0, 0, time.UTC)
 	}
-	return server
+	return server, toolRegistry, pluginService
 }
 
 func mustMarshal(t *testing.T, value any) json.RawMessage {
