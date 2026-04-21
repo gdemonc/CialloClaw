@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -312,8 +313,13 @@ func TestEngineUpdateSettingsMergesNestedBudgetPolicy(t *testing.T) {
 	if applyMode != "immediate" || needRestart {
 		t.Fatalf("expected budget policy update to stay immediate, got applyMode=%s needRestart=%v", applyMode, needRestart)
 	}
-	if len(updatedKeys) != 1 || updatedKeys[0] != "models.credentials.budget_policy" {
-		t.Fatalf("expected nested budget policy update key, got %+v", updatedKeys)
+	expectedKeys := []string{
+		"models.credentials.budget_policy.expensive_tool_categories",
+		"models.credentials.budget_policy.failure_signal_window",
+		"models.credentials.budget_policy.planner_retry_budget",
+	}
+	if !reflect.DeepEqual(updatedKeys, expectedKeys) {
+		t.Fatalf("expected nested budget policy leaf keys, got %+v", updatedKeys)
 	}
 	policyPatch := effective["models"].(map[string]any)["credentials"].(map[string]any)["budget_policy"].(map[string]any)
 	if policyPatch["failure_signal_window"] != 3 || policyPatch["planner_retry_budget"] != 2 {
@@ -327,6 +333,28 @@ func TestEngineUpdateSettingsMergesNestedBudgetPolicy(t *testing.T) {
 	categories := policy["expensive_tool_categories"].([]any)
 	if len(categories) != 3 {
 		t.Fatalf("expected updated expensive tool categories, got %+v", categories)
+	}
+}
+
+func TestEngineUpdateSettingsEmitsLeafModelKeys(t *testing.T) {
+	engine := NewEngine()
+	_, updatedKeys, _, _, err := engine.UpdateSettings(map[string]any{
+		"models": map[string]any{
+			"provider": "anthropic",
+			"base_url": "https://example.invalid/v1",
+			"model":    "claude-test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("update settings returned error: %v", err)
+	}
+	expectedKeys := []string{
+		"models.credentials.base_url",
+		"models.credentials.model",
+		"models.provider",
+	}
+	if !reflect.DeepEqual(updatedKeys, expectedKeys) {
+		t.Fatalf("expected leaf model keys, got %+v", updatedKeys)
 	}
 }
 
@@ -376,6 +404,72 @@ func TestEngineSessionStorePersistsSessionLifecycle(t *testing.T) {
 	session, err = storageService.SessionStore().GetSession(context.Background(), "sess_001")
 	if err != nil || session.Status != "idle" {
 		t.Fatalf("expected idle session record after completion, session=%+v err=%v", session, err)
+	}
+}
+
+func TestEngineInspectorConfigAndRuntimeBuffers(t *testing.T) {
+	engine := NewEngine()
+	updatedInspector := engine.UpdateInspectorConfig(map[string]any{
+		"task_sources":           []any{"D:/workspace/todos", "D:/workspace/backlog"},
+		"inspection_interval":    map[string]any{"unit": "minute", "value": 10},
+		"inspect_on_file_change": false,
+		"inspect_on_startup":     true,
+		"remind_before_deadline": false,
+		"remind_when_stale":      true,
+	})
+	if !reflect.DeepEqual(updatedInspector["task_sources"], []string{"D:/workspace/todos", "D:/workspace/backlog"}) {
+		t.Fatalf("expected inspector task sources to update, got %+v", updatedInspector)
+	}
+
+	task := engine.CreateTask(CreateTaskInput{
+		SessionID:   "sess_runtime_buffers",
+		Title:       "Runtime buffer task",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		CurrentStep: "generate_output",
+		RiskLevel:   "green",
+	})
+	if _, ok := engine.SetCitations(task.TaskID, []map[string]any{{"citation_id": "cit_001"}}); !ok {
+		t.Fatal("expected SetCitations to succeed")
+	}
+	if _, ok := engine.RecordLoopLifecycle(task.TaskID, "loop.round.completed", "waiting_for_retry", map[string]any{"round": 1}); !ok {
+		t.Fatal("expected RecordLoopLifecycle to succeed")
+	}
+	if _, ok := engine.AppendSteeringMessage(task.TaskID, "Please adjust the summary.", map[string]any{"type": "status", "text": "Adjusting summary"}); !ok {
+		t.Fatal("expected AppendSteeringMessage to succeed")
+	}
+	if _, ok := engine.UpdateSecuritySummary(task.TaskID, map[string]any{"security_status": "warning", "risk_level": "yellow"}); !ok {
+		t.Fatal("expected UpdateSecuritySummary to succeed")
+	}
+	if _, ok := engine.MarkWaitingApproval(task.TaskID, map[string]any{"approval_id": "appr_001"}, map[string]any{"type": "status", "text": "Waiting approval"}); !ok {
+		t.Fatal("expected MarkWaitingApproval to succeed")
+	}
+	approvals, total := engine.PendingApprovalRequests(10, 0)
+	if total != 1 || len(approvals) != 1 || approvals[0]["approval_id"] != "appr_001" {
+		t.Fatalf("expected one pending approval request, got total=%d approvals=%+v", total, approvals)
+	}
+	detail, ok := engine.TaskDetail(task.TaskID)
+	if !ok || len(detail.Citations) != 1 || detail.SecuritySummary["pending_authorizations"] != 1 {
+		t.Fatalf("expected task detail snapshot to expose citations and security summary, got %+v", detail)
+	}
+	notifications, ok := engine.PendingNotifications(task.TaskID)
+	if !ok || len(notifications) == 0 {
+		t.Fatalf("expected pending notifications after runtime events, got %+v ok=%v", notifications, ok)
+	}
+	drained, ok := engine.DrainNotifications(task.TaskID)
+	if !ok || len(drained) != len(notifications) {
+		t.Fatalf("expected DrainNotifications to return all buffered notifications, got %+v ok=%v", drained, ok)
+	}
+	notifications, ok = engine.PendingNotifications(task.TaskID)
+	if !ok || len(notifications) != 0 {
+		t.Fatalf("expected notification buffer to be empty after draining, got %+v ok=%v", notifications, ok)
+	}
+	if err := engine.DeleteTask(task.TaskID); err != nil {
+		t.Fatalf("expected DeleteTask to succeed, got %v", err)
+	}
+	if _, ok := engine.TaskDetail(task.TaskID); ok {
+		t.Fatal("expected deleted task to be removed from runtime")
 	}
 }
 

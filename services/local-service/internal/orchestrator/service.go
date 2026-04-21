@@ -1000,7 +1000,7 @@ func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 	task, ok := s.taskDetailFromStorage(taskID)
 	if runtimeTask, runtimeOK := s.runEngine.TaskDetail(taskID); runtimeOK {
 		if ok {
-			task = mergeStructuredTaskDetailCompatibility(task, runtimeTask)
+			task = mergeRuntimeTaskDetail(task, runtimeTask)
 		} else {
 			task = runtimeTask
 			ok = true
@@ -1067,6 +1067,55 @@ func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 		"security_summary":     securitySummary,
 		"runtime_summary":      runtimeSummary,
 	}, nil
+}
+
+// mergeRuntimeTaskDetail keeps first-class structured evidence authoritative but
+// lets the live runtime state win for task status fields when persistence is
+// temporarily stale.
+func mergeRuntimeTaskDetail(structuredTask, runtimeTask runengine.TaskRecord) runengine.TaskRecord {
+	merged := mergeStructuredTaskDetailCompatibility(structuredTask, runtimeTask)
+	if runtimeTask.Status != "" {
+		merged.Status = runtimeTask.Status
+	}
+	if runtimeTask.CurrentStep != "" {
+		merged.CurrentStep = runtimeTask.CurrentStep
+	}
+	if runtimeTask.CurrentStepStatus != "" {
+		merged.CurrentStepStatus = runtimeTask.CurrentStepStatus
+	}
+	if runtimeTask.UpdatedAt.After(merged.UpdatedAt) {
+		merged.UpdatedAt = runtimeTask.UpdatedAt
+	}
+	if runtimeTask.FinishedAt != nil {
+		if merged.FinishedAt == nil || runtimeTask.FinishedAt.After(*merged.FinishedAt) {
+			merged.FinishedAt = cloneTimePointer(runtimeTask.FinishedAt)
+		}
+	}
+	if runtimeTask.LoopStopReason != "" {
+		merged.LoopStopReason = runtimeTask.LoopStopReason
+	}
+	if len(runtimeTask.BubbleMessage) > 0 {
+		merged.BubbleMessage = cloneMap(runtimeTask.BubbleMessage)
+	}
+	if len(runtimeTask.PendingExecution) > 0 {
+		merged.PendingExecution = cloneMap(runtimeTask.PendingExecution)
+	}
+	if len(runtimeTask.TokenUsage) > 0 {
+		merged.TokenUsage = cloneMap(runtimeTask.TokenUsage)
+	}
+	if len(runtimeTask.LatestEvent) > 0 {
+		merged.LatestEvent = cloneMap(runtimeTask.LatestEvent)
+	}
+	if len(runtimeTask.LatestToolCall) > 0 {
+		merged.LatestToolCall = cloneMap(runtimeTask.LatestToolCall)
+	}
+	if len(runtimeTask.SteeringMessages) > 0 {
+		merged.SteeringMessages = append([]string(nil), runtimeTask.SteeringMessages...)
+	}
+	if !isEmptySnapshot(runtimeTask.Snapshot) {
+		merged.Snapshot = cloneTaskSnapshot(runtimeTask.Snapshot)
+	}
+	return merged
 }
 
 func (s *Service) buildTaskRuntimeSummary(task runengine.TaskRecord) map[string]any {

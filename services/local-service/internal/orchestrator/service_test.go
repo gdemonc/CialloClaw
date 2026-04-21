@@ -7914,6 +7914,53 @@ func TestServiceTaskDetailGetStructuredFallbackUsesSessionAndRunStores(t *testin
 	}
 }
 
+func TestServiceTaskDetailGetPrefersRuntimeStateWhenStructuredRowIsStale(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "runtime detail beats stale storage")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	runtimeTask := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_runtime_freshness",
+		Title:       "Runtime freshness task",
+		SourceType:  "hover_input",
+		Status:      "confirming_intent",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{"style": "key_points"}},
+		CurrentStep: "confirming_intent",
+		RiskLevel:   "green",
+	})
+	runtimeTask, ok := service.runEngine.BeginExecution(runtimeTask.TaskID, "generate_output", "Working on the response.")
+	if !ok {
+		t.Fatal("expected runtime task to begin execution")
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              runtimeTask.TaskID,
+		SessionID:           runtimeTask.SessionID,
+		RunID:               runtimeTask.RunID,
+		Title:               runtimeTask.Title,
+		SourceType:          runtimeTask.SourceType,
+		Status:              "confirming_intent",
+		IntentName:          "summarize",
+		IntentArgumentsJSON: `{"style":"key_points"}`,
+		PreferredDelivery:   runtimeTask.PreferredDelivery,
+		FallbackDelivery:    runtimeTask.FallbackDelivery,
+		CurrentStep:         "confirming_intent",
+		CurrentStepStatus:   "pending",
+		RiskLevel:           runtimeTask.RiskLevel,
+		StartedAt:           runtimeTask.StartedAt.Format(time.RFC3339Nano),
+		UpdatedAt:           runtimeTask.StartedAt.Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write stale structured task failed: %v", err)
+	}
+	detailResult, err := service.TaskDetailGet(map[string]any{"task_id": runtimeTask.TaskID})
+	if err != nil {
+		t.Fatalf("task detail get failed: %v", err)
+	}
+	task := detailResult["task"].(map[string]any)
+	if task["status"] != "processing" || task["current_step"] != "generate_output" {
+		t.Fatalf("expected runtime task state to override stale storage, got %+v", task)
+	}
+}
+
 func TestServiceTaskDetailGetStructuredFallbackBackfillsTaskRunEvidence(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "structured screen detail evidence")
 	if service.storage == nil {
@@ -9173,6 +9220,25 @@ func TestSettingsUpdatePersistsSecretOutsideRegularSettings(t *testing.T) {
 	}
 	if _, exists := models["stronghold"]; !exists {
 		t.Fatalf("expected stronghold status in settings response, got %+v", models)
+	}
+}
+
+func TestSettingsUpdateReturnsLeafModelKeys(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "settings leaf model keys")
+	result, err := service.SettingsUpdate(map[string]any{
+		"models": map[string]any{
+			"provider": "anthropic",
+			"base_url": "https://example.invalid/v1",
+			"model":    "claude-test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("settings update failed: %v", err)
+	}
+	updatedKeys := result["updated_keys"].([]string)
+	expectedKeys := []string{"models.base_url", "models.model", "models.provider"}
+	if !reflect.DeepEqual(updatedKeys, expectedKeys) {
+		t.Fatalf("expected leaf model updated keys, got %+v", updatedKeys)
 	}
 }
 
