@@ -87,6 +87,12 @@
 - `approval_request`：待授权对象，高风险动作必须先落到这里。
 - `audit_record`：审计对象，用于记录真实动作和结果。
 - `memory_summary`：长期记忆对象，用于镜子、偏好、阶段总结。
+- `plugin`：对外插件主对象，用于插件列表页和详情页承接插件基础信息、来源、权限与能力概览。
+- `plugin_runtime_state`：插件运行态对象，用于展示运行状态、健康度、传输方式、最近可见时间和能力摘要。
+- `plugin_metric_snapshot`：插件指标快照对象，用于展示启动次数、成功失败次数和最近运行时间。
+- `plugin_runtime_event`：插件运行事件对象，用于展示最近状态变化和健康事件。
+- `plugin_tool_contract`：插件工具合同对象，用于描述单个工具的输入合同、输出合同、风险提示与交付映射。
+- `plugin_data_contract`：插件数据合同对象，用于冻结 `schema_ref / schema_json / fields` 三层展示结构。
 
 ### 3.4 方法族说明
 
@@ -101,7 +107,8 @@
 - `agent.security.*`：安全卫士、授权、审计、恢复。
 - `agent.settings.*`：设置中心。
 - `agent.screen.*`：屏幕感知与场景推荐分析。
-- `agent.plugin.* / agent.model.* / agent.skill.*`：扩展能力方法组，当前多数为 planned。
+- `agent.plugin.*`：插件扩展能力方法组，负责插件列表、详情与运行态查询。
+- `agent.model.* / agent.skill.*`：扩展能力方法组，当前多数为 planned。
 
 ---
 
@@ -345,6 +352,14 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - 悬浮球主状态机、承接状态机、气泡生命周期都属于前端局部状态，不直接进入正式状态枚举。
 - 文档中未登记的状态值不得进入实现。
 
+### 5.18 插件扩展相关
+
+- `plugin_kind`：`worker / sidecar`
+- `plugin_source_type`：`builtin / local_dir / github / marketplace`
+- `plugin_health_status`：`unknown / healthy / degraded / failed / stopped / unavailable`
+- `plugin_tool_source_type`：`builtin / worker / sidecar`
+- `plugin_tool_contract.risk_hint`：对齐 `risk_level` 语义，当前允许返回 `green / yellow / red`
+
 ## 6. 错误码设计
 
 ### 6.1 分段
@@ -516,10 +531,15 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `agent.settings.get`
 - `agent.settings.update`
 
+#### E. 插件扩展
+
+- `agent.plugin.runtime.list`
+- `agent.plugin.list`
+- `agent.plugin.detail.get`
+
 ### 7.2 planned
 
 - `agent.mirror.memory.manage`
-- `agent.plugin.list`
 - `agent.plugin.enable`
 - `agent.plugin.disable`
 - `agent.model.list`
@@ -542,7 +562,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - 一键中断：复用 `agent.task.control`
 - **运行中补充 follow-up 指令** 统一使用 `agent.task.steer`，用于向当前任务追加 steering 信息。
 - **运行时事件查看与调试观察** 统一使用 `agent.task.events.list`，用于补充查看正式事件流，不替代 `task` 主对象查询。
-- **插件、多模型、技能安装** 当前阶段先通过 `agent.settings.get / update` 与仪表盘模块承接，待对象、权限与来源字段完全冻结后再升级为独立正式接口。
+- **插件扩展列表、插件详情与运行态展示** 统一使用 `agent.plugin.list`、`agent.plugin.detail.get`、`agent.plugin.runtime.list`；插件启停、安装以及多模型、技能安装当前阶段仍优先通过 `agent.settings.get / update` 与仪表盘模块承接，待对象、权限与来源字段完全冻结后再升级为独立正式接口。
 - **任务巡检、事项转任务** 统一使用 `agent.task_inspector.*` 与 `agent.notepad.*`。
 - **仪表盘首页、镜子、安全卫士** 统一使用 `agent.dashboard.*`、`agent.mirror.*`、`agent.security.*`。
 
@@ -3598,6 +3618,474 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
+## 8.5 插件扩展
+
+以下内容在不改变前述插件边界、Go service 统一编排与事件流约束的前提下，对插件扩展模块的 stable 查询接口进行详细展开。当前阶段只冻结列表、详情与运行态查询，不允许前端绕过协议直接触发插件执行。
+
+### 8.5.1 `agent.plugin.runtime.list`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：
+  - 用户打开插件扩展首页的运行态概览区时
+  - 用户进入插件详情页，需要刷新健康状态、指标和最近事件时
+  - 仪表盘或调试视图需要统一查看插件运行态时
+- **系统处理**：
+  - 查询当前已声明插件运行态
+  - 返回运行态列表、指标快照和最近事件
+  - 该接口只用于展示运行态，不承接插件执行
+- **入参**：请求链路头
+- **出参**：运行态列表、指标快照、最近事件
+
+补充约束：
+
+- `agent.plugin.runtime.list` 是插件扩展模块的运行态读侧接口，前端不得把它误解为“可直接调插件”的入口。
+- `data.items`、`data.metrics`、`data.events` 分别代表当前运行态快照、指标快照和最近事件列表；三者允许为空数组，但返回结构必须稳定。
+- 插件运行态事件仍通过统一 Notification 通道补充刷新；读侧查询以本接口为准。
+
+### agent.plugin.runtime.list 入参说明
+
+| 字段                        | 中文说明 |
+| --------------------------- | -------- |
+| `request_meta.trace_id`     | 请求链路追踪 ID |
+| `request_meta.client_time`  | 前端发起时间 |
+
+### agent.plugin.runtime.list 入参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_plugin_runtime_001",
+  "method": "agent.plugin.runtime.list",
+  "params": {
+    "request_meta": {
+      "trace_id": "trace_plugin_runtime_001",
+      "client_time": "2026-04-20T10:08:00Z"
+    }
+  }
+}
+```
+
+### agent.plugin.runtime.list 出参说明
+
+| 字段                            | 中文说明 |
+| ------------------------------- | -------- |
+| `data.items`                    | 插件运行态列表，对应 `plugin_runtime_state` 视图对象 |
+| `data.metrics`                  | 插件指标快照列表，对应 `plugin_metric_snapshot` 视图对象 |
+| `data.events`                   | 最近插件运行事件列表，对应 `plugin_runtime_event` 视图对象 |
+| `meta.server_time`              | 服务端响应时间 |
+
+### agent.plugin.runtime.list 出参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_plugin_runtime_001",
+  "result": {
+    "data": {
+      "items": [
+        {
+          "name": "ocr_worker",
+          "kind": "worker",
+          "status": "running",
+          "transport": "named_pipe",
+          "health": "healthy",
+          "last_seen_at": "2026-04-20T10:08:01Z",
+          "last_error": null,
+          "capabilities": ["extract_text", "ocr_image", "ocr_pdf"]
+        }
+      ],
+      "metrics": [
+        {
+          "name": "ocr_worker",
+          "kind": "worker",
+          "start_count": 3,
+          "success_count": 12,
+          "failure_count": 1,
+          "last_started_at": "2026-04-20T09:58:10Z",
+          "last_failed_at": "2026-04-20T09:20:00Z",
+          "last_seen_at": "2026-04-20T10:08:01Z"
+        }
+      ],
+      "events": [
+        {
+          "name": "ocr_worker",
+          "kind": "worker",
+          "event_type": "plugin.runtime.healthy",
+          "payload": {
+            "health": "healthy"
+          },
+          "created_at": "2026-04-20T10:08:01Z"
+        }
+      ]
+    },
+    "meta": {
+      "server_time": "2026-04-20T10:08:01Z"
+    },
+    "warnings": []
+  }
+}
+```
+
+---
+
+### 8.5.2 `agent.plugin.list`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：
+  - 用户打开插件扩展首页或插件列表页时
+  - 前端需要按关键字、插件类型或健康状态筛选插件卡片时
+- **系统处理**：
+  - 聚合插件基础信息、来源、权限、能力概览与当前运行态摘要
+  - 返回插件视图模型列表，而不是裸 `worker / sidecar` 运行实例列表
+- **入参**：分页参数、查询条件、插件类型过滤、健康状态过滤
+- **出参**：插件列表、分页信息
+
+补充约束：
+
+- `agent.plugin.list` 的目标对象是 `plugin`，不是运行中实例行；前端插件首页应以本接口返回的 `plugin_id` 作为主列表锚点。
+- 当前阶段插件来源可优先返回 `builtin`，`enabled` 也可先按真实后端能力返回稳定布尔值；前端不得因为当前多为内置插件而绕过正式字段。
+- 本接口只承接插件列表与筛选查询，不替代 `agent.plugin.runtime.list` 的运行态明细，也不承接插件启停。
+
+### agent.plugin.list 入参说明
+
+| 字段                        | 中文说明 |
+| --------------------------- | -------- |
+| `request_meta.trace_id`     | 请求链路追踪 ID |
+| `request_meta.client_time`  | 前端发起时间 |
+| `page.limit`                | 每页条数 |
+| `page.offset`               | 偏移量 |
+| `query`                     | 按插件名、展示名或摘要做模糊查询 |
+| `kinds`                     | 插件类型过滤，取值来自 `plugin_kind` |
+| `health`                    | 健康状态过滤，取值来自 `plugin_health_status` |
+
+### agent.plugin.list 入参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_plugin_list_001",
+  "method": "agent.plugin.list",
+  "params": {
+    "request_meta": {
+      "trace_id": "trace_plugin_list_001",
+      "client_time": "2026-04-20T10:00:00Z"
+    },
+    "page": {
+      "limit": 20,
+      "offset": 0
+    },
+    "query": "ocr",
+    "kinds": ["worker"],
+    "health": ["healthy", "unknown"]
+  }
+}
+```
+
+### agent.plugin.list 出参说明
+
+| 字段                                  | 中文说明 |
+| ------------------------------------- | -------- |
+| `data.items`                          | 插件列表，对应 `plugin` 视图对象列表 |
+| `data.items[].plugin_id`              | 插件稳定主键 |
+| `data.items[].display_name`           | 前端展示名称 |
+| `data.items[].summary`                | 插件摘要 |
+| `data.items[].version`                | 当前插件版本 |
+| `data.items[].source`                 | 插件来源，取值来自 `plugin_source_type` |
+| `data.items[].entry`                  | 插件入口描述 |
+| `data.items[].enabled`                | 是否启用 |
+| `data.items[].permissions`            | 权限声明列表 |
+| `data.items[].capabilities`           | 插件能力概览列表 |
+| `data.items[].runtimes`               | 关联运行态快照列表 |
+| `data.page`                           | 分页信息 |
+| `meta.server_time`                    | 服务端响应时间 |
+
+### agent.plugin.list 出参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_plugin_list_001",
+  "result": {
+    "data": {
+      "items": [
+        {
+          "plugin_id": "ocr",
+          "name": "ocr",
+          "display_name": "OCR Worker",
+          "summary": "Extract text from files, images and PDFs.",
+          "version": "builtin-1",
+          "source": "builtin",
+          "entry": "worker://ocr_worker",
+          "enabled": true,
+          "permissions": ["workspace:read"],
+          "capabilities": [
+            {
+              "tool_name": "extract_text",
+              "display_name": "文本提取",
+              "description": "通过 OCR worker 从文本文件、PDF 或图片中提取正文内容",
+              "source": "worker",
+              "risk_hint": "green"
+            },
+            {
+              "tool_name": "ocr_image",
+              "display_name": "图片 OCR",
+              "description": "通过 OCR worker 对图片执行文字识别",
+              "source": "worker",
+              "risk_hint": "green"
+            },
+            {
+              "tool_name": "ocr_pdf",
+              "display_name": "PDF OCR",
+              "description": "通过 OCR worker 对 PDF 执行文本提取或 OCR 识别",
+              "source": "worker",
+              "risk_hint": "green"
+            }
+          ],
+          "runtimes": [
+            {
+              "name": "ocr_worker",
+              "kind": "worker",
+              "status": "running",
+              "transport": "named_pipe",
+              "health": "healthy",
+              "last_seen_at": "2026-04-20T10:00:02Z",
+              "last_error": null,
+              "capabilities": ["extract_text", "ocr_image", "ocr_pdf"]
+            }
+          ]
+        }
+      ],
+      "page": {
+        "limit": 20,
+        "offset": 0,
+        "total": 1,
+        "has_more": false
+      }
+    },
+    "meta": {
+      "server_time": "2026-04-20T10:00:02Z"
+    },
+    "warnings": []
+  }
+}
+```
+
+---
+
+### 8.5.3 `agent.plugin.detail.get`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：
+  - 用户进入插件详情页时
+  - 前端需要展示某个插件下全部工具的入参合同、出参合同与交付映射时
+  - 详情页需要按需带出运行态、指标和最近事件时
+- **系统处理**：
+  - 查询插件基础信息
+  - 按需聚合运行态、指标和最近事件
+  - 一次性返回插件下全部工具的 `input_contract / output_contract`
+- **入参**：插件 ID、是否包含运行态、是否包含指标、是否包含最近事件
+- **出参**：插件详情、运行态、指标、最近事件、工具合同列表
+
+补充约束：
+
+- `agent.plugin.detail.get` 是插件详情页的核心接口；当前阶段不单独拆 `agent.plugin.input.get`、`agent.plugin.output.get`。
+- `input_contract` 与 `output_contract` 由后端聚合整理后返回；前端不得解析后端源码或假设存在独立 schema 文件仓库。
+- `schema_ref` 作为后续正式 schema 文件化的兼容锚点保留；当前允许 `schema_json = null`。
+- `include_runtime`、`include_metrics`、`include_events` 省略时按 `true` 处理；若显式传 `false`，对应返回字段应保持空数组而不是缺字段。
+- 本接口只返回展示和合同信息，不允许前端借由详情页直接触发插件执行。
+
+### agent.plugin.detail.get 入参说明
+
+| 字段                        | 中文说明 |
+| --------------------------- | -------- |
+| `request_meta.trace_id`     | 请求链路追踪 ID |
+| `request_meta.client_time`  | 前端发起时间 |
+| `plugin_id`                 | 目标插件稳定主键 |
+| `include_runtime`           | 是否返回运行态列表；缺省按 `true` 处理 |
+| `include_metrics`           | 是否返回指标快照；缺省按 `true` 处理 |
+| `include_events`            | 是否返回最近事件；缺省按 `true` 处理 |
+
+### agent.plugin.detail.get 入参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_plugin_detail_001",
+  "method": "agent.plugin.detail.get",
+  "params": {
+    "request_meta": {
+      "trace_id": "trace_plugin_detail_001",
+      "client_time": "2026-04-20T10:05:00Z"
+    },
+    "plugin_id": "ocr",
+    "include_runtime": true,
+    "include_metrics": true,
+    "include_events": true
+  }
+}
+```
+
+### agent.plugin.detail.get 出参说明
+
+| 字段                                                     | 中文说明 |
+| -------------------------------------------------------- | -------- |
+| `data.plugin`                                            | 插件基础信息，对应 `plugin` 视图对象 |
+| `data.runtimes`                                          | 关联运行态列表 |
+| `data.metrics`                                           | 关联指标快照列表 |
+| `data.recent_events`                                     | 最近插件事件列表 |
+| `data.tools`                                             | 插件工具合同列表，对应 `plugin_tool_contract` 视图对象 |
+| `data.tools[].tool_name`                                 | 工具内部名 |
+| `data.tools[].display_name`                              | 工具展示名 |
+| `data.tools[].description`                               | 工具说明 |
+| `data.tools[].source`                                    | 工具来源，取值来自 `plugin_tool_source_type` |
+| `data.tools[].risk_hint`                                 | 风险提示，语义对齐 `risk_level` |
+| `data.tools[].timeout_sec`                               | 工具超时秒数 |
+| `data.tools[].supports_dry_run`                          | 是否支持 dry run |
+| `data.tools[].input_contract.schema_ref`                 | 输入合同 schema 引用 |
+| `data.tools[].input_contract.schema_json`                | 输入合同 schema JSON；当前可为 `null` |
+| `data.tools[].input_contract.fields`                     | 输入合同字段列表 |
+| `data.tools[].output_contract.schema_ref`                | 输出合同 schema 引用 |
+| `data.tools[].output_contract.schema_json`               | 输出合同 schema JSON；当前可为 `null` |
+| `data.tools[].output_contract.fields`                    | 输出合同字段列表 |
+| `data.tools[].delivery_mapping`                          | 该工具结果如何映射到 `tool_call / artifact / delivery_result` |
+| `meta.server_time`                                       | 服务端响应时间 |
+
+### agent.plugin.detail.get 出参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_plugin_detail_001",
+  "result": {
+    "data": {
+      "plugin": {
+        "plugin_id": "ocr",
+        "name": "ocr",
+        "display_name": "OCR Worker",
+        "summary": "Extract text from files, images and PDFs.",
+        "version": "builtin-1",
+        "source": "builtin",
+        "entry": "worker://ocr_worker",
+        "enabled": true,
+        "permissions": ["workspace:read"]
+      },
+      "runtimes": [
+        {
+          "name": "ocr_worker",
+          "kind": "worker",
+          "status": "running",
+          "transport": "named_pipe",
+          "health": "healthy",
+          "last_seen_at": "2026-04-20T10:05:01Z",
+          "last_error": null,
+          "capabilities": ["extract_text", "ocr_image", "ocr_pdf"]
+        }
+      ],
+      "metrics": [
+        {
+          "name": "ocr_worker",
+          "kind": "worker",
+          "start_count": 3,
+          "success_count": 12,
+          "failure_count": 1,
+          "last_started_at": "2026-04-20T09:58:10Z",
+          "last_failed_at": "2026-04-20T09:20:00Z",
+          "last_seen_at": "2026-04-20T10:05:01Z"
+        }
+      ],
+      "recent_events": [
+        {
+          "name": "ocr_worker",
+          "kind": "worker",
+          "event_type": "plugin.runtime.healthy",
+          "payload": {
+            "health": "healthy"
+          },
+          "created_at": "2026-04-20T10:05:01Z"
+        }
+      ],
+      "tools": [
+        {
+          "tool_name": "ocr_image",
+          "display_name": "图片 OCR",
+          "description": "通过 OCR worker 对图片执行文字识别",
+          "source": "worker",
+          "risk_hint": "green",
+          "timeout_sec": 30,
+          "supports_dry_run": false,
+          "input_contract": {
+            "schema_ref": "tools/ocr_image/input",
+            "schema_json": null,
+            "fields": [
+              {
+                "name": "path",
+                "type": "string",
+                "required": true,
+                "description": "待识别图片路径",
+                "example": "D:/workspace/invoice.png"
+              },
+              {
+                "name": "language",
+                "type": "string",
+                "required": false,
+                "description": "OCR 语言提示",
+                "example": "zh-CN"
+              }
+            ]
+          },
+          "output_contract": {
+            "schema_ref": "tools/ocr_image/output",
+            "schema_json": null,
+            "fields": [
+              {
+                "name": "path",
+                "type": "string",
+                "required": true,
+                "description": "原始输入路径"
+              },
+              {
+                "name": "text",
+                "type": "string",
+                "required": true,
+                "description": "识别后的正文文本"
+              },
+              {
+                "name": "language",
+                "type": "string",
+                "required": false,
+                "description": "识别语言"
+              },
+              {
+                "name": "page_count",
+                "type": "integer",
+                "required": true,
+                "description": "页数"
+              },
+              {
+                "name": "source",
+                "type": "string",
+                "required": true,
+                "description": "来源运行时，默认 ocr_worker"
+              }
+            ]
+          },
+          "delivery_mapping": {
+            "emits_tool_call": true,
+            "artifact_types": [],
+            "delivery_types": ["task_detail"],
+            "citation_source_types": []
+          }
+        }
+      ]
+    },
+    "meta": {
+      "server_time": "2026-04-20T10:05:01Z"
+    },
+    "warnings": []
+  }
+}
+```
+
 ## 9. Notification / Subscription 说明
 
 ### 9.1 事件语义
@@ -3616,7 +4104,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 ### 9.2 前端使用约束
 
 - 订阅只用于状态同步，不绕过正式请求。
-- Notification 到达后，前端应以 `task_id` 为主键刷新状态，而不是临时拼装新对象。
+- Notification 到达后，前端应按正式主键刷新对应对象：`task.*` 以 `task_id` 为主键，`plugin.*` 以 `plugin_id` 或运行态主键 `name + kind` 为锚点，而不是临时拼装新对象。
 - 若通知缺少关键主键，视为非法事件。
 
 ---
