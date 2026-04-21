@@ -7,7 +7,26 @@ import { loadDashboardSettingsSnapshot, type DashboardSettingsSnapshotData, type
 export type DashboardSettingsPatch = Pick<
   AgentSettingsUpdateParams,
   "general" | "floating_ball" | "memory" | "task_automation" | "models"
->;
+> & {
+  data_log?: DesktopSettings["settings"]["data_log"];
+};
+
+function normalizeDashboardModelPatch(patch: DashboardSettingsPatch) {
+  if (patch.models) {
+    return patch.models as Partial<DesktopSettings["settings"]["models"]>;
+  }
+  if (!patch.data_log) {
+    return undefined;
+  }
+  return {
+    provider: patch.data_log.provider,
+    budget_auto_downgrade: patch.data_log.budget_auto_downgrade,
+    provider_api_key_configured: patch.data_log.provider_api_key_configured,
+    stronghold: patch.data_log.stronghold,
+    base_url: patch.data_log.base_url,
+    model: patch.data_log.model,
+  } satisfies Partial<DesktopSettings["settings"]["models"]>;
+}
 
 export type DashboardSettingsMutationResult = {
   snapshot: DashboardSettingsSnapshotData;
@@ -29,6 +48,19 @@ function mergeSettingsSnapshot(
   current: DesktopSettings["settings"],
   patch: DashboardSettingsPatch,
 ): DesktopSettings["settings"] {
+  const modelPatch = normalizeDashboardModelPatch(patch);
+  const dataLogPatch = patch.data_log ??
+    (modelPatch
+      ? {
+          provider: modelPatch.provider ?? current.data_log.provider,
+          budget_auto_downgrade: modelPatch.budget_auto_downgrade ?? current.data_log.budget_auto_downgrade,
+          provider_api_key_configured:
+            modelPatch.provider_api_key_configured ?? current.data_log.provider_api_key_configured,
+          stronghold: modelPatch.stronghold ?? current.data_log.stronghold,
+          base_url: modelPatch.base_url ?? current.data_log.base_url,
+          model: modelPatch.model ?? current.data_log.model,
+        }
+      : undefined);
   return {
     ...current,
     general: patch.general
@@ -71,12 +103,29 @@ function mergeSettingsSnapshot(
           },
         }
       : current.task_automation,
-    models: patch.models
+    data_log: dataLogPatch
+      ? {
+          ...current.data_log,
+          ...dataLogPatch,
+        }
+      : current.data_log,
+    models: modelPatch
       ? {
           ...current.models,
-          ...patch.models,
+          ...modelPatch,
         }
       : current.models,
+  };
+}
+
+function buildRpcSettingsPatch(patch: DashboardSettingsPatch): AgentSettingsUpdateParams {
+  return {
+    request_meta: createRequestMeta(),
+    general: patch.general,
+    floating_ball: patch.floating_ball,
+    memory: patch.memory,
+    task_automation: patch.task_automation,
+    models: normalizeDashboardModelPatch(patch),
   };
 }
 
@@ -115,10 +164,7 @@ export async function updateDashboardSettings(
   }
 
   try {
-    const response = await requestUpdateSettings({
-      request_meta: createRequestMeta(),
-      ...patch,
-    });
+    const response = await requestUpdateSettings(buildRpcSettingsPatch(patch));
 
     persistPatchedSettings(response.effective_settings as DashboardSettingsPatch);
     const snapshot = await loadDashboardSettingsSnapshot("rpc");

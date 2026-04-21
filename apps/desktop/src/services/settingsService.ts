@@ -135,26 +135,45 @@ function normalizeSettingsSnapshot(
     storedModels && "credentials" in storedModels && typeof storedModels.credentials === "object"
       ? (storedModels.credentials as Partial<ProtocolModelCredentials>)
       : undefined;
+  const hasFormalModelCredentials = storedModelCredentials !== undefined;
   const normalizedDataLog: ProtocolDataLogSettings = {
     ...defaults.settings.data_log,
     ...storedDataLog,
     // Shared RPC fields stay authoritative in the formal `models.credentials`
     // snapshot; the desktop-local `data_log` alias only mirrors them.
-    provider: storedModels?.provider ?? storedDataLog?.provider ?? defaults.settings.data_log.provider,
+    provider: hasFormalModelCredentials
+      ? storedModels?.provider ?? storedDataLog?.provider ?? defaults.settings.data_log.provider
+      : storedDataLog?.provider ?? storedModels?.provider ?? defaults.settings.data_log.provider,
     budget_auto_downgrade:
       storedModelCredentials?.budget_auto_downgrade ??
-      storedModels?.budget_auto_downgrade ??
-      storedDataLog?.budget_auto_downgrade ??
+      (hasFormalModelCredentials
+        ? storedModels?.budget_auto_downgrade ?? storedDataLog?.budget_auto_downgrade
+        : storedDataLog?.budget_auto_downgrade ?? storedModels?.budget_auto_downgrade) ??
       defaults.settings.data_log.budget_auto_downgrade,
     provider_api_key_configured:
       storedModelCredentials?.provider_api_key_configured ??
-      storedModels?.provider_api_key_configured ??
-      storedDataLog?.provider_api_key_configured ??
+      (hasFormalModelCredentials
+        ? storedModels?.provider_api_key_configured ?? storedDataLog?.provider_api_key_configured
+        : storedDataLog?.provider_api_key_configured ?? storedModels?.provider_api_key_configured) ??
       defaults.settings.data_log.provider_api_key_configured,
     stronghold:
-      storedModelCredentials?.stronghold ?? storedModels?.stronghold ?? storedDataLog?.stronghold ?? defaults.settings.data_log.stronghold,
-    base_url: storedModelCredentials?.base_url ?? storedModels?.base_url ?? storedDataLog?.base_url ?? defaults.settings.models.base_url,
-    model: storedModelCredentials?.model ?? storedModels?.model ?? storedDataLog?.model ?? defaults.settings.models.model,
+      storedModelCredentials?.stronghold ??
+      (hasFormalModelCredentials
+        ? storedModels?.stronghold ?? storedDataLog?.stronghold
+        : storedDataLog?.stronghold ?? storedModels?.stronghold) ??
+      defaults.settings.data_log.stronghold,
+    base_url:
+      storedModelCredentials?.base_url ??
+      (hasFormalModelCredentials
+        ? storedModels?.base_url ?? storedDataLog?.base_url
+        : storedDataLog?.base_url ?? storedModels?.base_url) ??
+      defaults.settings.models.base_url,
+    model:
+      storedModelCredentials?.model ??
+      (hasFormalModelCredentials
+        ? storedModels?.model ?? storedDataLog?.model
+        : storedDataLog?.model ?? storedModels?.model) ??
+      defaults.settings.models.model,
   };
   const normalizedModels: DesktopModelSettings = {
     ...defaults.settings.models,

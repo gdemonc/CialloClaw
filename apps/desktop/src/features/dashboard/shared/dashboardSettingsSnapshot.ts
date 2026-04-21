@@ -67,7 +67,7 @@ export async function loadDashboardSettingsSnapshot(source: DashboardSettingsSou
     const response = await getSettingsDetailed(params);
 
     return {
-      settings: response.data.settings,
+      settings: response.data.settings as unknown as SettingsSnapshot["settings"],
       source: "rpc",
       rpcContext: {
         serverTime: response.meta?.server_time ?? null,

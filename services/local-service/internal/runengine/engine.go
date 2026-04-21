@@ -1573,6 +1573,10 @@ func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string
 	defer e.mu.Unlock()
 	values = normalizeSettingsPatch(values)
 
+	nextSettings := cloneMap(e.settings)
+	if nextSettings == nil {
+		nextSettings = buildDefaultSettings()
+	}
 	updatedKeys := make([]string, 0)
 	effectiveSettings := map[string]any{}
 	applyMode := "immediate"
@@ -1584,13 +1588,13 @@ func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string
 			continue
 		}
 
-		currentSection, ok := e.settings[section].(map[string]any)
-		if !ok {
+		currentSection := cloneMap(mapValue(nextSettings, section))
+		if currentSection == nil {
 			currentSection = map[string]any{}
 		}
 
 		mergeMaps(currentSection, sectionPatch)
-		e.settings[section] = currentSection
+		nextSettings[section] = currentSection
 		effectiveSettings[section] = cloneMap(sectionPatch)
 
 		updatedKeys = append(updatedKeys, settingsPatchPaths(section, sectionPatch)...)
@@ -1603,10 +1607,11 @@ func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string
 		}
 	}
 	if e.settingsStore != nil {
-		if err := e.settingsStore.SaveSettingsSnapshot(context.Background(), normalizeSettingsPatch(cloneMap(e.settings))); err != nil {
+		if err := e.settingsStore.SaveSettingsSnapshot(context.Background(), normalizeSettingsPatch(cloneMap(nextSettings))); err != nil {
 			return nil, nil, "", false, err
 		}
 	}
+	e.settings = nextSettings
 
 	return effectiveSettings, updatedKeys, applyMode, needRestart, nil
 }
@@ -2013,8 +2018,9 @@ func (e *Engine) sessionRecordLocked(sessionID string) (storage.SessionRecord, b
 		if record == nil || record.SessionID != sessionID {
 			continue
 		}
-		latest = record
-		break
+		if latest == nil || record.UpdatedAt.After(latest.UpdatedAt) {
+			latest = record
+		}
 	}
 	if latest == nil {
 		return storage.SessionRecord{}, false

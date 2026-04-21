@@ -16,6 +16,16 @@ type storageTestAdapter struct {
 	databasePath string
 }
 
+type failingSettingsStore struct{}
+
+func (failingSettingsStore) SaveSettingsSnapshot(context.Context, map[string]any) error {
+	return errors.New("settings snapshot write failed")
+}
+
+func (failingSettingsStore) LoadSettingsSnapshot(context.Context) (map[string]any, error) {
+	return nil, nil
+}
+
 func (s storageTestAdapter) DatabasePath() string {
 	return s.databasePath
 }
@@ -386,6 +396,24 @@ func TestEngineSettingsStorePersistsAndReloadsSnapshot(t *testing.T) {
 	}
 }
 
+func TestEngineUpdateSettingsDoesNotMutateRuntimeWhenSnapshotPersistenceFails(t *testing.T) {
+	engine := NewEngine()
+	if err := engine.WithSettingsStore(failingSettingsStore{}); err != nil {
+		t.Fatalf("attach failing settings store failed: %v", err)
+	}
+	before := engine.Settings()
+	if _, _, _, _, err := engine.UpdateSettings(map[string]any{
+		"general": map[string]any{"language": "en-US"},
+		"models":  map[string]any{"provider": "anthropic", "model": "claude-3-7-sonnet"},
+	}); err == nil {
+		t.Fatal("expected update settings to fail when snapshot persistence fails")
+	}
+	after := engine.Settings()
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("expected runtime settings to remain unchanged on persistence failure, before=%+v after=%+v", before, after)
+	}
+}
+
 func TestEngineSessionStorePersistsSessionLifecycle(t *testing.T) {
 	storageService := storage.NewService(storageTestAdapter{databasePath: filepath.Join(t.TempDir(), "sessions-persist.db")})
 	defer func() { _ = storageService.Close() }()
@@ -404,6 +432,34 @@ func TestEngineSessionStorePersistsSessionLifecycle(t *testing.T) {
 	session, err = storageService.SessionStore().GetSession(context.Background(), "sess_001")
 	if err != nil || session.Status != "idle" {
 		t.Fatalf("expected idle session record after completion, session=%+v err=%v", session, err)
+	}
+}
+
+func TestEngineSessionStoreUsesMostRecentlyUpdatedTaskForSessionSnapshot(t *testing.T) {
+	storageService := storage.NewService(storageTestAdapter{databasePath: filepath.Join(t.TempDir(), "sessions-freshness.db")})
+	defer func() { _ = storageService.Close() }()
+	engine := NewEngine()
+	if err := engine.WithSessionStore(storageService.SessionStore()); err != nil {
+		t.Fatalf("attach session store failed: %v", err)
+	}
+	olderTask := engine.CreateTask(CreateTaskInput{SessionID: "sess_latest", Title: "Older task", SourceType: "hover_input", Status: "processing", CurrentStep: "collect_input", RiskLevel: "green"})
+	newerTask := engine.CreateTask(CreateTaskInput{SessionID: "sess_latest", Title: "Newer task", SourceType: "hover_input", Status: "processing", CurrentStep: "collect_input", RiskLevel: "green"})
+	if _, ok := engine.UpdateIntent(olderTask.TaskID, "Older task updated", map[string]any{"name": "summarize", "arguments": map[string]any{"style": "key_points"}}); !ok {
+		t.Fatal("expected UpdateIntent to succeed for older task")
+	}
+	session, err := storageService.SessionStore().GetSession(context.Background(), "sess_latest")
+	if err != nil {
+		t.Fatalf("get session failed: %v", err)
+	}
+	if session.Title != "Older task updated" {
+		t.Fatalf("expected session title to come from most recently updated task, got %+v", session)
+	}
+	newerRecord, ok := engine.GetTask(newerTask.TaskID)
+	if !ok {
+		t.Fatal("expected newer task to remain in runtime")
+	}
+	if session.UpdatedAt == newerRecord.UpdatedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("expected session updated_at to move beyond stale newer task snapshot, got %+v newer=%+v", session, newerRecord)
 	}
 }
 

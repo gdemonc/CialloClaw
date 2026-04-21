@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -193,6 +195,104 @@ func TestStrongholdSQLiteProviderRejectsMissingPath(t *testing.T) {
 	provider := NewStrongholdSQLiteProvider("   ")
 	if _, err := provider.Open(context.Background()); !errors.Is(err, ErrStrongholdUnavailable) {
 		t.Fatalf("expected missing formal provider path to return ErrStrongholdUnavailable, got %v", err)
+	}
+}
+
+func TestDPAPISecretStoreRoundTripAndCloseBehavior(t *testing.T) {
+	store, err := NewDPAPISecretStore(filepath.Join(t.TempDir(), "stronghold-formal-store.db"))
+	if runtime.GOOS != "windows" {
+		if err == nil || !errors.Is(err, ErrStrongholdUnavailable) {
+			t.Fatalf("expected unsupported platform to reject formal stronghold store, got %v", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("NewDPAPISecretStore returned error: %v", err)
+	}
+	record := SecretRecord{Namespace: "model", Key: "openai_responses_api_key", Value: "secret", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	if err := store.PutSecret(context.Background(), record); err != nil {
+		t.Fatalf("PutSecret returned error: %v", err)
+	}
+	resolved, err := store.GetSecret(context.Background(), record.Namespace, record.Key)
+	if err != nil || resolved.Value != record.Value {
+		t.Fatalf("GetSecret returned record=%+v err=%v", resolved, err)
+	}
+	if err := store.DeleteSecret(context.Background(), record.Namespace, record.Key); err != nil {
+		t.Fatalf("DeleteSecret returned error: %v", err)
+	}
+	if _, err := store.GetSecret(context.Background(), record.Namespace, record.Key); !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("expected deleted secret to disappear, got %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+	if err := store.PutSecret(context.Background(), record); !errors.Is(err, ErrSecretStoreAccessFailed) {
+		t.Fatalf("expected closed store PutSecret to fail, got %v", err)
+	}
+	if _, err := store.GetSecret(context.Background(), record.Namespace, record.Key); !errors.Is(err, ErrSecretStoreAccessFailed) {
+		t.Fatalf("expected closed store GetSecret to fail, got %v", err)
+	}
+	if err := store.DeleteSecret(context.Background(), record.Namespace, record.Key); !errors.Is(err, ErrSecretStoreAccessFailed) {
+		t.Fatalf("expected closed store DeleteSecret to fail, got %v", err)
+	}
+}
+
+func TestDPAPISecretStoreRejectsCorruptPayload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stronghold-corrupt.db")
+	if runtime.GOOS != "windows" {
+		if _, err := NewDPAPISecretStore(path); err == nil || !errors.Is(err, ErrStrongholdUnavailable) {
+			t.Fatalf("expected unsupported platform to reject formal stronghold store, got %v", err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, []byte("not-encrypted-payload"), 0o600); err != nil {
+		t.Fatalf("write corrupt payload failed: %v", err)
+	}
+	store, err := NewDPAPISecretStore(path)
+	if err != nil {
+		t.Fatalf("NewDPAPISecretStore returned error: %v", err)
+	}
+	if _, err := store.GetSecret(context.Background(), "model", "openai_responses_api_key"); !errors.Is(err, ErrSecretStoreAccessFailed) {
+		t.Fatalf("expected corrupt payload to fail with ErrSecretStoreAccessFailed, got %v", err)
+	}
+}
+
+func TestDPAPISecretStoreLoadAndSavePayloadHelpers(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		if _, err := NewDPAPISecretStore(filepath.Join(t.TempDir(), "stronghold-helper.db")); err == nil || !errors.Is(err, ErrStrongholdUnavailable) {
+			t.Fatalf("expected unsupported platform to reject formal stronghold store, got %v", err)
+		}
+		return
+	}
+	store, err := NewDPAPISecretStore(filepath.Join(t.TempDir(), "stronghold-helper.db"))
+	if err != nil {
+		t.Fatalf("NewDPAPISecretStore returned error: %v", err)
+	}
+	payload, err := store.loadPayloadLocked()
+	if err != nil || payload.Backend != "stronghold" || len(payload.Records) != 0 {
+		t.Fatalf("expected empty payload defaults, payload=%+v err=%v", payload, err)
+	}
+	if err := store.savePayloadLocked(strongholdFilePayload{}); err != nil {
+		t.Fatalf("savePayloadLocked returned error: %v", err)
+	}
+	payload, err = store.loadPayloadLocked()
+	if err != nil || payload.Backend != "stronghold" || payload.Records == nil {
+		t.Fatalf("expected saved payload to normalize backend and records, payload=%+v err=%v", payload, err)
+	}
+	encoded, err := json.Marshal(strongholdFilePayload{Records: map[string]SecretRecord{"model::openai_responses_api_key": {Namespace: "model", Key: "openai_responses_api_key", Value: "secret", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}}})
+	if err != nil {
+		t.Fatalf("marshal helper payload failed: %v", err)
+	}
+	protected, err := protectStrongholdBytes(encoded)
+	if err != nil {
+		t.Fatalf("protectStrongholdBytes returned error: %v", err)
+	}
+	if err := os.WriteFile(store.path, protected, 0o600); err != nil {
+		t.Fatalf("write protected payload failed: %v", err)
+	}
+	payload, err = store.loadPayloadLocked()
+	if err != nil || payload.Backend != "stronghold" || payload.Records["model::openai_responses_api_key"].Value != "secret" {
+		t.Fatalf("expected helper payload to round-trip, payload=%+v err=%v", payload, err)
 	}
 }
 
