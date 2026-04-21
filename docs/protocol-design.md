@@ -125,7 +125,7 @@
     "request_meta": {
       "trace_id": "trace_xxx",
       "client_time": "2026-04-09T10:00:00+08:00"
-    }
+	      }
   }
 }
 ```
@@ -313,10 +313,12 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `dragged_file`
 - `todo`
 - `error_signal`
+- `screen_capture`
 
 ### 5.13 气泡类型 `bubble_message_type`
 
 - `status`
+- `intent_confirm`
 - `result`
 
 ### 5.14 授权决策 / 状态
@@ -438,11 +440,6 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `1006003` `OCR_WORKER_FAILED`
 - `1006004` `MEDIA_WORKER_FAILED`
 
-#### 模型与前馈配置
-
-- `1008001` `MODEL_PROVIDER_NOT_FOUND`
-- `1008002` `MODEL_NOT_ALLOWED`
-
 #### 预留错误码（尚未登记到错误码真源）
 
 以下错误码常量保留给后续功能使用。在它们正式写入 `packages/protocol/errors/codes.ts` 前，只能作为规划预留，不得被文档误解为当前仓库已经实现：
@@ -463,6 +460,8 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ##### 模型与前馈配置预留
 
+- `1008001` `MODEL_PROVIDER_NOT_FOUND`
+- `1008002` `MODEL_NOT_ALLOWED`
 - `1008003` `SKILL_NOT_FOUND`
 - `1008004` `BLUEPRINT_NOT_FOUND`
 - `1008005` `PROMPT_TEMPLATE_NOT_FOUND`
@@ -600,10 +599,25 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `input.text`                 | 用户输入文本                   |
 | `input.input_mode`           | 输入模式，语音或文字           |
 | `context.page`               | 当前页面上下文                 |
+| `context.page.title`         | 当前页面标题                   |
+| `context.page.url`           | 当前页面 URL                   |
+| `context.page.app_name`      | 当前宿主应用名                 |
+| `context.page.window_title`  | 当前窗口标题                   |
+| `context.page.visible_text`  | 当前页面可见文本摘录           |
 | `context.selection.text`     | 当前选中文本                   |
 | `context.files`              | 当前附带文件列表               |
+| `context.screen.summary`     | 当前屏幕摘要，可用于视觉型任务上下文 |
+| `context.screen.visible_text` | 当前屏幕可见文本摘录          |
+| `context.behavior.last_action` | 最近行为信号，例如 `copy`    |
+| `context.behavior.dwell_millis` | 当前场景停留时长             |
 | `voice_meta`                 | 语音会话元信息                 |
 | `options.preferred_delivery` | 偏好的结果交付方式             |
+
+补充约束：
+
+- 当输入文本和 `context.page / context.screen / context.behavior` 同时表明用户想“查看当前页面/屏幕”时，后端可直接推断为受控视觉型任务，并继续走既有 `task -> approval_request -> event -> artifact / delivery_result` 链路。
+- 这类视觉型任务的 `task.source_type` 应返回 `screen_capture`，表示正式任务围绕当前屏幕采样展开，而不是普通 `hover_input` 文本处理。
+- 若客户端后续改为通过 `agent.task.start` 显式提交 `intent.name = screen_analyze`，后端应复用同一条主链路；`agent.input.submit` 不需要新增平行入口。
 
 ### agent.input.submit 入参示例
 
@@ -629,7 +643,17 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
       "page": {
         "title": "Q3 复盘草稿",
         "app_name": "browser",
-        "url": "local://current-page"
+        "url": "local://current-page",
+        "window_title": "Chrome - Q3 复盘草稿",
+        "visible_text": "发布说明缺少回滚策略和验收结论。"
+      },
+      "screen": {
+        "summary": "浏览器中打开了一页发布清单，页面中有缺失项提示。",
+        "visible_text": "Warning: release notes are incomplete."
+      },
+      "behavior": {
+        "last_action": "copy",
+        "dwell_millis": 18000
       },
       "selection": {
         "text": "这里是一段当前选中的补充上下文"
@@ -715,10 +739,25 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `input.text`               | 当 `input.type = text_selection` 时传入，表示选中文本内容 |
 | `input.files`              | 当 `input.type = file` 时传入，表示拖入文件列表 |
 | `input.page_context`       | 与输入对象关联的页面上下文，按需传入 |
+| `input.page_context.title` | 当前页面标题，可用于页面级任务标题与上下文冻结 |
+| `input.page_context.url`   | 当前页面 URL |
+| `input.page_context.app_name` | 当前宿主应用名 |
+| `input.page_context.window_title` | 当前窗口标题 |
+| `input.page_context.visible_text` | 当前页面可见文本摘录 |
 | `context.selection.text`   | 当前选区补充文本，按需传入 |
 | `context.files`            | 补充文件上下文，按需传入 |
+| `context.screen.summary`   | 当前屏幕摘要，可用于视觉型任务上下文 |
+| `context.screen.visible_text` | 当前屏幕可见文本摘录 |
+| `context.behavior.last_action` | 最近行为信号，例如 `copy` |
+| `context.behavior.dwell_millis` | 当前场景停留时长 |
 | `delivery.preferred`       | 优先交付方式 |
 | `delivery.fallback`        | 兜底交付方式 |
+
+补充约束：
+
+- 当输入文本和 `page_context / screen / behavior` 同时表明用户想“查看当前页面/屏幕”时，后端可直接推断为受控视觉型任务，并继续走既有 `task -> approval_request -> event -> artifact / delivery_result` 链路。
+- 这类视觉型任务的 `task.source_type` 应返回 `screen_capture`，表示正式任务围绕当前屏幕采样展开，而不是普通 `hover_input` 文本处理。
+- 若客户端已显式提供 `intent.name = screen_analyze`，后端应复用同一条主链路；若客户端未显式提供 intent，也不应要求前端额外发明平行入口。
 
 ### agent.task.start 入参示例
 
@@ -741,6 +780,8 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
       "type": "text_selection",
       "text": "这里放用户选中的文本内容",
       "page_context": {
+        "app_name": "Chrome",
+        "url": "https://example.com/release",
         "image_url": "xxx.png"
       }
     },
@@ -801,6 +842,13 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
   }
 }
 ```
+
+---
+
+补充说明：
+
+- `task.source_type` 当前稳定取值至少包括 `voice`、`hover_input`、`selected_text`、`dragged_file`、`todo`、`error_signal`、`screen_capture`。
+- 其中 `screen_capture` 表示该任务虽然可能由自然语言触发，但其正式执行对象已经切换为“当前屏幕/页面采样证据”，因此后续会进入授权、artifact 证据和交付链。
 
 ---
 
@@ -1476,13 +1524,15 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户进入任务详情页时
-- **系统处理**：返回任务头部、时间线、成果、记忆引用、安全摘要与单个正式安全锚点
+- **系统处理**：返回任务头部、时间线、成果、正式引用、记忆引用、安全摘要与单个正式安全锚点
 - **入参**：任务 ID
 - **出参**：任务详情对象
 
 补充约束：
 
 - `approval_request` 是任务详情里的单个安全锚点，只在当前任务处于 `waiting_auth` 且仍持有活跃正式授权对象时返回；否则返回 `null`。
+- `authorization_record` 返回当前任务最近一条正式授权记录；若任务还没有进入授权决策阶段则返回 `null`。
+- `audit_record` 返回当前任务最近一条正式审计记录；若当前任务还没有正式审计记录则返回 `null`。
 - 该字段只服务当前 task 的详情承接，不替代 `agent.security.pending.list` 对全局待确认项的聚合查询。
 - `security_summary.pending_authorizations` 在任务详情中收敛为 `0 | 1`，仅反映当前 task 是否存在这一个活跃安全锚点。
 - `security_summary.latest_restore_point` 的正式类型为 `RecoveryPoint | null`。
@@ -1525,7 +1575,10 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.citations`         | 正式引用列表；可携带截图证据、OCR 摘要和引用片段的结构化元信息 |
 | `data.mirror_references` | 命中的镜子记忆 |
 | `data.approval_request`  | 当前任务的正式安全锚点 |
+| `data.authorization_record` | 当前任务最近一条正式授权记录 |
+| `data.audit_record`      | 当前任务最近一条正式审计记录 |
 | `data.security_summary`  | 安全摘要       |
+| `data.runtime_summary`   | 运行态摘要，包含最新 runtime event、停止原因、最近失败错误码 / 分类 / 摘要与 observation signals |
 
 其中 `data.timeline` 条目对应对外 `task_step` / `task_steps` 视图对象，不直接暴露内核 `step` / `steps`。
 
@@ -1609,6 +1662,25 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
         }
       ],
       "approval_request": null,
+      "authorization_record": {
+        "authorization_record_id": "auth_001",
+        "task_id": "task_201",
+        "approval_id": "appr_001",
+        "decision": "allow_once",
+        "remember_rule": false,
+        "operator": "user",
+        "created_at": "2026-04-07T10:39:40+08:00"
+      },
+      "audit_record": {
+        "audit_id": "audit_001",
+        "task_id": "task_201",
+        "type": "execution",
+        "action": "execute_task",
+        "summary": "已根据正式授权完成摘要生成。",
+        "target": "workspace/Q3复盘.md",
+        "result": "success",
+        "created_at": "2026-04-07T10:40:10+08:00"
+      },
       "security_summary": {
         "security_status": "normal",
         "risk_level": "green",
@@ -1620,6 +1692,16 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
           "created_at": "2026-04-07T10:39:58+08:00",
           "objects": ["workspace/Q3复盘.md"]
         }
+      },
+      "runtime_summary": {
+        "events_count": 4,
+        "latest_event_type": "loop.round.completed",
+        "active_steering_count": 0,
+        "latest_failure_code": null,
+        "latest_failure_category": null,
+        "latest_failure_summary": null,
+        "loop_stop_reason": null,
+        "observation_signals": ["page_title", "visible_text"]
       }
     },
     "meta": {
@@ -2569,6 +2651,20 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.summary`    | 统计摘要     |
 | `data.highlights` | 亮点信息列表 |
 
+当 `module = "tasks"` 时，`data.summary` 在通用统计摘要之外还会补充以下任务模块字段：
+
+| 字段                                  | 中文说明 |
+| ------------------------------------- | -------- |
+| `data.summary.processing_tasks`       | 当前未完成任务中处于 `processing` 的数量 |
+| `data.summary.waiting_auth_tasks`     | 当前未完成任务中处于 `waiting_auth` 的数量 |
+| `data.summary.blocked_tasks`          | 当前未完成任务中处于 `blocked`、`failed`、`ended_unfinished` 或 `paused` 的数量 |
+| `data.summary.focus_task_id`          | 当前焦点任务的 `task_id`，用于把任务模块运行态与 `agent.dashboard.overview.get` 的 `focus_summary.task_id` 对齐 |
+| `data.summary.focus_runtime_summary`  | 当前焦点任务的运行态摘要，仅当 `focus_task_id` 与前端持有的焦点任务一致时才应被展示 |
+| `data.summary.focus_runtime_summary.events_count` | 焦点任务累计运行事件数 |
+| `data.summary.focus_runtime_summary.latest_event_type` | 焦点任务最近一个关键运行事件类型 |
+| `data.summary.focus_runtime_summary.active_steering_count` | 焦点任务当前待消费的 steering 条数 |
+| `data.summary.focus_runtime_summary.loop_stop_reason` | 焦点任务最近一次 loop 停止原因 |
+
 ### agent.dashboard.module.get 出参示例
 
 ```json
@@ -2577,18 +2673,28 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
   "id": "req_dashboard_module_001",
   "result": {
     "data": {
-      "module": "mirror",
-      "tab": "daily_summary",
+      "module": "tasks",
+      "tab": "focus",
       "summary": {
         "completed_tasks": 3,
         "generated_outputs": 5,
         "authorizations_used": 1,
-        "exceptions": 0
+        "exceptions": 0,
+        "processing_tasks": 2,
+        "waiting_auth_tasks": 1,
+        "blocked_tasks": 1,
+        "focus_task_id": "task_focus_001",
+        "focus_runtime_summary": {
+          "events_count": 6,
+          "latest_event_type": "loop.retrying",
+          "active_steering_count": 2,
+          "loop_stop_reason": "waiting_for_user_confirmation"
+        }
       },
       "highlights": [
-        "完成了 3 项内容整理任务",
-        "生成了 1 份方案稿和 2 份摘要",
-        "命中 2 条历史偏好记忆"
+        "焦点任务仍在执行中，当前步骤为 gather_context。",
+        "最近停止原因：waiting_for_user_confirmation。",
+        "当前仍有 2 条追加要求待消费。"
       ]
     },
     "meta": {
@@ -3305,7 +3411,6 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.settings.models.credentials.provider_api_key_configured` | 当前提供方 API Key 是否已配置；只返回布尔状态，不返回明文 |
 | `data.settings.models.credentials.base_url`          | 模型服务基地址 |
 | `data.settings.models.credentials.model`             | 当前生效模型名 |
-| `data.settings.models.credentials.stronghold`        | 当前 Stronghold/secret backend 诊断摘要 |
 | `meta.server_time`                                   | 服务端响应时间 |
 
 ### agent.settings.get 出参示例
@@ -3384,53 +3489,32 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户修改设置并点击保存时
-- **系统处理**：按分组写入设置并返回生效结果；支持 `general / floating_ball / memory / task_automation / models` 五个正式设置分组的字段更新；`models.api_key` 只用于当前请求写入 Stronghold，不会进入正式设置快照或回传明文
+- **系统处理**：写入设置并返回生效结果；`models.api_key` 只用于当前请求写入 Stronghold，不会进入正式设置快照或回传明文
 - **入参**：要更新的设置项
 - **出参**：已更新字段、生效设置、生效方式、是否需重启
 
 补充约束：
 
-- `agent.settings.update` 支持对 `general / floating_ball / memory / task_automation / models` 五个正式分组做部分更新；未传入的分组或字段保持原值，不得被隐式清空。
-- 本接口的字段覆盖范围应与设置面板可见项和 `agent.settings.get` 的正式分组保持一致，避免前端把“可见但未写入”的设置误判为保存失败或未受支持。
-- `general`、`floating_ball`、`memory`、`task_automation` 按分组结构更新；`models` 保持写入导向结构，使用扁平字段提交提供方、凭证和模型选择。
-- 本接口响应里的 `effective_settings` 只要求返回本次提交后对应字段的生效值；返回路径应与请求对象路径保持一致，便于前端直接对照保存结果。
+- `agent.settings.update` 的 `models` 采用写入导向结构，使用扁平字段提交提供方、凭证和模型选择。
+- 本接口响应里的 `effective_settings.models.*` 保持与更新请求相同的扁平路径，便于前端直接对照本次保存结果。
 - `models.api_key` 仅在本次请求内使用；响应体里只通过 `provider_api_key_configured` 回传布尔状态。
 
 ### agent.settings.update 入参说明
 
-| 字段                                               | 中文说明 |
-| -------------------------------------------------- | -------- |
-| `request_meta.trace_id`                            | 请求链路追踪 ID |
-| `request_meta.client_time`                         | 前端发起时间 |
-| `general.language`                                 | 界面语言 |
-| `general.auto_launch`                              | 是否开机自启动 |
-| `general.theme_mode`                               | 主题模式，取值来自 `theme_mode` |
-| `general.voice_notification_enabled`               | 是否开启语音通知 |
-| `general.voice_type`                               | 语音播报音色 |
-| `general.download.workspace_path`                  | 默认工作区路径 |
-| `general.download.ask_before_save_each_file`       | 每次保存文件前是否再次确认 |
-| `floating_ball.auto_snap`                          | 悬浮球是否自动吸边 |
-| `floating_ball.idle_translucent`                   | 空闲时是否半透明 |
-| `floating_ball.position_mode`                      | 悬浮球位置模式，取值来自 `position_mode` |
-| `floating_ball.size`                               | 悬浮球尺寸档位 |
-| `memory.enabled`                                   | 是否启用记忆 |
-| `memory.lifecycle`                                 | 记忆保留周期 |
-| `memory.work_summary_interval.unit`                | 工作总结刷新周期单位，取值来自 `time_unit` |
-| `memory.work_summary_interval.value`               | 工作总结刷新周期数值 |
-| `memory.profile_refresh_interval.unit`             | 画像刷新周期单位，取值来自 `time_unit` |
-| `memory.profile_refresh_interval.value`            | 画像刷新周期数值 |
-| `task_automation.inspect_on_startup`               | 启动时是否自动巡检 |
-| `task_automation.inspect_on_file_change`           | 文件变化时是否自动巡检 |
-| `task_automation.inspection_interval.unit`         | 巡检周期单位，取值来自 `time_unit` |
-| `task_automation.inspection_interval.value`        | 巡检周期数值 |
-| `task_automation.task_sources`                     | 巡检任务来源目录列表 |
-| `task_automation.remind_before_deadline`           | 是否在截止前提醒 |
-| `task_automation.remind_when_stale`                | 是否对长期未处理事项提醒 |
-| `models.provider`                                  | 要切换到的模型提供方 |
-| `models.budget_auto_downgrade`                     | 预算不足时是否自动降级 |
-| `models.api_key`                                   | 当前请求临时写入 Stronghold 的 API Key；保存后不回显 |
-| `models.base_url`                                  | 模型服务基地址 |
-| `models.model`                                     | 目标模型名 |
+| 字段                                      | 中文说明 |
+| ----------------------------------------- | -------- |
+| `request_meta.trace_id`                   | 请求链路追踪 ID |
+| `request_meta.client_time`                | 前端发起时间 |
+| `memory.enabled`                          | 是否启用记忆 |
+| `memory.lifecycle`                        | 记忆保留周期 |
+| `task_automation.inspection_interval.unit` | 巡检周期单位，取值来自 `time_unit` |
+| `task_automation.inspection_interval.value` | 巡检周期数值 |
+| `task_automation.inspect_on_file_change`  | 文件变化时是否自动巡检 |
+| `models.provider`                         | 要切换到的模型提供方 |
+| `models.budget_auto_downgrade`            | 预算不足时是否自动降级 |
+| `models.api_key`                          | 当前请求临时写入 Stronghold 的 API Key；保存后不回显 |
+| `models.base_url`                         | 模型服务基地址 |
+| `models.model`                            | 目标模型名 |
 
 ### agent.settings.update 入参示例
 
@@ -3444,54 +3528,23 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
       "trace_id": "trace_settings_update_001",
       "client_time": "2026-04-07T11:06:00+08:00"
     },
-    "general": {
-      "language": "zh-CN",
-      "auto_launch": true,
-      "theme_mode": "dark",
-      "voice_notification_enabled": true,
-      "voice_type": "default_female",
-      "download": {
-        "workspace_path": "D:/CialloClawWorkspace",
-        "ask_before_save_each_file": true
-      }
-    },
-    "floating_ball": {
-      "auto_snap": true,
-      "idle_translucent": true,
-      "position_mode": "draggable",
-      "size": "medium"
-    },
     "memory": {
       "enabled": true,
-      "lifecycle": "30d",
-      "work_summary_interval": {
-        "unit": "day",
-        "value": 7
-      },
-      "profile_refresh_interval": {
-        "unit": "week",
-        "value": 2
-      }
+      "lifecycle": "30d"
     },
     "task_automation": {
-      "inspect_on_startup": true,
-      "inspect_on_file_change": true,
       "inspection_interval": {
         "unit": "minute",
         "value": 15
       },
-      "task_sources": [
-        "D:/workspace/todos"
-      ],
-      "remind_before_deadline": true,
-      "remind_when_stale": false
+      "inspect_on_file_change": true
     },
     "models": {
       "provider": "openai",
       "budget_auto_downgrade": true,
       "api_key": "sk-example",
       "base_url": "https://api.openai.com/v1",
-      "model": "gpt-4.1"
+      "model": "gpt-3.5-turbo"
     }
   }
 }
@@ -3499,42 +3552,22 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ### agent.settings.update 出参说明
 
-| 字段                                                            | 中文说明 |
-| --------------------------------------------------------------- | -------- |
-| `data.updated_keys`                                             | 已更新字段列表，字段路径与请求对象路径一致 |
-| `data.effective_settings.general.language`                      | 生效后的界面语言 |
-| `data.effective_settings.general.auto_launch`                   | 生效后的开机自启动开关 |
-| `data.effective_settings.general.theme_mode`                    | 生效后的主题模式 |
-| `data.effective_settings.general.voice_notification_enabled`    | 生效后的语音通知开关 |
-| `data.effective_settings.general.voice_type`                    | 生效后的语音播报音色 |
-| `data.effective_settings.general.download.workspace_path`       | 生效后的默认工作区路径 |
-| `data.effective_settings.general.download.ask_before_save_each_file` | 生效后的保存前确认开关 |
-| `data.effective_settings.floating_ball.auto_snap`               | 生效后的自动吸边开关 |
-| `data.effective_settings.floating_ball.idle_translucent`        | 生效后的空闲半透明开关 |
-| `data.effective_settings.floating_ball.position_mode`           | 生效后的悬浮球位置模式 |
-| `data.effective_settings.floating_ball.size`                    | 生效后的悬浮球尺寸档位 |
-| `data.effective_settings.memory.enabled`                        | 生效后的记忆开关 |
-| `data.effective_settings.memory.lifecycle`                      | 生效后的记忆保留周期 |
-| `data.effective_settings.memory.work_summary_interval.unit`     | 生效后的工作总结刷新周期单位 |
-| `data.effective_settings.memory.work_summary_interval.value`    | 生效后的工作总结刷新周期数值 |
-| `data.effective_settings.memory.profile_refresh_interval.unit`  | 生效后的画像刷新周期单位 |
-| `data.effective_settings.memory.profile_refresh_interval.value` | 生效后的画像刷新周期数值 |
-| `data.effective_settings.task_automation.inspect_on_startup`    | 生效后的启动自动巡检开关 |
-| `data.effective_settings.task_automation.inspect_on_file_change` | 生效后的文件变化自动巡检开关 |
+| 字段                                                   | 中文说明 |
+| ------------------------------------------------------ | -------- |
+| `data.updated_keys`                                    | 已更新字段列表，字段路径与请求对象路径一致 |
+| `data.effective_settings.memory.enabled`               | 生效后的记忆开关 |
+| `data.effective_settings.memory.lifecycle`             | 生效后的记忆保留周期 |
 | `data.effective_settings.task_automation.inspection_interval.unit` | 生效后的巡检周期单位 |
 | `data.effective_settings.task_automation.inspection_interval.value` | 生效后的巡检周期数值 |
-| `data.effective_settings.task_automation.task_sources`          | 生效后的巡检任务来源目录列表 |
-| `data.effective_settings.task_automation.remind_before_deadline` | 生效后的截止前提醒开关 |
-| `data.effective_settings.task_automation.remind_when_stale`     | 生效后的长期未处理提醒开关 |
-| `data.effective_settings.models.provider`                       | 生效后的模型提供方 |
-| `data.effective_settings.models.budget_auto_downgrade`          | 生效后的自动降级开关 |
-| `data.effective_settings.models.provider_api_key_configured`    | API Key 是否已配置成功；只返回布尔状态 |
-| `data.effective_settings.models.base_url`                       | 生效后的模型服务基地址 |
-| `data.effective_settings.models.model`                          | 生效后的模型名 |
-| `data.effective_settings.models.stronghold`                     | 当前 Stronghold/secret backend 诊断摘要 |
-| `data.apply_mode`                                               | 配置生效方式，取值来自 `apply_mode` |
-| `data.need_restart`                                             | 当前更新是否需要重启客户端 |
-| `meta.server_time`                                              | 服务端响应时间 |
+| `data.effective_settings.task_automation.inspect_on_file_change` | 生效后的文件变化自动巡检开关 |
+| `data.effective_settings.models.provider`              | 生效后的模型提供方 |
+| `data.effective_settings.models.budget_auto_downgrade` | 生效后的自动降级开关 |
+| `data.effective_settings.models.provider_api_key_configured` | API Key 是否已配置成功；只返回布尔状态 |
+| `data.effective_settings.models.base_url`              | 生效后的模型服务基地址 |
+| `data.effective_settings.models.model`                 | 生效后的模型名 |
+| `data.apply_mode`                                      | 配置生效方式，取值来自 `apply_mode` |
+| `data.need_restart`                                    | 当前更新是否需要重启客户端 |
+| `meta.server_time`                                     | 服务端响应时间 |
 
 ### agent.settings.update 出参示例
 
@@ -3545,75 +3578,29 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
   "result": {
     "data": {
       "updated_keys": [
-        "general.theme_mode",
-        "general.download.workspace_path",
-        "floating_ball.position_mode",
-        "floating_ball.size",
         "memory.enabled",
         "memory.lifecycle",
-        "memory.work_summary_interval",
-        "memory.profile_refresh_interval",
-        "task_automation.inspect_on_startup",
-        "task_automation.inspect_on_file_change",
         "task_automation.inspection_interval",
-        "task_automation.task_sources",
-        "task_automation.remind_before_deadline",
-        "task_automation.remind_when_stale",
-        "models.provider",
-        "models.budget_auto_downgrade",
-        "models.api_key",
-        "models.base_url",
-        "models.model"
+        "task_automation.inspect_on_file_change"
       ],
       "effective_settings": {
-        "general": {
-          "language": "zh-CN",
-          "auto_launch": true,
-          "theme_mode": "dark",
-          "voice_notification_enabled": true,
-          "voice_type": "default_female",
-          "download": {
-            "workspace_path": "D:/CialloClawWorkspace",
-            "ask_before_save_each_file": true
-          }
-        },
-        "floating_ball": {
-          "auto_snap": true,
-          "idle_translucent": true,
-          "position_mode": "draggable",
-          "size": "medium"
-        },
         "memory": {
           "enabled": true,
-          "lifecycle": "30d",
-          "work_summary_interval": {
-            "unit": "day",
-            "value": 7
-          },
-          "profile_refresh_interval": {
-            "unit": "week",
-            "value": 2
-          }
+          "lifecycle": "30d"
         },
         "task_automation": {
-          "inspect_on_startup": true,
-          "inspect_on_file_change": true,
           "inspection_interval": {
             "unit": "minute",
             "value": 15
           },
-          "task_sources": [
-            "D:/workspace/todos"
-          ],
-          "remind_before_deadline": true,
-          "remind_when_stale": false
+          "inspect_on_file_change": true
         },
         "models": {
           "provider": "openai",
           "budget_auto_downgrade": true,
           "provider_api_key_configured": true,
           "base_url": "https://api.openai.com/v1",
-          "model": "gpt-4.1"
+          "model": "gpt-3.5-turbo"
         }
       },
       "apply_mode": "immediate",
@@ -3626,6 +3613,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
   }
 }
 ```
+
 
 
 ---
@@ -3903,6 +3891,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `agent.plugin.detail.get` 是插件详情页的核心接口；当前阶段不单独拆 `agent.plugin.input.get`、`agent.plugin.output.get`。
 - `input_contract` 与 `output_contract` 由后端聚合整理后返回；前端不得解析后端源码或假设存在独立 schema 文件仓库。
 - `schema_ref` 作为后续正式 schema 文件化的兼容锚点保留；当前允许 `schema_json = null`。
+- 当后端仅冻结了 `ToolMetadata` 而尚未补齐字段级 schema 展开时，`input_contract.fields` 与 `output_contract.fields` 允许返回空数组，前端应优先消费 `schema_ref`、展示名、来源与风险信息。
 - `include_runtime`、`include_metrics`、`include_events` 省略时按 `true` 处理；若显式传 `false`，对应返回字段应保持空数组而不是缺字段。
 - 本接口只返回展示和合同信息，不允许前端借由详情页直接触发插件执行。
 
@@ -3955,10 +3944,10 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.tools[].supports_dry_run`                          | 是否支持 dry run |
 | `data.tools[].input_contract.schema_ref`                 | 输入合同 schema 引用 |
 | `data.tools[].input_contract.schema_json`                | 输入合同 schema JSON；当前可为 `null` |
-| `data.tools[].input_contract.fields`                     | 输入合同字段列表 |
+| `data.tools[].input_contract.fields`                     | 输入合同字段列表；若仅注册了 `schema_ref` 而未展开字段，可返回空数组 |
 | `data.tools[].output_contract.schema_ref`                | 输出合同 schema 引用 |
 | `data.tools[].output_contract.schema_json`               | 输出合同 schema JSON；当前可为 `null` |
-| `data.tools[].output_contract.fields`                    | 输出合同字段列表 |
+| `data.tools[].output_contract.fields`                    | 输出合同字段列表；若仅注册了 `schema_ref` 而未展开字段，可返回空数组 |
 | `data.tools[].delivery_mapping`                          | 该工具结果如何映射到 `tool_call / artifact / delivery_result` |
 | `meta.server_time`                                       | 服务端响应时间 |
 
@@ -4097,9 +4086,6 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
   }
 }
 ```
-
-
----
 
 ## 9. Notification / Subscription 说明
 

@@ -7,6 +7,12 @@ import type {
   AgentDashboardOverviewGetResult,
   AgentInputSubmitParams,
   AgentInputSubmitResult,
+  AgentPluginDetailGetParams,
+  AgentPluginDetailGetResult,
+  AgentPluginListParams,
+  AgentPluginListResult,
+  AgentPluginRuntimeListParams,
+  AgentPluginRuntimeListResult,
   AgentNotepadConvertToTaskParams,
   AgentNotepadConvertToTaskResult,
   AgentNotepadListParams,
@@ -207,6 +213,18 @@ export function getSettingsDetailed(params: AgentSettingsGetParams): Promise<Jso
 
 export function updateSettings(params: AgentSettingsUpdateParams) {
   return rpcClient.request<AgentSettingsUpdateResult>(RPC_METHODS.AGENT_SETTINGS_UPDATE, params);
+}
+
+export function listPluginRuntimes(params: AgentPluginRuntimeListParams) {
+  return rpcClient.request<AgentPluginRuntimeListResult>(RPC_METHODS.AGENT_PLUGIN_RUNTIME_LIST, params);
+}
+
+export function listPlugins(params: AgentPluginListParams) {
+  return rpcClient.request<AgentPluginListResult>(RPC_METHODS.AGENT_PLUGIN_LIST, params);
+}
+
+export function getPluginDetail(params: AgentPluginDetailGetParams) {
+  return rpcClient.request<AgentPluginDetailGetResult>(RPC_METHODS.AGENT_PLUGIN_DETAIL_GET, params);
 }
 
 export function getTaskInspectorConfig(params: AgentTaskInspectorConfigGetParams) {
