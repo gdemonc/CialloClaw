@@ -45,6 +45,7 @@ export function ShellBallInputBar({
 }: ShellBallInputBarProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const compositionActiveRef = useRef(false);
+  const appliedFocusTokenRef = useRef(0);
   const multilineStateRef = useRef(false);
   const trimmedValue = value.trim();
   const isHidden = mode === "hidden";
@@ -97,7 +98,8 @@ export function ShellBallInputBar({
       return;
     }
 
-    if (focusToken !== 0) {
+    if (focusToken !== 0 && focusToken !== appliedFocusTokenRef.current) {
+      appliedFocusTokenRef.current = focusToken;
       inputRef.current.focus();
     }
   }, [focusToken, isInteractive, onFocusChange]);
