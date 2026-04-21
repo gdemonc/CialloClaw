@@ -161,6 +161,9 @@ func TestCapabilitiesReturnsConfiguredStructuredStorageOnly(t *testing.T) {
 	if service.TraceStore() == nil || service.EvalStore() == nil {
 		t.Fatalf("expected trace and eval stores to be wired: %+v", capabilities)
 	}
+	if service.ToolCallStore() == nil {
+		t.Fatalf("expected typed tool call store accessor to be wired: %+v", capabilities)
+	}
 	if !capabilities.SupportsRetrievalHits || !capabilities.SupportsFTS5 || !capabilities.SupportsSQLiteVecStub {
 		t.Fatalf("expected retrieval and search skeleton capabilities to be enabled: %+v", capabilities)
 	}
@@ -245,6 +248,14 @@ func TestServiceSessionAndSettingsStoresPersistRecords(t *testing.T) {
 	}
 	if snapshot["general"].(map[string]any)["language"] != "zh-CN" {
 		t.Fatalf("unexpected settings snapshot: %+v", snapshot)
+	}
+}
+
+func TestResolveModelAPIKeyFailsWhenSecretStoreMissing(t *testing.T) {
+	service := NewService(nil)
+	service.secretStore = nil
+	if _, err := service.ResolveModelAPIKey("openai_responses"); !errors.Is(err, ErrSecretStoreAccessFailed) {
+		t.Fatalf("expected ErrSecretStoreAccessFailed when secret store is missing, got %v", err)
 	}
 }
 

@@ -176,6 +176,44 @@ func TestStrongholdSQLiteProviderLifecycle(t *testing.T) {
 	}
 }
 
+func TestStrongholdSQLiteFallbackProviderHonorsCanceledContext(t *testing.T) {
+	provider := NewStrongholdSQLiteFallbackProvider(filepath.Join(t.TempDir(), "stronghold-fallback-canceled.db"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := provider.Open(ctx); !errors.Is(err, ErrStrongholdUnavailable) {
+		t.Fatalf("expected wrapped ErrStrongholdUnavailable on canceled context, got %v", err)
+	}
+	descriptor := provider.Descriptor()
+	if descriptor.Available || descriptor.Initialized {
+		t.Fatalf("expected canceled provider descriptor to remain unavailable, got %+v", descriptor)
+	}
+}
+
+func TestStrongholdSQLiteProviderRejectsMissingPath(t *testing.T) {
+	provider := NewStrongholdSQLiteProvider("   ")
+	if _, err := provider.Open(context.Background()); !errors.Is(err, ErrStrongholdUnavailable) {
+		t.Fatalf("expected missing formal provider path to return ErrStrongholdUnavailable, got %v", err)
+	}
+}
+
+func TestSQLiteSecretStoreEnsuresStrongholdMetadata(t *testing.T) {
+	store, err := NewSQLiteSecretStore(filepath.Join(t.TempDir(), "stronghold-metadata.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSecretStore returned error: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	if err := store.EnsureStrongholdMetadata(context.Background(), "stronghold_sqlite_fallback"); err != nil {
+		t.Fatalf("EnsureStrongholdMetadata returned error: %v", err)
+	}
+	var backend string
+	if err := store.db.QueryRow(`SELECT backend FROM stronghold_metadata WHERE metadata_key = ?`, "active_backend").Scan(&backend); err != nil {
+		t.Fatalf("query stronghold metadata failed: %v", err)
+	}
+	if backend != "stronghold_sqlite_fallback" {
+		t.Fatalf("expected stored backend metadata, got %s", backend)
+	}
+}
+
 func TestNormalizeSecretStoreErrorMapsStrongholdFailures(t *testing.T) {
 	if NormalizeSecretStoreError(nil) != nil {
 		t.Fatal("expected nil error to stay nil")

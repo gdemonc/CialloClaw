@@ -40,3 +40,33 @@ func TestServiceCurrentExecutionAssetsAndPluginResolution(t *testing.T) {
 		t.Fatalf("expected OCR plugin manifest ref, got %+v", pluginRefs)
 	}
 }
+
+func TestExtensionAssetCatalogHandlesEmptyAndMalformedPluginData(t *testing.T) {
+	service := NewService(nil)
+	refs, err := service.CurrentExecutionAssets(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentExecutionAssets returned error: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("expected nil refs before built-in asset seeding, got %+v", refs)
+	}
+	if pluginRefs, err := service.PluginAssetsForCapabilities(context.Background(), []string{"   "}); err != nil || pluginRefs != nil {
+		t.Fatalf("expected blank capability request to be ignored, refs=%+v err=%v", pluginRefs, err)
+	}
+	if err := service.PluginManifestStore().WritePluginManifest(context.Background(), PluginManifestRecord{
+		PluginID:         "broken",
+		Name:             "Broken Plugin",
+		Version:          "v1",
+		Entry:            "builtin://plugin/broken",
+		Source:           "builtin",
+		Summary:          "broken manifest",
+		CapabilitiesJSON: `not-json`,
+		PermissionsJSON:  `[]`,
+		RuntimeNamesJSON: `[]`,
+	}); err != nil {
+		t.Fatalf("write malformed plugin manifest: %v", err)
+	}
+	if pluginRefs, err := service.PluginAssetsForCapabilities(context.Background(), []string{"ocr_image"}); err != nil || len(pluginRefs) != 0 {
+		t.Fatalf("expected malformed plugin manifest capabilities to be ignored, refs=%+v err=%v", pluginRefs, err)
+	}
+}
