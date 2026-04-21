@@ -1327,6 +1327,26 @@ func TestDispatchMapsStrongholdErrors(t *testing.T) {
 	}
 }
 
+func TestDispatchMapsModelProviderErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, model.ErrModelProviderUnsupported)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1008001 || rpcErr.Message != "MODEL_PROVIDER_NOT_FOUND" {
+		t.Fatalf("expected MODEL_PROVIDER_NOT_FOUND mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
+func TestDispatchMapsModelConfigurationErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, model.ErrOpenAIEndpointRequired)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1008002 || rpcErr.Message != "MODEL_NOT_ALLOWED" {
+		t.Fatalf("expected MODEL_NOT_ALLOWED mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
 func TestDispatchReturnsSettingsGet(t *testing.T) {
 	server := newTestServer()
 	storageService := storage.NewService(testStorageAdapter{databasePath: filepath.Join(t.TempDir(), "settings-get.db")})
@@ -1342,9 +1362,10 @@ func TestDispatchReturnsSettingsGet(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected success response envelope, got %#v", response)
 	}
-	dataLog := success.Result.Data.(map[string]any)["settings"].(map[string]any)["data_log"].(map[string]any)
-	if _, ok := dataLog["stronghold"].(map[string]any); !ok {
-		t.Fatalf("expected settings get to include stronghold status, got %+v", dataLog)
+	models := success.Result.Data.(map[string]any)["settings"].(map[string]any)["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if _, ok := credentials["stronghold"].(map[string]any); !ok {
+		t.Fatalf("expected settings get to include stronghold status, got %+v", credentials)
 	}
 }
 
@@ -1358,7 +1379,7 @@ func TestDispatchReturnsSettingsUpdate(t *testing.T) {
 		ID:      json.RawMessage(`"req-settings-update"`),
 		Method:  "agent.settings.update",
 		Params: mustMarshal(t, map[string]any{
-			"data_log": map[string]any{
+			"models": map[string]any{
 				"provider": "openai",
 				"api_key":  "rpc-secret-key",
 			},
@@ -1368,12 +1389,12 @@ func TestDispatchReturnsSettingsUpdate(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected success response envelope, got %#v", response)
 	}
-	dataLog := success.Result.Data.(map[string]any)["effective_settings"].(map[string]any)["data_log"].(map[string]any)
-	if dataLog["provider_api_key_configured"] != true {
-		t.Fatalf("expected settings update to mark provider key configured, got %+v", dataLog)
+	models := success.Result.Data.(map[string]any)["effective_settings"].(map[string]any)["models"].(map[string]any)
+	if models["provider_api_key_configured"] != true {
+		t.Fatalf("expected settings update to mark provider key configured, got %+v", models)
 	}
-	if _, exists := dataLog["api_key"]; exists {
-		t.Fatalf("expected settings update response to keep api_key redacted, got %+v", dataLog)
+	if _, exists := models["api_key"]; exists {
+		t.Fatalf("expected settings update response to keep api_key redacted, got %+v", models)
 	}
 }
 
@@ -1393,6 +1414,10 @@ func TestDispatchReturnsPluginRuntimeList(t *testing.T) {
 	items := data["items"].([]map[string]any)
 	if len(items) == 0 {
 		t.Fatalf("expected plugin runtime query to return declared runtimes, got %+v", data)
+	}
+	manifest, ok := items[0]["manifest"].(map[string]any)
+	if !ok || manifest["plugin_id"] == nil || manifest["source"] == nil {
+		t.Fatalf("expected plugin runtime items to include formal manifest linkage, got %+v", items[0])
 	}
 	metrics := data["metrics"].([]map[string]any)
 	if len(metrics) == 0 {

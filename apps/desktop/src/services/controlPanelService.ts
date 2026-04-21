@@ -31,6 +31,7 @@ export type ControlPanelData = {
   securitySummary: AgentSecuritySummaryGetResult["summary"];
   providerApiKeyInput: string;
   source: ControlPanelSource;
+  warnings?: string[];
 };
 
 export type ControlPanelSaveResult = {
@@ -113,6 +114,13 @@ function mergeProtocolSettings(
             ...patch.data_log,
           }
         : base.data_log,
+      models: patch.models
+        ? {
+            ...base.models,
+            ...patch.models,
+            ...(patch.models.credentials ?? {}),
+          }
+        : base.models,
     }),
   };
 }
@@ -128,6 +136,7 @@ function buildSettingsWithProviderApiKeyConfigured(
       provider: settings.models.provider,
       budget_auto_downgrade: settings.models.budget_auto_downgrade,
       provider_api_key_configured: providerApiKeyConfigured,
+      stronghold: settings.models.stronghold,
     },
     models: {
       ...settings.models,
@@ -136,12 +145,14 @@ function buildSettingsWithProviderApiKeyConfigured(
   });
 }
 
-function buildDataLogUpdatePayload(input: ControlPanelData) {
+function buildModelsUpdatePayload(input: ControlPanelData) {
   const apiKey = input.providerApiKeyInput.trim();
 
   return {
     provider: input.settings.models.provider,
     budget_auto_downgrade: input.settings.models.budget_auto_downgrade,
+    base_url: input.settings.models.base_url,
+    model: input.settings.models.model,
     ...(apiKey === "" ? {} : { api_key: apiKey }),
   };
 }
@@ -187,7 +198,7 @@ function buildMockInspector(settings: DesktopSettings): AgentTaskInspectorConfig
   };
 }
 
-function getInitialControlPanelData(): ControlPanelData {
+function getInitialControlPanelData(warnings: string[] = []): ControlPanelData {
   const settings = loadSettings();
   const inspector = buildMockInspector(settings);
   const normalizedSettings = projectInspectorToTaskAutomation(settings.settings, inspector);
@@ -197,6 +208,7 @@ function getInitialControlPanelData(): ControlPanelData {
     providerApiKeyInput: "",
     securitySummary: buildMockSecuritySummary(),
     source: "mock",
+    warnings,
   };
 }
 
@@ -222,9 +234,15 @@ export async function loadControlPanelData(): Promise<ControlPanelData> {
       providerApiKeyInput: "",
       securitySummary: securityResult.summary,
       source: "rpc",
+      warnings: [],
     };
   } catch (error) {
-    console.warn("Control panel RPC unavailable, using local settings fallback.", error);
+    if (!isRpcChannelUnavailable(error)) {
+      console.warn("Control panel RPC failed, using local settings fallback.", error);
+      return getInitialControlPanelData([error instanceof Error ? error.message : "control panel unavailable"]);
+    }
+
+    logRpcMockFallback("control panel load", error);
     return getInitialControlPanelData();
   }
 }
@@ -256,7 +274,7 @@ export async function saveControlPanelData(data: ControlPanelData): Promise<Cont
         general: data.settings.general,
         floating_ball: data.settings.floating_ball,
         memory: data.settings.memory,
-        data_log: buildDataLogUpdatePayload(data),
+        models: buildModelsUpdatePayload(data),
       }),
       updateTaskInspectorConfig({
         request_meta: createRequestMeta(),

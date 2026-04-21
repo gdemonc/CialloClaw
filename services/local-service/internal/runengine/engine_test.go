@@ -11,6 +11,21 @@ import (
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
 )
 
+type storageTestAdapter struct {
+	databasePath string
+}
+
+func (s storageTestAdapter) DatabasePath() string {
+	return s.databasePath
+}
+
+func (s storageTestAdapter) SecretStorePath() string {
+	if s.databasePath == "" {
+		return ""
+	}
+	return s.databasePath + ".stronghold"
+}
+
 // TestEngineTaskLifecycle verifies the end-to-end task lifecycle.
 func TestEngineTaskLifecycle(t *testing.T) {
 	engine := NewEngine()
@@ -265,10 +280,11 @@ func TestEngineAppendAuditDataPersistsAuditAndTokenUsage(t *testing.T) {
 func TestEngineDefaultSettingsIncludeBudgetPolicy(t *testing.T) {
 	engine := NewEngine()
 	settings := engine.Settings()
-	dataLog := settings["data_log"].(map[string]any)
-	policy := dataLog["budget_policy"].(map[string]any)
-	if dataLog["budget_auto_downgrade"] != true {
-		t.Fatalf("expected budget_auto_downgrade default to remain true, got %+v", dataLog)
+	models := settings["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	policy := credentials["budget_policy"].(map[string]any)
+	if credentials["budget_auto_downgrade"] != true {
+		t.Fatalf("expected budget_auto_downgrade default to remain true, got %+v", credentials)
 	}
 	if policy["planner_retry_budget"] != 1 || policy["failure_signal_window"] != 2 || policy["token_pressure_threshold"] != 64 {
 		t.Fatalf("expected default budget policy thresholds, got %+v", policy)
@@ -281,8 +297,8 @@ func TestEngineDefaultSettingsIncludeBudgetPolicy(t *testing.T) {
 
 func TestEngineUpdateSettingsMergesNestedBudgetPolicy(t *testing.T) {
 	engine := NewEngine()
-	effective, updatedKeys, applyMode, needRestart := engine.UpdateSettings(map[string]any{
-		"data_log": map[string]any{
+	effective, updatedKeys, applyMode, needRestart, err := engine.UpdateSettings(map[string]any{
+		"models": map[string]any{
 			"budget_policy": map[string]any{
 				"failure_signal_window":     3,
 				"planner_retry_budget":      2,
@@ -290,24 +306,76 @@ func TestEngineUpdateSettingsMergesNestedBudgetPolicy(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("update settings returned error: %v", err)
+	}
 	if applyMode != "immediate" || needRestart {
 		t.Fatalf("expected budget policy update to stay immediate, got applyMode=%s needRestart=%v", applyMode, needRestart)
 	}
-	if len(updatedKeys) != 1 || updatedKeys[0] != "data_log.budget_policy" {
+	if len(updatedKeys) != 1 || updatedKeys[0] != "models.credentials.budget_policy" {
 		t.Fatalf("expected nested budget policy update key, got %+v", updatedKeys)
 	}
-	policyPatch := effective["data_log"].(map[string]any)["budget_policy"].(map[string]any)
+	policyPatch := effective["models"].(map[string]any)["credentials"].(map[string]any)["budget_policy"].(map[string]any)
 	if policyPatch["failure_signal_window"] != 3 || policyPatch["planner_retry_budget"] != 2 {
 		t.Fatalf("expected effective settings to expose nested budget policy patch, got %+v", effective)
 	}
 	settings := engine.Settings()
-	policy := settings["data_log"].(map[string]any)["budget_policy"].(map[string]any)
+	policy := settings["models"].(map[string]any)["credentials"].(map[string]any)["budget_policy"].(map[string]any)
 	if policy["failure_signal_window"] != 3 || policy["planner_retry_budget"] != 2 {
 		t.Fatalf("expected nested budget policy merge to persist, got %+v", policy)
 	}
 	categories := policy["expensive_tool_categories"].([]any)
 	if len(categories) != 3 {
 		t.Fatalf("expected updated expensive tool categories, got %+v", categories)
+	}
+}
+
+func TestEngineSettingsStorePersistsAndReloadsSnapshot(t *testing.T) {
+	storageService := storage.NewService(storageTestAdapter{databasePath: filepath.Join(t.TempDir(), "settings-persist.db")})
+	defer func() { _ = storageService.Close() }()
+	engine := NewEngine()
+	if err := engine.WithSettingsStore(storageService.SettingsStore()); err != nil {
+		t.Fatalf("attach settings store failed: %v", err)
+	}
+	if _, _, _, _, err := engine.UpdateSettings(map[string]any{
+		"general": map[string]any{"language": "en-US"},
+		"models":  map[string]any{"provider": "anthropic", "budget_auto_downgrade": false, "model": "claude-3-7-sonnet"},
+	}); err != nil {
+		t.Fatalf("update settings with persistence returned error: %v", err)
+	}
+	reloaded := NewEngine()
+	if err := reloaded.WithSettingsStore(storageService.SettingsStore()); err != nil {
+		t.Fatalf("reload settings store failed: %v", err)
+	}
+	settings := reloaded.Settings()
+	if settings["general"].(map[string]any)["language"] != "en-US" {
+		t.Fatalf("expected persisted general settings, got %+v", settings)
+	}
+	models := settings["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if models["provider"] != "anthropic" || credentials["budget_auto_downgrade"] != false || credentials["model"] != "claude-3-7-sonnet" {
+		t.Fatalf("expected persisted model settings, got %+v", settings)
+	}
+}
+
+func TestEngineSessionStorePersistsSessionLifecycle(t *testing.T) {
+	storageService := storage.NewService(storageTestAdapter{databasePath: filepath.Join(t.TempDir(), "sessions-persist.db")})
+	defer func() { _ = storageService.Close() }()
+	engine := NewEngine()
+	if err := engine.WithSessionStore(storageService.SessionStore()); err != nil {
+		t.Fatalf("attach session store failed: %v", err)
+	}
+	task := engine.CreateTask(CreateTaskInput{SessionID: "sess_001", Title: "Session task", SourceType: "hover_input", Status: "processing", CurrentStep: "run", RiskLevel: "green"})
+	session, err := storageService.SessionStore().GetSession(context.Background(), "sess_001")
+	if err != nil || session.Status != "active" || session.Title != "Session task" {
+		t.Fatalf("expected active session record after task creation, session=%+v err=%v", session, err)
+	}
+	if _, ok := engine.CompleteTask(task.TaskID, nil, nil, nil); !ok {
+		t.Fatal("expected complete task to succeed")
+	}
+	session, err = storageService.SessionStore().GetSession(context.Background(), "sess_001")
+	if err != nil || session.Status != "idle" {
+		t.Fatalf("expected idle session record after completion, session=%+v err=%v", session, err)
 	}
 }
 

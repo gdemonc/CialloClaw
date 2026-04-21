@@ -64,6 +64,13 @@ func TestNewWiresStorageBackedMemoryService(t *testing.T) {
 	if app.storage.TraceStore() == nil || app.storage.EvalStore() == nil {
 		t.Fatal("expected trace/eval stores to be available")
 	}
+	if refs, err := app.storage.CurrentExecutionAssets(context.Background()); err != nil || len(refs) != 3 {
+		t.Fatalf("expected built-in execution assets to be seeded, refs=%+v err=%v", refs, err)
+	}
+	pluginManifests, total, err := app.storage.PluginManifestStore().ListPluginManifests(context.Background(), 10, 0)
+	if err != nil || total == 0 || len(pluginManifests) == 0 {
+		t.Fatalf("expected plugin manifests to be seeded, total=%d len=%d err=%v", total, len(pluginManifests), err)
+	}
 	capabilities := app.storage.Capabilities()
 	if !capabilities.SupportsMemoryStore {
 		t.Fatalf("expected storage capabilities to expose memory store: %+v", app.storage.Capabilities())

@@ -6,14 +6,28 @@ import { loadStoredValue, saveStoredValue } from "../platform/storage";
 const SETTINGS_KEY = "cialloclaw.settings";
 
 type ProtocolSettings = SettingsSnapshot["settings"];
-type ProtocolDataLogSettings = ProtocolSettings["data_log"];
+type ProtocolModelSettings = ProtocolSettings["models"];
+type ProtocolModelCredentials = ProtocolModelSettings["credentials"];
 
-export type DesktopModelSettings = ProtocolDataLogSettings & {
+type ProtocolDataLogSettings = {
+  provider: string;
+  budget_auto_downgrade: boolean;
+  provider_api_key_configured: boolean;
+  stronghold: ProtocolModelCredentials["stronghold"];
+  base_url?: string;
+  model?: string;
+};
+
+export type DesktopModelSettings = {
+  provider: string;
+  budget_auto_downgrade: boolean;
+  provider_api_key_configured: boolean;
+  stronghold: ProtocolModelCredentials["stronghold"];
   base_url: string;
   model: string;
 };
 
-export type DesktopSettingsData = Omit<ProtocolSettings, "data_log"> & {
+export type DesktopSettingsData = Omit<ProtocolSettings, "data_log" | "models"> & {
   data_log: ProtocolDataLogSettings;
   models: DesktopModelSettings;
 };
@@ -82,10 +96,10 @@ function createDefaultSettings(): DesktopSettings {
         budget_auto_downgrade: true,
         provider_api_key_configured: false,
         stronghold: {
-          backend: "stronghold_sqlite_fallback",
-          available: true,
-          fallback: true,
-          initialized: true,
+          backend: "none",
+          available: false,
+          fallback: false,
+          initialized: false,
           formal_store: false,
         },
       },
@@ -94,10 +108,10 @@ function createDefaultSettings(): DesktopSettings {
         budget_auto_downgrade: true,
         provider_api_key_configured: false,
         stronghold: {
-          backend: "stronghold_sqlite_fallback",
-          available: true,
-          fallback: true,
-          initialized: true,
+          backend: "none",
+          available: false,
+          fallback: false,
+          initialized: false,
           formal_store: false,
         },
         base_url: "https://api.openai.com/v1",
@@ -107,37 +121,49 @@ function createDefaultSettings(): DesktopSettings {
   };
 }
 
-// The desktop control panel carries local-only model routing fields while RPC
-// still persists the shared `data_log` subset. Keep both shapes synchronized so
-// older snapshots and new UI state read back consistently.
+// The desktop control panel keeps a flat local `models` view while the formal
+// RPC snapshot now exposes `models.credentials`. Keep both shapes synchronized
+// and preserve the legacy local `data_log` alias for backward-compatible UI state.
 function normalizeSettingsSnapshot(
   snapshot: StoredDesktopSettings | SettingsSnapshot | DesktopSettings | null | undefined,
 ): DesktopSettings {
   const defaults = createDefaultSettings();
   const settings = snapshot?.settings as StoredDesktopSettings["settings"];
   const storedDataLog = settings?.data_log;
-  const storedModels = settings?.models;
+  const storedModels = settings?.models as Partial<ProtocolModelSettings & DesktopModelSettings> | undefined;
+  const storedModelCredentials =
+    storedModels && "credentials" in storedModels && typeof storedModels.credentials === "object"
+      ? (storedModels.credentials as Partial<ProtocolModelCredentials>)
+      : undefined;
   const normalizedDataLog: ProtocolDataLogSettings = {
     ...defaults.settings.data_log,
     ...storedDataLog,
-    // Shared RPC fields stay authoritative in `data_log`; the desktop-local
-    // `models` view mirrors them instead of overriding backend snapshots.
-    provider: storedDataLog?.provider ?? storedModels?.provider ?? defaults.settings.data_log.provider,
+    // Shared RPC fields stay authoritative in the formal `models.credentials`
+    // snapshot; the desktop-local `data_log` alias only mirrors them.
+    provider: storedModels?.provider ?? storedDataLog?.provider ?? defaults.settings.data_log.provider,
     budget_auto_downgrade:
-      storedDataLog?.budget_auto_downgrade ??
+      storedModelCredentials?.budget_auto_downgrade ??
       storedModels?.budget_auto_downgrade ??
+      storedDataLog?.budget_auto_downgrade ??
       defaults.settings.data_log.budget_auto_downgrade,
     provider_api_key_configured:
-      storedDataLog?.provider_api_key_configured ??
+      storedModelCredentials?.provider_api_key_configured ??
       storedModels?.provider_api_key_configured ??
+      storedDataLog?.provider_api_key_configured ??
       defaults.settings.data_log.provider_api_key_configured,
-    stronghold: storedDataLog?.stronghold ?? storedModels?.stronghold ?? defaults.settings.data_log.stronghold,
+    stronghold:
+      storedModelCredentials?.stronghold ?? storedModels?.stronghold ?? storedDataLog?.stronghold ?? defaults.settings.data_log.stronghold,
+    base_url: storedModelCredentials?.base_url ?? storedModels?.base_url ?? storedDataLog?.base_url ?? defaults.settings.models.base_url,
+    model: storedModelCredentials?.model ?? storedModels?.model ?? storedDataLog?.model ?? defaults.settings.models.model,
   };
   const normalizedModels: DesktopModelSettings = {
     ...defaults.settings.models,
+    ...(storedModelCredentials?.base_url === undefined ? {} : { base_url: storedModelCredentials.base_url }),
+    ...(storedModelCredentials?.model === undefined ? {} : { model: storedModelCredentials.model }),
+    ...(storedModels?.base_url === undefined ? {} : { base_url: storedModels.base_url }),
+    ...(storedModels?.model === undefined ? {} : { model: storedModels.model }),
     ...(storedDataLog?.base_url === undefined ? {} : { base_url: storedDataLog.base_url }),
     ...(storedDataLog?.model === undefined ? {} : { model: storedDataLog.model }),
-    ...storedModels,
     provider: normalizedDataLog.provider,
     budget_auto_downgrade: normalizedDataLog.budget_auto_downgrade,
     provider_api_key_configured: normalizedDataLog.provider_api_key_configured,
@@ -192,6 +218,40 @@ function normalizeSettingsSnapshot(
  */
 export function hydrateDesktopSettings(settings: ProtocolSettings | DesktopSettingsData): DesktopSettingsData {
   return normalizeSettingsSnapshot({ settings: settings as StoredDesktopSettings["settings"] }).settings;
+}
+
+/**
+ * Projects the desktop-local settings shape back into the formal protocol
+ * snapshot shape used by RPC-facing consumers.
+ *
+ * @param settings The desktop-local settings snapshot.
+ * @returns The formal protocol settings snapshot.
+ */
+export function toProtocolSettingsSnapshot(settings: DesktopSettingsData): ProtocolSettings {
+  return {
+    general: settings.general,
+    floating_ball: settings.floating_ball,
+    memory: settings.memory,
+    task_automation: settings.task_automation,
+    models: {
+      provider: settings.models.provider,
+      credentials: {
+        budget_auto_downgrade: settings.models.budget_auto_downgrade,
+        provider_api_key_configured: settings.models.provider_api_key_configured,
+        base_url: settings.models.base_url,
+        model: settings.models.model,
+        stronghold: settings.models.stronghold,
+      },
+    },
+    data_log: {
+      provider: settings.data_log.provider,
+      budget_auto_downgrade: settings.data_log.budget_auto_downgrade,
+      provider_api_key_configured: settings.data_log.provider_api_key_configured,
+      stronghold: settings.data_log.stronghold,
+      base_url: settings.data_log.base_url,
+      model: settings.data_log.model,
+    },
+  };
 }
 
 /**

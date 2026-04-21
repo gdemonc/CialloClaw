@@ -29,6 +29,13 @@ func TestServiceCaptureBuildsTraceAndEvalRecords(t *testing.T) {
 			"type": "workspace_document",
 		},
 		Artifacts: []map[string]any{{"artifact_id": "art_001"}},
+		ExtensionAssets: []storage.ExtensionAssetReference{{
+			AssetKind: storage.ExtensionAssetKindSkillManifest,
+			AssetID:   "skill_builtin_default_agent_loop",
+			Name:      "default_agent_loop_skill",
+			Version:   "builtin-v1",
+			Source:    "builtin",
+		}},
 		ModelInvocation: map[string]any{
 			"latency_ms": int64(321),
 			"usage": map[string]any{
@@ -56,6 +63,12 @@ func TestServiceCaptureBuildsTraceAndEvalRecords(t *testing.T) {
 	}
 	if result.TraceRecord.LoopRound != 1 || result.TraceRecord.Cost != 0.012 {
 		t.Fatalf("expected loop/cost metrics to be captured, got %+v", result.TraceRecord)
+	}
+	if result.TraceRecord.AssetRefsJSON == "" || result.EvalSnapshot.AssetRefsJSON == "" {
+		t.Fatalf("expected asset refs to be persisted into trace/eval records, got %+v", result)
+	}
+	if result.Metrics["skill_manifest_count"] != 1 {
+		t.Fatalf("expected extension asset metrics to count skill manifest usage, got %+v", result.Metrics)
 	}
 	if result.Metrics["worker_calls"] != nil {
 		// worker_calls is stored in rule hits, not metrics

@@ -6,7 +6,7 @@ import { loadDashboardSettingsSnapshot, type DashboardSettingsSnapshotData, type
 
 export type DashboardSettingsPatch = Pick<
   AgentSettingsUpdateParams,
-  "general" | "floating_ball" | "memory" | "task_automation" | "data_log"
+  "general" | "floating_ball" | "memory" | "task_automation" | "models"
 >;
 
 export type DashboardSettingsMutationResult = {
@@ -71,12 +71,12 @@ function mergeSettingsSnapshot(
           },
         }
       : current.task_automation,
-    data_log: patch.data_log
+    models: patch.models
       ? {
-          ...current.data_log,
-          ...patch.data_log,
+          ...current.models,
+          ...patch.models,
         }
-      : current.data_log,
+      : current.models,
   };
 }
 

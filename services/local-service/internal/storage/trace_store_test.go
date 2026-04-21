@@ -19,6 +19,7 @@ func TestInMemoryTraceAndEvalStoresPersistAndList(t *testing.T) {
 		LoopRound:        2,
 		LLMInputSummary:  "input",
 		LLMOutputSummary: "output",
+		AssetRefsJSON:    `[{"asset_kind":"skill_manifest","asset_id":"skill_001"}]`,
 		CreatedAt:        "2026-04-17T10:00:00Z",
 	}); err != nil {
 		t.Fatalf("write trace record failed: %v", err)
@@ -28,6 +29,7 @@ func TestInMemoryTraceAndEvalStoresPersistAndList(t *testing.T) {
 		TraceID:        "trace_001",
 		TaskID:         "task_001",
 		Status:         "passed",
+		AssetRefsJSON:  `[{"asset_kind":"skill_manifest","asset_id":"skill_001"}]`,
 		MetricsJSON:    `{"latency_ms":321}`,
 		CreatedAt:      "2026-04-17T10:00:00Z",
 	}); err != nil {
@@ -71,6 +73,7 @@ func TestSQLiteTraceAndEvalStoresPersistAndList(t *testing.T) {
 		LLMOutputSummary: "output summary",
 		LatencyMS:        321,
 		Cost:             0.012,
+		AssetRefsJSON:    `[{"asset_kind":"prompt_template_version","asset_id":"prompt_001"}]`,
 		RuleHitsJSON:     `{"doom_loop":"triggered"}`,
 		ReviewResult:     "human_review_required",
 		CreatedAt:        "2026-04-17T10:00:00Z",
@@ -82,6 +85,7 @@ func TestSQLiteTraceAndEvalStoresPersistAndList(t *testing.T) {
 		TraceID:        "trace_sql_001",
 		TaskID:         "task_sql_001",
 		Status:         "human_review_required",
+		AssetRefsJSON:  `[{"asset_kind":"prompt_template_version","asset_id":"prompt_001"}]`,
 		MetricsJSON:    `{"doom_loop_triggered":true}`,
 		CreatedAt:      "2026-04-17T10:00:00Z",
 	}); err != nil {
@@ -93,6 +97,9 @@ func TestSQLiteTraceAndEvalStoresPersistAndList(t *testing.T) {
 	}
 	if traces[0].ReviewResult != "human_review_required" {
 		t.Fatalf("expected review result to round-trip, got %+v", traces[0])
+	}
+	if traces[0].AssetRefsJSON == "" {
+		t.Fatalf("expected asset refs to round-trip, got %+v", traces[0])
 	}
 	if err := traceStore.DeleteTraceRecord(context.Background(), "trace_sql_001"); err != nil {
 		t.Fatalf("delete sqlite trace failed: %v", err)

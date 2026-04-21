@@ -375,6 +375,10 @@ func (s *countingTaskStore) ListTasks(ctx context.Context, limit, offset int) ([
 	return s.base.ListTasks(ctx, limit, offset)
 }
 
+func (s *countingTaskStore) ListTasksBySession(ctx context.Context, sessionID string, limit, offset int) ([]storage.TaskRecord, int, error) {
+	return s.base.ListTasksBySession(ctx, sessionID, limit, offset)
+}
+
 func (s stubModelClient) GenerateText(_ context.Context, request model.GenerateTextRequest) (model.GenerateTextResponse, error) {
 	return model.GenerateTextResponse{
 		TaskID:     request.TaskID,
@@ -457,8 +461,9 @@ func newTestServiceWithExecutionWorkers(t *testing.T, modelOutput string, execut
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
 	pluginService := plugin.NewService()
+	seedTestExtensionAssets(t, storageService, pluginService)
 	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
-	executor := execution.NewService(fileSystem, executionBackend, playwrightClient, ocrClient, mediaClient, sidecarclient.NewLocalScreenCaptureClient(fileSystem), modelService, auditService, checkpoint.NewService(checkpointWriter), deliveryService, toolRegistry, toolExecutor, pluginService).WithArtifactStore(storageService.ArtifactStore())
+	executor := execution.NewService(fileSystem, executionBackend, playwrightClient, ocrClient, mediaClient, sidecarclient.NewLocalScreenCaptureClient(fileSystem), modelService, auditService, checkpoint.NewService(checkpointWriter), deliveryService, toolRegistry, toolExecutor, pluginService).WithArtifactStore(storageService.ArtifactStore()).WithExtensionAssetCatalog(storageService)
 
 	service := NewService(
 		contextsvc.NewService(),
@@ -473,6 +478,49 @@ func newTestServiceWithExecutionWorkers(t *testing.T, modelOutput string, execut
 	).WithAudit(auditService).WithStorage(storageService).WithExecutor(executor).WithTaskInspector(taskinspector.NewService(fileSystem)).WithTraceEval(traceeval.NewService(storageService.TraceStore(), storageService.EvalStore()))
 
 	return service, workspaceRoot
+}
+
+func seedTestExtensionAssets(t *testing.T, storageService *storage.Service, pluginService *plugin.Service) {
+	t.Helper()
+	if err := storageService.EnsureBuiltinExecutionAssets(context.Background()); err != nil {
+		t.Fatalf("ensure builtin execution assets: %v", err)
+	}
+	runtimeNamesByPluginID := map[string][]string{}
+	for _, runtime := range pluginService.RuntimeStates() {
+		if runtime.Manifest == nil || runtime.Manifest.PluginID == "" {
+			continue
+		}
+		runtimeNamesByPluginID[runtime.Manifest.PluginID] = append(runtimeNamesByPluginID[runtime.Manifest.PluginID], runtime.Name)
+	}
+	for _, manifest := range pluginService.Manifests() {
+		capabilitiesJSON, err := json.Marshal(manifest.Capabilities)
+		if err != nil {
+			t.Fatalf("marshal plugin capabilities: %v", err)
+		}
+		permissionsJSON, err := json.Marshal(manifest.Permissions)
+		if err != nil {
+			t.Fatalf("marshal plugin permissions: %v", err)
+		}
+		runtimeNamesJSON, err := json.Marshal(runtimeNamesByPluginID[manifest.PluginID])
+		if err != nil {
+			t.Fatalf("marshal plugin runtime names: %v", err)
+		}
+		if err := storageService.PluginManifestStore().WritePluginManifest(context.Background(), storage.PluginManifestRecord{
+			PluginID:         manifest.PluginID,
+			Name:             manifest.Name,
+			Version:          manifest.Version,
+			Entry:            manifest.Entry,
+			Source:           manifest.Source,
+			Summary:          "test manifest",
+			CapabilitiesJSON: string(capabilitiesJSON),
+			PermissionsJSON:  string(permissionsJSON),
+			RuntimeNamesJSON: string(runtimeNamesJSON),
+			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+			UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatalf("write plugin manifest: %v", err)
+		}
+	}
 }
 
 func mustNewStoredEngine(t *testing.T, taskStore storage.TaskRunStore) *runengine.Engine {
@@ -1935,12 +1983,18 @@ func TestExecuteTaskPersistsTraceAndEvalSnapshots(t *testing.T) {
 	if traces[0].ReviewResult != "passed" {
 		t.Fatalf("expected passing trace review result, got %+v", traces[0])
 	}
+	if traces[0].AssetRefsJSON == "" {
+		t.Fatalf("expected trace record to keep extension asset refs, got %+v", traces[0])
+	}
 	evals, total, err := service.storage.EvalStore().ListEvalSnapshots(context.Background(), updated.TaskID, 10, 0)
 	if err != nil || total != 1 || len(evals) != 1 {
 		t.Fatalf("expected one eval snapshot, total=%d len=%d err=%v", total, len(evals), err)
 	}
 	if evals[0].Status != "passed" {
 		t.Fatalf("expected passing eval snapshot status, got %+v", evals[0])
+	}
+	if evals[0].AssetRefsJSON == "" {
+		t.Fatalf("expected eval snapshot to keep extension asset refs, got %+v", evals[0])
 	}
 }
 
@@ -4088,7 +4142,7 @@ func TestServiceTaskListUsesStructuredStoreUnlimitedPaginationInMemoryFallback(t
 	}
 }
 
-func TestServiceTaskListDoesNotFallbackWhenOffsetExceedsRuntimePage(t *testing.T) {
+func TestServiceTaskListMergesStructuredStorageWhenOffsetExceedsRuntimePage(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "runtime paging")
 
 	_, err := service.StartTask(map[string]any{
@@ -4145,8 +4199,8 @@ func TestServiceTaskListDoesNotFallbackWhenOffsetExceedsRuntimePage(t *testing.T
 		t.Fatalf("expected empty page beyond runtime total, got %+v", items)
 	}
 	page := listResult["page"].(map[string]any)
-	if page["total"] != 1 {
-		t.Fatalf("expected runtime total to stay unchanged, got %+v", page)
+	if page["total"] != 2 {
+		t.Fatalf("expected structured and runtime totals to merge, got %+v", page)
 	}
 }
 
@@ -6007,7 +6061,7 @@ func TestServiceBudgetAutoDowngradeSwitchesWorkspaceDeliveryToBubble(t *testing.
 func TestServiceBudgetAutoDowngradeProviderUnavailableDisablesExpensiveTools(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed provider unavailable")
 	if _, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":              "unsupported_provider",
 			"budget_auto_downgrade": true,
 		},
@@ -6049,7 +6103,7 @@ func TestServiceBudgetAutoDowngradeProviderUnavailableDisablesExpensiveTools(t *
 func TestServiceBudgetAutoDowngradeDisabledKeepsWorkspaceDelivery(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed no downgrade")
 	if _, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"budget_auto_downgrade": false,
 		},
 	}); err != nil {
@@ -6199,8 +6253,8 @@ func TestServiceBudgetFallbackSuccessStillAppendsFailureSignal(t *testing.T) {
 
 func TestServiceBudgetAutoDowngradeUsesConfiguredPolicyThresholds(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed configured thresholds")
-	_, _, _, needRestart := service.runEngine.UpdateSettings(map[string]any{
-		"data_log": map[string]any{
+	_, _, _, needRestart, err := service.runEngine.UpdateSettings(map[string]any{
+		"models": map[string]any{
 			"budget_auto_downgrade": true,
 			"budget_policy": map[string]any{
 				"failure_signal_window":     3,
@@ -6211,6 +6265,9 @@ func TestServiceBudgetAutoDowngradeUsesConfiguredPolicyThresholds(t *testing.T) 
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("update settings failed: %v", err)
+	}
 	if needRestart {
 		t.Fatal("expected nested budget policy update to remain immediate")
 	}
@@ -7722,6 +7779,64 @@ func TestServiceTaskDetailGetPrefersStructuredTaskStoreFallback(t *testing.T) {
 	}
 }
 
+func TestServiceTaskDetailGetStructuredFallbackUsesSessionAndRunStores(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "structured session run detail")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	if err := service.storage.SessionStore().WriteSession(context.Background(), storage.SessionRecord{
+		SessionID: "sess_structured_link",
+		Title:     "Structured Session Title",
+		Status:    "idle",
+		CreatedAt: time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt: time.Date(2026, 4, 15, 10, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write session failed: %v", err)
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              "task_structured_session_run",
+		SessionID:           "sess_structured_link",
+		RunID:               "run_structured_session_run",
+		Title:               "",
+		SourceType:          "hover_input",
+		Status:              "processing",
+		IntentName:          "summarize",
+		IntentArgumentsJSON: `{"style":"key_points"}`,
+		PreferredDelivery:   "workspace_document",
+		FallbackDelivery:    "bubble",
+		CurrentStep:         "generate_output",
+		CurrentStepStatus:   "processing",
+		RiskLevel:           "green",
+		StartedAt:           time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:           time.Date(2026, 4, 15, 10, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write structured task failed: %v", err)
+	}
+	if err := service.storage.LoopRuntimeStore().SaveRun(context.Background(), storage.RunRecord{
+		RunID:      "run_structured_session_run",
+		TaskID:     "task_structured_session_run",
+		SessionID:  "sess_structured_link",
+		Status:     "processing",
+		IntentName: "summarize",
+		StartedAt:  time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:  time.Date(2026, 4, 15, 10, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		StopReason: "paused_by_session",
+	}); err != nil {
+		t.Fatalf("write run failed: %v", err)
+	}
+	result, err := service.TaskDetailGet(map[string]any{"task_id": "task_structured_session_run"})
+	if err != nil {
+		t.Fatalf("task detail get failed: %v", err)
+	}
+	task := result["task"].(map[string]any)
+	if task["title"] != "Structured Session Title" {
+		t.Fatalf("expected session store to backfill task title, got %+v", task)
+	}
+	if task["loop_stop_reason"] != "paused_by_session" {
+		t.Fatalf("expected run store to backfill loop stop reason, got %+v", task)
+	}
+}
+
 func TestServiceTaskDetailGetStructuredFallbackBackfillsTaskRunEvidence(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "structured screen detail evidence")
 	if service.storage == nil {
@@ -8497,11 +8612,12 @@ func TestSettingsGetIncludesSecretConfigurationAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings get failed: %v", err)
 	}
-	dataLog := result["settings"].(map[string]any)["data_log"].(map[string]any)
-	if dataLog["provider_api_key_configured"] != false {
-		t.Fatalf("expected unset provider key flag, got %+v", dataLog)
+	models := result["settings"].(map[string]any)["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if credentials["provider_api_key_configured"] != false {
+		t.Fatalf("expected unset provider key flag, got %+v", credentials)
 	}
-	stronghold := dataLog["stronghold"].(map[string]any)
+	stronghold := credentials["stronghold"].(map[string]any)
 	if stronghold["backend"] == "" || stronghold["available"] != true {
 		t.Fatalf("expected stronghold status metadata, got %+v", stronghold)
 	}
@@ -8517,9 +8633,10 @@ func TestSettingsGetIncludesSecretConfigurationAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings get with secret failed: %v", err)
 	}
-	dataLog = result["settings"].(map[string]any)["data_log"].(map[string]any)
-	if dataLog["provider_api_key_configured"] != true {
-		t.Fatalf("expected configured provider key flag, got %+v", dataLog)
+	models = result["settings"].(map[string]any)["models"].(map[string]any)
+	credentials = models["credentials"].(map[string]any)
+	if credentials["provider_api_key_configured"] != true {
+		t.Fatalf("expected configured provider key flag, got %+v", credentials)
 	}
 }
 
@@ -8530,8 +8647,8 @@ func TestSettingsGetWithoutStorageStillReturnsStrongholdStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings get failed: %v", err)
 	}
-	dataLog := result["settings"].(map[string]any)["data_log"].(map[string]any)
-	stronghold := dataLog["stronghold"].(map[string]any)
+	models := result["settings"].(map[string]any)["models"].(map[string]any)
+	stronghold := models["credentials"].(map[string]any)["stronghold"].(map[string]any)
 	if stronghold["backend"] != "none" || stronghold["available"] != false || stronghold["formal_store"] != false {
 		t.Fatalf("expected degraded settings get to still expose stronghold defaults, got %+v", stronghold)
 	}
@@ -8575,7 +8692,7 @@ func TestSettingsUpdatePersistsSecretOutsideRegularSettings(t *testing.T) {
 		t.Fatal("expected storage service to be wired")
 	}
 	result, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":              "openai",
 			"budget_auto_downgrade": false,
 			"api_key":               "persisted-secret-key",
@@ -8592,15 +8709,15 @@ func TestSettingsUpdatePersistsSecretOutsideRegularSettings(t *testing.T) {
 		t.Fatalf("unexpected stored secret: %+v", stored)
 	}
 	effectiveSettings := result["effective_settings"].(map[string]any)
-	dataLog := effectiveSettings["data_log"].(map[string]any)
-	if _, exists := dataLog["api_key"]; exists {
-		t.Fatalf("expected api_key to stay out of regular settings path, got %+v", dataLog)
+	models := effectiveSettings["models"].(map[string]any)
+	if _, exists := models["api_key"]; exists {
+		t.Fatalf("expected api_key to stay out of regular settings path, got %+v", models)
 	}
-	if dataLog["provider_api_key_configured"] != true {
-		t.Fatalf("expected configured flag in settings response, got %+v", dataLog)
+	if models["provider_api_key_configured"] != true {
+		t.Fatalf("expected configured flag in settings response, got %+v", models)
 	}
-	if _, exists := dataLog["stronghold"]; !exists {
-		t.Fatalf("expected stronghold status in settings response, got %+v", dataLog)
+	if _, exists := models["stronghold"]; !exists {
+		t.Fatalf("expected stronghold status in settings response, got %+v", models)
 	}
 }
 
@@ -8610,7 +8727,7 @@ func TestSettingsUpdatePersistsSecretForRequestedProvider(t *testing.T) {
 		t.Fatal("expected storage service to be wired")
 	}
 	_, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":              "anthropic",
 			"budget_auto_downgrade": true,
 			"api_key":               "anthropic-secret-key",
@@ -8630,13 +8747,14 @@ func TestSettingsUpdatePersistsSecretForRequestedProvider(t *testing.T) {
 	if !errors.Is(err, storage.ErrSecretNotFound) {
 		t.Fatalf("expected default provider secret to remain unset, got %v", err)
 	}
-	result, err := service.SettingsGet(map[string]any{"scope": "data_log"})
+	result, err := service.SettingsGet(map[string]any{"scope": "models"})
 	if err != nil {
 		t.Fatalf("settings get failed: %v", err)
 	}
-	dataLog := result["settings"].(map[string]any)["data_log"].(map[string]any)
-	if dataLog["provider"] != "anthropic" || dataLog["provider_api_key_configured"] != true {
-		t.Fatalf("expected settings get to reflect anthropic provider secret, got %+v", dataLog)
+	models := result["settings"].(map[string]any)["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if models["provider"] != "anthropic" || credentials["provider_api_key_configured"] != true {
+		t.Fatalf("expected settings get to reflect anthropic provider secret, got models=%+v credentials=%+v", models, credentials)
 	}
 }
 
@@ -8654,7 +8772,7 @@ func TestSettingsUpdateDeletesProviderSecretWithoutLeakingValue(t *testing.T) {
 		t.Fatalf("seed secret store failed: %v", err)
 	}
 	result, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":       "openai",
 			"delete_api_key": true,
 		},
@@ -8666,12 +8784,12 @@ func TestSettingsUpdateDeletesProviderSecretWithoutLeakingValue(t *testing.T) {
 	if !errors.Is(err, storage.ErrSecretNotFound) {
 		t.Fatalf("expected secret to be deleted, got %v", err)
 	}
-	dataLog := result["effective_settings"].(map[string]any)["data_log"].(map[string]any)
-	if _, exists := dataLog["api_key"]; exists {
-		t.Fatalf("expected settings delete response to stay redacted, got %+v", dataLog)
+	models := result["effective_settings"].(map[string]any)["models"].(map[string]any)
+	if _, exists := models["api_key"]; exists {
+		t.Fatalf("expected settings delete response to stay redacted, got %+v", models)
 	}
-	if dataLog["provider_api_key_configured"] != false {
-		t.Fatalf("expected delete to clear configured flag, got %+v", dataLog)
+	if models["provider_api_key_configured"] != false {
+		t.Fatalf("expected delete to clear configured flag, got %+v", models)
 	}
 }
 
@@ -8692,7 +8810,7 @@ func TestSettingsUpdateReturnsStrongholdErrorWhenStoreUnavailable(t *testing.T) 
 	service.storage = storage.NewService(nil)
 	replaceSecretStore(t, service.storage, storage.UnavailableSecretStore{})
 	_, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider": "openai",
 			"api_key":  "secret-key",
 		},
@@ -8705,7 +8823,7 @@ func TestSettingsUpdateReturnsStrongholdErrorWhenStoreUnavailable(t *testing.T) 
 func TestSettingsUpdateReturnsStrongholdErrorWithoutStorage(t *testing.T) {
 	service := newTestService()
 	_, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider": "openai",
 			"api_key":  "sk-test",
 		},
@@ -8735,8 +8853,8 @@ func TestSettingsUpdateUnrelatedScopeIgnoresSecretStoreOutage(t *testing.T) {
 	if _, ok := effectiveSettings["general"].(map[string]any); !ok {
 		t.Fatalf("expected general effective settings payload, got %+v", effectiveSettings)
 	}
-	if _, exists := effectiveSettings["data_log"]; exists {
-		t.Fatalf("expected unrelated settings update to avoid attaching data_log metadata, got %+v", effectiveSettings)
+	if _, exists := effectiveSettings["models"]; exists {
+		t.Fatalf("expected unrelated settings update to avoid attaching model metadata, got %+v", effectiveSettings)
 	}
 }
 

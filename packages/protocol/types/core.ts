@@ -85,7 +85,7 @@ export const APPROVAL_DECISIONS = ["allow_once", "deny_once"] as const;
 export const APPROVAL_STATUSES = ["pending", "approved", "denied"] as const;
 
 // SETTINGS_SCOPES 定义共享常量。
-export const SETTINGS_SCOPES = ["all", "general", "floating_ball", "memory", "task_automation", "data_log"] as const;
+export const SETTINGS_SCOPES = ["all", "general", "floating_ball", "memory", "task_automation", "models"] as const;
 
 // APPLY_MODES 定义共享常量。
 export const APPLY_MODES = ["immediate", "restart_required", "next_task_effective"] as const;
@@ -444,11 +444,23 @@ export interface SettingsSnapshot {
       remind_before_deadline: boolean;
       remind_when_stale: boolean;
     };
-    data_log: {
+    models: {
+      provider: string;
+      credentials: {
+        budget_auto_downgrade: boolean;
+        provider_api_key_configured: boolean;
+        base_url: string;
+        model: string;
+        stronghold: StrongholdStatus;
+      };
+    };
+    data_log?: {
       provider: string;
       budget_auto_downgrade: boolean;
       provider_api_key_configured: boolean;
       stronghold: StrongholdStatus;
+      base_url?: string;
+      model?: string;
     };
   };
 }
@@ -476,7 +488,7 @@ export interface AsyncJob {
 export interface Session {
   session_id: string;
   title: string;
-  status: "active" | "archived";
+  status: "active" | "idle" | "archived";
   created_at: string;
   updated_at: string;
 }
@@ -575,6 +587,7 @@ export interface PluginManifest {
   name: string;
   version: string;
   entry: string;
+  source: string;
   capabilities: string[];
   permissions: string[];
 }
@@ -589,6 +602,7 @@ export interface PluginRuntimeState {
   last_seen_at: string;
   last_error: string | null;
   capabilities: string[];
+  manifest?: PluginManifest;
 }
 
 // PluginMetricSnapshot 定义当前模块的接口约束。

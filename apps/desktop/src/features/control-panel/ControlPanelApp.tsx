@@ -224,6 +224,11 @@ export function ControlPanelApp() {
         {sourceCopy.badge}
       </span>
       <span className="control-panel-page__value-text">{sourceCopy.label}</span>
+      {draft.warnings && draft.warnings.length > 0 ? (
+        <Text size="1" color="amber">
+          {draft.warnings[0]}
+        </Text>
+      ) : null}
     </span>
   );
   const saveStateValue = (

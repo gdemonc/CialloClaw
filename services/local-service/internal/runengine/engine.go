@@ -126,6 +126,8 @@ type Engine struct {
 	now           func() time.Time
 	taskStore     storage.TaskRunStore
 	todoStore     storage.TodoStore
+	settingsStore storage.SettingsStore
+	sessionStore  storage.SessionStore
 	tasks         map[string]*TaskRecord
 	taskOrder     []string
 	sessionOrder  []string
@@ -165,6 +167,41 @@ func (e *Engine) WithTodoStore(todoStore storage.TodoStore) error {
 	}
 	loaded := restoreNotepadItemsFromStore(items, rules)
 	e.notepadItems = loaded
+	return nil
+}
+
+// WithSettingsStore attaches ordinary settings persistence and hydrates the
+// in-memory settings snapshot from durable storage when records exist.
+func (e *Engine) WithSettingsStore(settingsStore storage.SettingsStore) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.settingsStore = settingsStore
+	if settingsStore == nil {
+		return nil
+	}
+	snapshot, err := settingsStore.LoadSettingsSnapshot(context.Background())
+	if err != nil {
+		return err
+	}
+	snapshot = normalizeSettingsPatch(snapshot)
+	if len(snapshot) == 0 {
+		return nil
+	}
+	mergeMaps(e.settings, snapshot)
+	return nil
+}
+
+// WithSessionStore attaches first-class session persistence used to keep the
+// `session -> task -> run` mapping durable alongside task snapshot updates.
+func (e *Engine) WithSessionStore(sessionStore storage.SessionStore) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.sessionStore = sessionStore
+	for _, taskID := range e.taskOrder {
+		record := e.tasks[taskID]
+		e.persistSessionLocked(record)
+	}
 	return nil
 }
 
@@ -303,6 +340,7 @@ func (e *Engine) DeleteTask(taskID string) error {
 	delete(e.tasks, taskID)
 	e.taskOrder = removeStringValue(e.taskOrder, taskID)
 	e.untrackSessionLocked(record.SessionID)
+	e.persistSessionByIDLocked(record.SessionID)
 	return nil
 }
 
@@ -1517,21 +1555,23 @@ func (e *Engine) UpdateInspectorConfig(values map[string]any) map[string]any {
 func (e *Engine) Settings() map[string]any {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return cloneMap(e.settings)
+	return normalizeSettingsPatch(cloneMap(e.settings))
 }
 
-// UpdateSettings merges a settings patch and reports affected fields, apply
-// mode, and restart requirements.
-func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string, string, bool) {
+// UpdateSettings merges a settings patch, persists the ordinary snapshot when a
+// settings store is attached, and reports affected fields, apply mode, and
+// restart requirements.
+func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string, string, bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	values = normalizeSettingsPatch(values)
 
 	updatedKeys := make([]string, 0)
 	effectiveSettings := map[string]any{}
 	applyMode := "immediate"
 	needRestart := false
 
-	for _, section := range []string{"general", "floating_ball", "memory", "task_automation", "data_log"} {
+	for _, section := range []string{"general", "floating_ball", "memory", "task_automation", "models"} {
 		sectionPatch, ok := values[section].(map[string]any)
 		if !ok || len(sectionPatch) == 0 {
 			continue
@@ -1546,14 +1586,7 @@ func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string
 		e.settings[section] = currentSection
 		effectiveSettings[section] = cloneMap(sectionPatch)
 
-		keys := make([]string, 0, len(sectionPatch))
-		for key := range sectionPatch {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			updatedKeys = append(updatedKeys, fmt.Sprintf("%s.%s", section, key))
-		}
+		updatedKeys = append(updatedKeys, settingsPatchPaths(section, sectionPatch)...)
 
 		if section == "general" {
 			if _, ok := sectionPatch["language"]; ok {
@@ -1562,8 +1595,13 @@ func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string
 			}
 		}
 	}
+	if e.settingsStore != nil {
+		if err := e.settingsStore.SaveSettingsSnapshot(context.Background(), normalizeSettingsPatch(cloneMap(e.settings))); err != nil {
+			return nil, nil, "", false, err
+		}
+	}
 
-	return effectiveSettings, updatedKeys, applyMode, needRestart
+	return effectiveSettings, updatedKeys, applyMode, needRestart, nil
 }
 
 // NotepadItems returns the current notepad bucket view using the frozen TodoItem
@@ -1929,11 +1967,79 @@ func (e *Engine) loadPersistedTaskRuns(ctx context.Context) error {
 }
 
 func (e *Engine) persistTaskLocked(record *TaskRecord) {
-	if e.taskStore == nil || record == nil {
+	if record == nil {
 		return
 	}
+	if e.taskStore != nil {
+		_ = e.taskStore.SaveTaskRun(context.Background(), taskRecordToStorage(record.clone()))
+	}
+	e.persistSessionLocked(record)
+}
 
-	_ = e.taskStore.SaveTaskRun(context.Background(), taskRecordToStorage(record.clone()))
+func (e *Engine) persistSessionLocked(record *TaskRecord) {
+	if record == nil {
+		return
+	}
+	e.persistSessionByIDLocked(record.SessionID)
+}
+
+func (e *Engine) persistSessionByIDLocked(sessionID string) {
+	if e.sessionStore == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	record, ok := e.sessionRecordLocked(sessionID)
+	if !ok {
+		_ = e.sessionStore.DeleteSession(context.Background(), sessionID)
+		return
+	}
+	_ = e.sessionStore.WriteSession(context.Background(), record)
+}
+
+func (e *Engine) sessionRecordLocked(sessionID string) (storage.SessionRecord, bool) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return storage.SessionRecord{}, false
+	}
+	var latest *TaskRecord
+	for _, taskID := range e.taskOrder {
+		record := e.tasks[taskID]
+		if record == nil || record.SessionID != sessionID {
+			continue
+		}
+		latest = record
+		break
+	}
+	if latest == nil {
+		return storage.SessionRecord{}, false
+	}
+	status := "idle"
+	for _, taskID := range e.taskOrder {
+		record := e.tasks[taskID]
+		if record == nil || record.SessionID != sessionID {
+			continue
+		}
+		if !record.isFinished() {
+			status = "active"
+			break
+		}
+	}
+	createdAt := latest.StartedAt
+	for _, taskID := range e.taskOrder {
+		record := e.tasks[taskID]
+		if record == nil || record.SessionID != sessionID {
+			continue
+		}
+		if record.StartedAt.Before(createdAt) {
+			createdAt = record.StartedAt
+		}
+	}
+	return storage.SessionRecord{
+		SessionID: sessionID,
+		Title:     latest.Title,
+		Status:    status,
+		CreatedAt: createdAt.Format(time.RFC3339Nano),
+		UpdatedAt: latest.UpdatedAt.Format(time.RFC3339Nano),
+	}, true
 }
 
 // clone returns a deep copy of TaskRecord so callers cannot retain internal
@@ -2642,18 +2748,119 @@ func buildDefaultSettings() map[string]any {
 			"remind_before_deadline": true,
 			"remind_when_stale":      false,
 		},
-		"data_log": map[string]any{
-			"provider":              "openai",
-			"budget_auto_downgrade": true,
-			"budget_policy": map[string]any{
-				"planner_retry_budget":      1,
-				"failure_signal_window":     2,
-				"token_pressure_threshold":  64,
-				"cost_pressure_threshold":   0.05,
-				"expensive_tool_categories": []string{"command", "browser_mutation", "media_heavy"},
+		"models": map[string]any{
+			"provider": "openai",
+			"credentials": map[string]any{
+				"budget_auto_downgrade": true,
+				"base_url":              "",
+				"model":                 "",
+				"budget_policy": map[string]any{
+					"planner_retry_budget":      1,
+					"failure_signal_window":     2,
+					"token_pressure_threshold":  64,
+					"cost_pressure_threshold":   0.05,
+					"expensive_tool_categories": []string{"command", "browser_mutation", "media_heavy"},
+				},
 			},
 		},
 	}
+}
+
+func normalizeSettingsPatch(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	normalized := cloneMap(values)
+	if normalized == nil {
+		normalized = map[string]any{}
+	}
+	if dataLog, ok := normalized["data_log"].(map[string]any); ok && len(dataLog) > 0 {
+		models := map[string]any{}
+		for key, value := range dataLog {
+			switch key {
+			case "provider":
+				models[key] = value
+			default:
+				credentials := mapValue(normalized, "models", "credentials")
+				if credentials == nil {
+					credentials = map[string]any{}
+				}
+				credentials[key] = value
+				models["credentials"] = credentials
+			}
+		}
+		mergeMaps(models, mapValue(normalized, "models"))
+		normalized["models"] = models
+		delete(normalized, "data_log")
+	}
+	if models, ok := normalized["models"].(map[string]any); ok && len(models) > 0 {
+		credentials := cloneMap(mapValue(models, "credentials"))
+		if credentials == nil {
+			credentials = map[string]any{}
+		}
+		delete(models, "provider_api_key_configured")
+		delete(models, "stronghold")
+		delete(credentials, "provider_api_key_configured")
+		delete(credentials, "stronghold")
+		for _, key := range []string{"budget_auto_downgrade", "base_url", "model", "budget_policy"} {
+			if value, exists := models[key]; exists {
+				credentials[key] = value
+				delete(models, key)
+			}
+		}
+		models["credentials"] = credentials
+		normalized["models"] = models
+	}
+	return normalized
+}
+
+func mapValue(values map[string]any, path ...string) map[string]any {
+	current := values
+	for _, key := range path {
+		rawValue, ok := current[key]
+		if !ok {
+			return nil
+		}
+		next, ok := rawValue.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = next
+	}
+	return current
+}
+
+func settingsPatchPaths(prefix string, patch map[string]any) []string {
+	if len(patch) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(patch))
+	for key := range patch {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	paths := make([]string, 0, len(keys))
+	for _, key := range keys {
+		nextPrefix := prefix + "." + key
+		if nested, ok := patch[key].(map[string]any); ok && len(nested) > 0 {
+			hasNestedChild := false
+			for _, nestedValue := range nested {
+				childMap, ok := nestedValue.(map[string]any)
+				if ok && len(childMap) > 0 {
+					hasNestedChild = true
+					break
+				}
+			}
+			if !hasNestedChild {
+				paths = append(paths, nextPrefix)
+				continue
+			}
+			paths = append(paths, settingsPatchPaths(nextPrefix, nested)...)
+			continue
+		}
+		paths = append(paths, nextPrefix)
+	}
+	return paths
 }
 
 func taskRecordToStorage(record TaskRecord) storage.TaskRunRecord {

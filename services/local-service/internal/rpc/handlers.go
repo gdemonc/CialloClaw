@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/model"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/orchestrator"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
 )
 
 // registerHandlers binds stable agent.* JSON-RPC methods to orchestrator entry
@@ -303,7 +305,23 @@ func wrapOrchestratorResult(data any, err error) (any, *rpcError) {
 			TraceID: "trace_storage_query_failed",
 		}
 	}
+	if errors.Is(err, storage.ErrStructuredStoreUnavailable) || errors.Is(err, storage.ErrDatabasePathRequired) {
+		return nil, &rpcError{
+			Code:    1005001,
+			Message: "SQLITE_WRITE_FAILED",
+			Detail:  err.Error(),
+			TraceID: "trace_sqlite_write_failed",
+		}
+	}
 	if errors.Is(err, orchestrator.ErrStrongholdAccessFailed) {
+		return nil, &rpcError{
+			Code:    1005004,
+			Message: "STRONGHOLD_ACCESS_FAILED",
+			Detail:  err.Error(),
+			TraceID: "trace_stronghold_access_failed",
+		}
+	}
+	if errors.Is(err, storage.ErrStrongholdAccessFailed) || errors.Is(err, storage.ErrStrongholdUnavailable) || errors.Is(err, storage.ErrSecretStoreAccessFailed) {
 		return nil, &rpcError{
 			Code:    1005004,
 			Message: "STRONGHOLD_ACCESS_FAILED",
@@ -317,6 +335,22 @@ func wrapOrchestratorResult(data any, err error) (any, *rpcError) {
 			Message: "RECOVERY_POINT_NOT_FOUND",
 			Detail:  err.Error(),
 			TraceID: "trace_recovery_point_not_found",
+		}
+	}
+	if errors.Is(err, model.ErrModelProviderRequired) || errors.Is(err, model.ErrModelProviderUnsupported) {
+		return nil, &rpcError{
+			Code:    1008001,
+			Message: "MODEL_PROVIDER_NOT_FOUND",
+			Detail:  err.Error(),
+			TraceID: "trace_model_provider_not_found",
+		}
+	}
+	if errors.Is(err, model.ErrClientNotConfigured) || errors.Is(err, model.ErrToolCallingNotSupported) || errors.Is(err, model.ErrOpenAIAPIKeyRequired) || errors.Is(err, model.ErrOpenAIEndpointRequired) || errors.Is(err, model.ErrOpenAIModelIDRequired) || errors.Is(err, model.ErrOpenAIHTTPStatus) || errors.Is(err, model.ErrOpenAIRequestFailed) || errors.Is(err, model.ErrOpenAIRequestTimeout) || errors.Is(err, model.ErrOpenAIResponseInvalid) || errors.Is(err, model.ErrSecretSourceFailed) {
+		return nil, &rpcError{
+			Code:    1008002,
+			Message: "MODEL_NOT_ALLOWED",
+			Detail:  err.Error(),
+			TraceID: "trace_model_not_allowed",
 		}
 	}
 

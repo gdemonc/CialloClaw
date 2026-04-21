@@ -139,6 +139,49 @@ func (s *inMemoryPromptTemplateVersionStore) ListPromptTemplateVersions(_ contex
 	return pagePromptTemplateVersions(items, limit, offset), len(items), nil
 }
 
+type inMemoryPluginManifestStore struct {
+	mu      sync.Mutex
+	records map[string]PluginManifestRecord
+	order   []string
+}
+
+func newInMemoryPluginManifestStore() *inMemoryPluginManifestStore {
+	return &inMemoryPluginManifestStore{records: make(map[string]PluginManifestRecord), order: make([]string, 0)}
+}
+
+func (s *inMemoryPluginManifestStore) WritePluginManifest(_ context.Context, record PluginManifestRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.records[record.PluginID]; !exists {
+		s.order = append(s.order, record.PluginID)
+	}
+	s.records[record.PluginID] = record
+	return nil
+}
+
+func (s *inMemoryPluginManifestStore) GetPluginManifest(_ context.Context, pluginID string) (PluginManifestRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.records[pluginID]
+	if !ok {
+		return PluginManifestRecord{}, sql.ErrNoRows
+	}
+	return record, nil
+}
+
+func (s *inMemoryPluginManifestStore) ListPluginManifests(_ context.Context, limit, offset int) ([]PluginManifestRecord, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]PluginManifestRecord, 0, len(s.order))
+	for _, id := range s.order {
+		items = append(items, s.records[id])
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].UpdatedAt > items[j].UpdatedAt
+	})
+	return pagePluginManifests(items, limit, offset), len(items), nil
+}
+
 type SQLiteSkillManifestStore struct{ db *sql.DB }
 
 func NewSQLiteSkillManifestStore(databasePath string) (*SQLiteSkillManifestStore, error) {
@@ -307,6 +350,62 @@ func (s *SQLitePromptTemplateVersionStore) initialize(ctx context.Context) error
 	return nil
 }
 
+type SQLitePluginManifestStore struct{ db *sql.DB }
+
+func NewSQLitePluginManifestStore(databasePath string) (*SQLitePluginManifestStore, error) {
+	if strings.TrimSpace(databasePath) == "" {
+		return nil, errors.New("sqlite config asset database path is required")
+	}
+	db, err := openSQLiteDatabase(databasePath)
+	if err != nil {
+		return nil, err
+	}
+	store := &SQLitePluginManifestStore{db: db}
+	if err := store.initialize(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *SQLitePluginManifestStore) WritePluginManifest(ctx context.Context, record PluginManifestRecord) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO plugin_manifests (plugin_id, name, version, entry, source, summary, capabilities_json, permissions_json, runtime_names_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, record.PluginID, record.Name, record.Version, record.Entry, record.Source, record.Summary, record.CapabilitiesJSON, record.PermissionsJSON, record.RuntimeNamesJSON, record.CreatedAt, record.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("write plugin manifest: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLitePluginManifestStore) GetPluginManifest(ctx context.Context, pluginID string) (PluginManifestRecord, error) {
+	var record PluginManifestRecord
+	err := s.db.QueryRowContext(ctx, `SELECT plugin_id, name, version, entry, source, summary, capabilities_json, permissions_json, runtime_names_json, created_at, updated_at FROM plugin_manifests WHERE plugin_id = ?`, pluginID).Scan(&record.PluginID, &record.Name, &record.Version, &record.Entry, &record.Source, &record.Summary, &record.CapabilitiesJSON, &record.PermissionsJSON, &record.RuntimeNamesJSON, &record.CreatedAt, &record.UpdatedAt)
+	if err != nil {
+		return PluginManifestRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *SQLitePluginManifestStore) ListPluginManifests(ctx context.Context, limit, offset int) ([]PluginManifestRecord, int, error) {
+	return listSQLitePluginManifests(ctx, s.db, limit, offset)
+}
+
+func (s *SQLitePluginManifestStore) Close() error {
+	if s.db == nil {
+		return nil
+	}
+	return s.db.Close()
+}
+
+func (s *SQLitePluginManifestStore) initialize(ctx context.Context) error {
+	if err := configureConfigAssetSQLiteDatabase(ctx, s.db); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS plugin_manifests (plugin_id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, entry TEXT NOT NULL, source TEXT NOT NULL, summary TEXT NOT NULL, capabilities_json TEXT NOT NULL, permissions_json TEXT NOT NULL, runtime_names_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`); err != nil {
+		return fmt.Errorf("create plugin_manifests table: %w", err)
+	}
+	return nil
+}
+
 // configureConfigAssetSQLiteDatabase aligns config-asset stores with the same
 // busy-timeout and WAL behavior used by the rest of the SQLite storage layer so
 // future concurrent reads/writes do not fail immediately with locked database
@@ -331,6 +430,10 @@ func listSQLiteBlueprintDefinitions(ctx context.Context, db *sql.DB, limit, offs
 
 func listSQLitePromptTemplateVersions(ctx context.Context, db *sql.DB, limit, offset int) ([]PromptTemplateVersionRecord, int, error) {
 	return listSQLiteConfigAssets(ctx, db, `SELECT prompt_template_version_id, template_name, version, source, summary, template_body, variables_json, created_at, updated_at FROM prompt_template_versions ORDER BY updated_at DESC, prompt_template_version_id DESC`, `SELECT COUNT(1) FROM prompt_template_versions`, limit, offset, scanPromptTemplateVersion)
+}
+
+func listSQLitePluginManifests(ctx context.Context, db *sql.DB, limit, offset int) ([]PluginManifestRecord, int, error) {
+	return listSQLiteConfigAssets(ctx, db, `SELECT plugin_id, name, version, entry, source, summary, capabilities_json, permissions_json, runtime_names_json, created_at, updated_at FROM plugin_manifests ORDER BY updated_at DESC, plugin_id DESC`, `SELECT COUNT(1) FROM plugin_manifests`, limit, offset, scanPluginManifest)
 }
 
 func listSQLiteConfigAssets[T any](ctx context.Context, db *sql.DB, query, countQuery string, limit, offset int, scan func(*sql.Rows) (T, error)) ([]T, int, error) {
@@ -380,6 +483,12 @@ func scanPromptTemplateVersion(rows *sql.Rows) (PromptTemplateVersionRecord, err
 	return record, err
 }
 
+func scanPluginManifest(rows *sql.Rows) (PluginManifestRecord, error) {
+	var record PluginManifestRecord
+	err := rows.Scan(&record.PluginID, &record.Name, &record.Version, &record.Entry, &record.Source, &record.Summary, &record.CapabilitiesJSON, &record.PermissionsJSON, &record.RuntimeNamesJSON, &record.CreatedAt, &record.UpdatedAt)
+	return record, err
+}
+
 func pageSkillManifests(items []SkillManifestRecord, limit, offset int) []SkillManifestRecord {
 	return pageConfigAssets(items, limit, offset)
 }
@@ -389,6 +498,10 @@ func pageBlueprintDefinitions(items []BlueprintDefinitionRecord, limit, offset i
 }
 
 func pagePromptTemplateVersions(items []PromptTemplateVersionRecord, limit, offset int) []PromptTemplateVersionRecord {
+	return pageConfigAssets(items, limit, offset)
+}
+
+func pagePluginManifests(items []PluginManifestRecord, limit, offset int) []PluginManifestRecord {
 	return pageConfigAssets(items, limit, offset)
 }
 

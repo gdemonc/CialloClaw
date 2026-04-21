@@ -2,6 +2,8 @@ package execution
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -58,6 +60,35 @@ func (s *recordingLoopRuntimeStore) SaveEvents(_ context.Context, records []stor
 func (s *recordingLoopRuntimeStore) SaveDeliveryResult(_ context.Context, record storage.DeliveryResultRecord) error {
 	s.deliveryResults = append(s.deliveryResults, record)
 	return nil
+}
+
+func (s *recordingLoopRuntimeStore) GetRun(_ context.Context, runID string) (storage.RunRecord, error) {
+	for _, record := range s.runs {
+		if record.RunID == runID {
+			return record, nil
+		}
+	}
+	return storage.RunRecord{}, sql.ErrNoRows
+}
+
+func (s *recordingLoopRuntimeStore) ListDeliveryResults(_ context.Context, taskID string, limit, offset int) ([]storage.DeliveryResultRecord, int, error) {
+	items := make([]storage.DeliveryResultRecord, 0, len(s.deliveryResults))
+	for index := len(s.deliveryResults) - 1; index >= 0; index-- {
+		record := s.deliveryResults[index]
+		if taskID != "" && record.TaskID != taskID {
+			continue
+		}
+		items = append(items, record)
+	}
+	total := len(items)
+	if offset >= total {
+		return []storage.DeliveryResultRecord{}, total, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return append([]storage.DeliveryResultRecord(nil), items[offset:end]...), total, nil
 }
 
 func (s *recordingLoopRuntimeStore) ListEvents(_ context.Context, taskID, runID, eventType, createdAtFrom, createdAtTo string, limit, offset int) ([]storage.EventRecord, int, error) {
@@ -151,7 +182,9 @@ func newTestExecutionServiceWithConfig(t *testing.T, cfg serviceconfig.ModelConf
 		t.Fatalf("register builtin tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
-	artifactStore := storage.NewService(nil).ArtifactStore()
+	storageService := newTestExecutionStorage(t)
+	pluginService := plugin.NewService()
+	seedTestExecutionPluginManifests(t, storageService, pluginService)
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -166,8 +199,8 @@ func newTestExecutionServiceWithConfig(t *testing.T, cfg serviceconfig.ModelConf
 		delivery.NewService(),
 		toolRegistry,
 		toolExecutor,
-		plugin.NewService(),
-	).WithArtifactStore(artifactStore), workspaceRoot
+		pluginService,
+	).WithArtifactStore(storageService.ArtifactStore()).WithExtensionAssetCatalog(storageService), workspaceRoot
 }
 
 func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (*Service, string) {
@@ -183,7 +216,9 @@ func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (
 		t.Fatalf("register builtin tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
-	artifactStore := storage.NewService(nil).ArtifactStore()
+	storageService := newTestExecutionStorage(t)
+	pluginService := plugin.NewService()
+	seedTestExecutionPluginManifests(t, storageService, pluginService)
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -198,8 +233,8 @@ func newTestExecutionServiceWithModelClient(t *testing.T, client model.Client) (
 		delivery.NewService(),
 		toolRegistry,
 		toolExecutor,
-		plugin.NewService(),
-	).WithArtifactStore(artifactStore), workspaceRoot
+		pluginService,
+	).WithArtifactStore(storageService.ArtifactStore()).WithExtensionAssetCatalog(storageService), workspaceRoot
 }
 
 func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwright tools.PlaywrightSidecarClient) (*Service, string) {
@@ -218,7 +253,9 @@ func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwrig
 		t.Fatalf("register playwright tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
-	artifactStore := storage.NewService(nil).ArtifactStore()
+	storageService := newTestExecutionStorage(t)
+	pluginService := plugin.NewService()
+	seedTestExecutionPluginManifests(t, storageService, pluginService)
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -233,8 +270,8 @@ func newTestExecutionServiceWithPlaywright(t *testing.T, output string, playwrig
 		delivery.NewService(),
 		toolRegistry,
 		toolExecutor,
-		plugin.NewService(),
-	).WithArtifactStore(artifactStore), workspaceRoot
+		pluginService,
+	).WithArtifactStore(storageService.ArtifactStore()).WithExtensionAssetCatalog(storageService), workspaceRoot
 }
 
 func newTestExecutionServiceWithWorkers(t *testing.T, output string, playwright tools.PlaywrightSidecarClient, ocr tools.OCRWorkerClient, media tools.MediaWorkerClient) (*Service, string) {
@@ -259,7 +296,9 @@ func newTestExecutionServiceWithWorkers(t *testing.T, output string, playwright 
 		t.Fatalf("register media tools: %v", err)
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
-	artifactStore := storage.NewService(nil).ArtifactStore()
+	storageService := newTestExecutionStorage(t)
+	pluginService := plugin.NewService()
+	seedTestExecutionPluginManifests(t, storageService, pluginService)
 
 	return NewService(
 		platform.NewLocalFileSystemAdapter(pathPolicy),
@@ -274,8 +313,57 @@ func newTestExecutionServiceWithWorkers(t *testing.T, output string, playwright 
 		delivery.NewService(),
 		toolRegistry,
 		toolExecutor,
-		plugin.NewService(),
-	).WithArtifactStore(artifactStore), workspaceRoot
+		pluginService,
+	).WithArtifactStore(storageService.ArtifactStore()).WithExtensionAssetCatalog(storageService), workspaceRoot
+}
+
+func newTestExecutionStorage(t *testing.T) *storage.Service {
+	t.Helper()
+	service := storage.NewService(nil)
+	if err := service.EnsureBuiltinExecutionAssets(context.Background()); err != nil {
+		t.Fatalf("ensure builtin execution assets: %v", err)
+	}
+	return service
+}
+
+func seedTestExecutionPluginManifests(t *testing.T, storageService *storage.Service, pluginService *plugin.Service) {
+	t.Helper()
+	runtimeNamesByPluginID := map[string][]string{}
+	for _, runtime := range pluginService.RuntimeStates() {
+		if runtime.Manifest == nil || runtime.Manifest.PluginID == "" {
+			continue
+		}
+		runtimeNamesByPluginID[runtime.Manifest.PluginID] = append(runtimeNamesByPluginID[runtime.Manifest.PluginID], runtime.Name)
+	}
+	for _, manifest := range pluginService.Manifests() {
+		capabilitiesJSON, err := json.Marshal(manifest.Capabilities)
+		if err != nil {
+			t.Fatalf("marshal plugin capabilities: %v", err)
+		}
+		permissionsJSON, err := json.Marshal(manifest.Permissions)
+		if err != nil {
+			t.Fatalf("marshal plugin permissions: %v", err)
+		}
+		runtimeNamesJSON, err := json.Marshal(runtimeNamesByPluginID[manifest.PluginID])
+		if err != nil {
+			t.Fatalf("marshal plugin runtime names: %v", err)
+		}
+		if err := storageService.PluginManifestStore().WritePluginManifest(context.Background(), storage.PluginManifestRecord{
+			PluginID:         manifest.PluginID,
+			Name:             manifest.Name,
+			Version:          manifest.Version,
+			Entry:            manifest.Entry,
+			Source:           manifest.Source,
+			Summary:          "test manifest",
+			CapabilitiesJSON: string(capabilitiesJSON),
+			PermissionsJSON:  string(permissionsJSON),
+			RuntimeNamesJSON: string(runtimeNamesJSON),
+			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+			UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatalf("write plugin manifest: %v", err)
+		}
+	}
 }
 
 func registerBuiltinTools(t *testing.T) *tools.Registry {
@@ -1307,6 +1395,22 @@ func TestExecuteDirectSidecarPageReadUsesToolExecutor(t *testing.T) {
 	}
 	if result.ToolOutput["summary_output"] == nil {
 		t.Fatalf("expected sidecar tool summary output, got %+v", result.ToolOutput)
+	}
+	if len(result.ExtensionAssets) < 4 {
+		t.Fatalf("expected static execution assets plus plugin manifest refs, got %+v", result.ExtensionAssets)
+	}
+	foundPluginManifest := false
+	for _, asset := range result.ExtensionAssets {
+		if asset["asset_kind"] == storage.ExtensionAssetKindPluginManifest && asset["asset_id"] == "playwright" {
+			foundPluginManifest = true
+			break
+		}
+	}
+	if !foundPluginManifest {
+		t.Fatalf("expected page_read execution to attribute playwright plugin manifest, got %+v", result.ExtensionAssets)
+	}
+	if refs, ok := result.ModelInvocation["extension_asset_refs"].([]map[string]any); !ok || len(refs) != len(result.ExtensionAssets) {
+		t.Fatalf("expected model invocation to expose extension asset refs, got %+v", result.ModelInvocation)
 	}
 	if !strings.Contains(result.BubbleText, "page content from sidecar") {
 		t.Fatalf("expected bubble text to include sidecar preview, got %s", result.BubbleText)

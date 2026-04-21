@@ -138,6 +138,33 @@ func TestStrongholdSQLiteFallbackProviderLifecycle(t *testing.T) {
 	}
 }
 
+func TestStrongholdSQLiteProviderLifecycle(t *testing.T) {
+	provider := NewStrongholdSQLiteProvider(filepath.Join(t.TempDir(), "stronghold-formal.db"))
+	descriptor := provider.Descriptor()
+	if descriptor.Available || descriptor.Initialized || descriptor.Fallback || descriptor.Backend != "stronghold" {
+		t.Fatalf("expected unopened formal provider descriptor to advertise formal stronghold only, got %+v", descriptor)
+	}
+	store, err := provider.Open(context.Background())
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer func() {
+		if closer, ok := store.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+	}()
+	descriptor = provider.Descriptor()
+	if !descriptor.Available || !descriptor.Initialized || descriptor.Fallback || descriptor.Backend != "stronghold" {
+		t.Fatalf("expected opened provider descriptor to report formal stronghold availability, got %+v", descriptor)
+	}
+	if err := store.PutSecret(context.Background(), SecretRecord{Namespace: "model", Key: "openai_responses_api_key", Value: "secret", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		t.Fatalf("formal provider store put returned error: %v", err)
+	}
+	if _, err := store.GetSecret(context.Background(), "model", "openai_responses_api_key"); err != nil {
+		t.Fatalf("formal provider store get returned error: %v", err)
+	}
+}
+
 func TestNormalizeSecretStoreErrorMapsStrongholdFailures(t *testing.T) {
 	if NormalizeSecretStoreError(nil) != nil {
 		t.Fatal("expected nil error to stay nil")
