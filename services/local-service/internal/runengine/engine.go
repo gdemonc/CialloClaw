@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -1592,6 +1593,7 @@ func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string
 		if currentSection == nil {
 			currentSection = map[string]any{}
 		}
+		previousSection := cloneMap(currentSection)
 
 		mergeMaps(currentSection, sectionPatch)
 		nextSettings[section] = currentSection
@@ -1600,9 +1602,12 @@ func (e *Engine) UpdateSettings(values map[string]any) (map[string]any, []string
 		updatedKeys = append(updatedKeys, settingsPatchPaths(section, sectionPatch)...)
 
 		if section == "general" {
-			if _, ok := sectionPatch["language"]; ok {
-				applyMode = "restart_required"
-				needRestart = true
+			if nextLanguage, ok := sectionPatch["language"]; ok {
+				currentLanguage, hasCurrentLanguage := previousSection["language"]
+				if !hasCurrentLanguage || !reflect.DeepEqual(currentLanguage, nextLanguage) {
+					applyMode = "restart_required"
+					needRestart = true
+				}
 			}
 		}
 	}

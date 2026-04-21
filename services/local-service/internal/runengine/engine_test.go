@@ -368,6 +368,29 @@ func TestEngineUpdateSettingsEmitsLeafModelKeys(t *testing.T) {
 	}
 }
 
+func TestEngineUpdateSettingsOnlyRequestsRestartWhenLanguageChanges(t *testing.T) {
+	engine := NewEngine()
+	_, updatedKeys, applyMode, needRestart, err := engine.UpdateSettings(map[string]any{
+		"general": map[string]any{"language": "zh-CN"},
+	})
+	if err != nil {
+		t.Fatalf("unchanged language update returned error: %v", err)
+	}
+	if applyMode != "immediate" || needRestart {
+		t.Fatalf("expected unchanged language update to stay immediate, got applyMode=%s needRestart=%v updatedKeys=%+v", applyMode, needRestart, updatedKeys)
+	}
+
+	_, updatedKeys, applyMode, needRestart, err = engine.UpdateSettings(map[string]any{
+		"general": map[string]any{"language": "en-US"},
+	})
+	if err != nil {
+		t.Fatalf("changed language update returned error: %v", err)
+	}
+	if applyMode != "restart_required" || !needRestart {
+		t.Fatalf("expected changed language update to require restart, got applyMode=%s needRestart=%v updatedKeys=%+v", applyMode, needRestart, updatedKeys)
+	}
+}
+
 func TestEngineSettingsStorePersistsAndReloadsSnapshot(t *testing.T) {
 	storageService := storage.NewService(storageTestAdapter{databasePath: filepath.Join(t.TempDir(), "settings-persist.db")})
 	defer func() { _ = storageService.Close() }()
