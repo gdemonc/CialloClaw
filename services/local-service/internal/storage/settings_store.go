@@ -58,7 +58,7 @@ func (s *SQLiteSettingsStore) SaveSettingsSnapshot(ctx context.Context, snapshot
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO settings_snapshots (snapshot_key, snapshot_json, updated_at) VALUES (?, ?, ?)`, settingsSnapshotKey, string(encoded), time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
-		return fmt.Errorf("write settings snapshot: %w", err)
+		return fmt.Errorf("%w: write settings snapshot: %v", ErrStructuredStoreUnavailable, err)
 	}
 	return nil
 }
@@ -70,7 +70,7 @@ func (s *SQLiteSettingsStore) LoadSettingsSnapshot(ctx context.Context) (map[str
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("load settings snapshot: %w", err)
+		return nil, fmt.Errorf("%w: load settings snapshot: %v", ErrStructuredStoreUnavailable, err)
 	}
 	var snapshot map[string]any
 	if err := json.Unmarshal([]byte(rawSnapshot), &snapshot); err != nil {
@@ -88,13 +88,13 @@ func (s *SQLiteSettingsStore) Close() error {
 
 func (s *SQLiteSettingsStore) initialize(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		return fmt.Errorf("enable sqlite wal mode: %w", err)
+		return fmt.Errorf("%w: enable sqlite wal mode: %v", ErrStructuredStoreUnavailable, err)
 	}
 	if _, err := s.db.ExecContext(ctx, `PRAGMA busy_timeout=5000;`); err != nil {
-		return fmt.Errorf("set sqlite busy timeout: %w", err)
+		return fmt.Errorf("%w: set sqlite busy timeout: %v", ErrStructuredStoreUnavailable, err)
 	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS settings_snapshots (snapshot_key TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL, updated_at TEXT NOT NULL)`); err != nil {
-		return fmt.Errorf("create settings_snapshots table: %w", err)
+		return fmt.Errorf("%w: create settings_snapshots table: %v", ErrStructuredStoreUnavailable, err)
 	}
 	return nil
 }

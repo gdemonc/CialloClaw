@@ -1307,6 +1307,16 @@ func TestDispatchMapsSecurityAuditListStorageErrors(t *testing.T) {
 	}
 }
 
+func TestDispatchMapsWrappedStructuredStoreErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, fmt.Errorf("settings snapshot write failed: %w", storage.ErrStructuredStoreUnavailable))
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1005001 || rpcErr.Message != "SQLITE_WRITE_FAILED" {
+		t.Fatalf("expected wrapped structured store error to map to SQLITE_WRITE_FAILED, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
 func TestDispatchMapsRecoveryPointNotFoundErrors(t *testing.T) {
 	_, rpcErr := wrapOrchestratorResult(nil, orchestrator.ErrRecoveryPointNotFound)
 	if rpcErr == nil {

@@ -218,6 +218,36 @@ func TestChooseRuntimeOnStartKeepsFailedRuntimeState(t *testing.T) {
 	if selected != unavailableRuntime {
 		t.Fatalf("expected nil build failure runtime to choose unavailable runtime, got %+v", selected)
 	}
+	successRuntime := &stubRuntimeStarter{}
+	selected = chooseRuntimeOnStart[*stubRuntimeStarter](successRuntime, nil, func() *stubRuntimeStarter {
+		return unavailableRuntime
+	})
+	if selected != successRuntime {
+		t.Fatalf("expected successful runtime start to keep original runtime, got %+v", selected)
+	}
+}
+
+func TestNewFailsWhenWorkspaceRootIsInvalid(t *testing.T) {
+	_, err := New(config.Config{
+		RPC: config.RPCConfig{
+			Transport:        "named_pipe",
+			NamedPipeName:    `\\.\pipe\cialloclaw-rpc-invalid-workspace`,
+			DebugHTTPAddress: ":0",
+		},
+		WorkspaceRoot: string([]byte{'b', 'a', 'd', 0, 'r', 'o', 'o', 't'}),
+		DatabasePath:  filepath.Join(t.TempDir(), "data", "local.db"),
+		Model: config.ModelConfig{
+			Provider:            "openai_responses",
+			ModelID:             "gpt-5.4",
+			Endpoint:            "https://api.openai.com/v1/responses",
+			SingleTaskLimit:     10.0,
+			DailyLimit:          50.0,
+			BudgetAutoDowngrade: true,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid workspace root to fail bootstrap")
+	}
 }
 
 type stubRuntimeStarter struct{ err error }

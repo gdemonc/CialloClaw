@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,6 +25,13 @@ func TestPersistPluginManifestsHandlesNilAndSuccessPaths(t *testing.T) {
 	items, total, err := service.PluginManifestStore().ListPluginManifests(context.Background(), 10, 0)
 	if err != nil || total == 0 || len(items) == 0 {
 		t.Fatalf("expected plugin manifests to be persisted, total=%d len=%d err=%v", total, len(items), err)
+	}
+	var runtimeNames []string
+	if err := json.Unmarshal([]byte(items[0].RuntimeNamesJSON), &runtimeNames); err != nil || len(runtimeNames) == 0 {
+		t.Fatalf("expected persisted plugin manifests to include runtime names, names=%+v err=%v", runtimeNames, err)
+	}
+	if err := persistPluginManifests(context.Background(), service, &plugin.Service{}); err != nil {
+		t.Fatalf("expected empty plugin registry to be ignored, got %v", err)
 	}
 }
 
@@ -66,4 +74,27 @@ func TestAppStartAndCloseHandleLifecycle(t *testing.T) {
 	// Give the debug HTTP server shutdown path a brief chance to settle before the
 	// next test reuses the process resources.
 	time.Sleep(10 * time.Millisecond)
+}
+
+func TestNewFailsWhenWorkspaceRootIsInvalidAdditional(t *testing.T) {
+	_, err := New(config.Config{
+		RPC: config.RPCConfig{
+			Transport:        "named_pipe",
+			NamedPipeName:    `\\.\pipe\cialloclaw-bootstrap-invalid-workspace`,
+			DebugHTTPAddress: ":0",
+		},
+		WorkspaceRoot: string([]byte{'b', 'a', 'd', 0, 'r', 'o', 'o', 't'}),
+		DatabasePath:  filepath.Join(t.TempDir(), "data", "local.db"),
+		Model: config.ModelConfig{
+			Provider:            "openai_responses",
+			ModelID:             "gpt-5.4",
+			Endpoint:            "https://api.openai.com/v1/responses",
+			SingleTaskLimit:     10.0,
+			DailyLimit:          50.0,
+			BudgetAutoDowngrade: true,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid workspace root to fail bootstrap")
+	}
 }

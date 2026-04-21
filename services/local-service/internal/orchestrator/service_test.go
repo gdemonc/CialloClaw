@@ -9242,6 +9242,25 @@ func TestSettingsUpdateReturnsLeafModelKeys(t *testing.T) {
 	}
 }
 
+func TestNormalizeSettingsSnapshotAccumulatesLegacyDataLogFields(t *testing.T) {
+	normalized := normalizeSettingsSnapshot(map[string]any{
+		"data_log": map[string]any{
+			"provider":              "openai",
+			"budget_auto_downgrade": true,
+			"base_url":              "https://example.invalid/v1",
+			"model":                 "gpt-test",
+		},
+	})
+	models := normalized["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if models["provider"] != "openai" {
+		t.Fatalf("expected legacy provider to map into models provider, got %+v", models)
+	}
+	if credentials["budget_auto_downgrade"] != true || credentials["base_url"] != "https://example.invalid/v1" || credentials["model"] != "gpt-test" {
+		t.Fatalf("expected legacy data_log fields to accumulate into models.credentials, got %+v", credentials)
+	}
+}
+
 func TestSettingsUpdatePersistsSecretForRequestedProvider(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "settings provider secret persist")
 	if service.storage == nil {

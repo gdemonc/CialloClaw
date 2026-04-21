@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -71,5 +72,27 @@ func TestSQLiteSettingsStoreLoadReturnsNilWhenEmpty(t *testing.T) {
 	}
 	if page := cloneSettingsMap(nil); page != nil {
 		t.Fatalf("expected cloneSettingsMap(nil) to stay nil, got %+v", page)
+	}
+}
+
+func TestSQLiteSettingsStoreWrapsStructuredStoreErrors(t *testing.T) {
+	store, err := NewSQLiteSettingsStore(filepath.Join(t.TempDir(), "settings-structured-error.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSettingsStore returned error: %v", err)
+	}
+	_ = store.Close()
+	if err := store.SaveSettingsSnapshot(context.Background(), map[string]any{"general": map[string]any{"language": "zh-CN"}}); !errors.Is(err, ErrStructuredStoreUnavailable) {
+		t.Fatalf("expected closed sqlite store write to wrap ErrStructuredStoreUnavailable, got %v", err)
+	}
+	if _, err := store.LoadSettingsSnapshot(context.Background()); !errors.Is(err, ErrStructuredStoreUnavailable) {
+		t.Fatalf("expected closed sqlite store read to wrap ErrStructuredStoreUnavailable, got %v", err)
+	}
+	closedStore, err := NewSQLiteSettingsStore(filepath.Join(t.TempDir(), "settings-initialize-error.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSettingsStore returned error: %v", err)
+	}
+	_ = closedStore.Close()
+	if err := closedStore.initialize(context.Background()); !errors.Is(err, ErrStructuredStoreUnavailable) {
+		t.Fatalf("expected initialize on closed db to wrap ErrStructuredStoreUnavailable, got %v", err)
 	}
 }
