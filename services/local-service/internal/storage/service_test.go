@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -160,20 +161,37 @@ func TestCapabilitiesReturnsConfiguredStructuredStorageOnly(t *testing.T) {
 	if service.TraceStore() == nil || service.EvalStore() == nil {
 		t.Fatalf("expected trace and eval stores to be wired: %+v", capabilities)
 	}
+	if service.ToolCallStore() == nil {
+		t.Fatalf("expected typed tool call store accessor to be wired: %+v", capabilities)
+	}
 	if !capabilities.SupportsRetrievalHits || !capabilities.SupportsFTS5 || !capabilities.SupportsSQLiteVecStub {
 		t.Fatalf("expected retrieval and search skeleton capabilities to be enabled: %+v", capabilities)
 	}
 	if capabilities.MemoryStoreBackend != memoryStoreBackendSQLite || capabilities.FallbackActive {
-		t.Fatalf("unexpected backend state: %+v", capabilities)
+		if runtime.GOOS == "windows" {
+			t.Fatalf("unexpected backend state: %+v", capabilities)
+		}
+		if !capabilities.FallbackActive {
+			t.Fatalf("expected unsupported platforms to report fallback activity, got %+v", capabilities)
+		}
 	}
 	if capabilities.MemoryRetrievalBackend != memoryRetrievalBackendSQLite {
 		t.Fatalf("unexpected retrieval backend: %+v", capabilities)
 	}
-	if capabilities.SecretStoreBackend != "stronghold_sqlite_fallback" {
-		t.Fatalf("unexpected secret backend: %+v", capabilities)
+	if runtime.GOOS == "windows" {
+		if capabilities.SecretStoreBackend != "stronghold" {
+			t.Fatalf("unexpected secret backend: %+v", capabilities)
+		}
+	} else {
+		if capabilities.SecretStoreBackend != "stronghold_sqlite_fallback" {
+			t.Fatalf("expected fallback secret backend on unsupported platforms, got %+v", capabilities)
+		}
 	}
-	if service.SkillManifestStore() == nil || service.BlueprintDefinitionStore() == nil || service.PromptTemplateVersionStore() == nil {
+	if service.SkillManifestStore() == nil || service.BlueprintDefinitionStore() == nil || service.PromptTemplateVersionStore() == nil || service.PluginManifestStore() == nil {
 		t.Fatalf("expected config asset stores to be wired: %+v", capabilities)
+	}
+	if service.SessionStore() == nil || service.SettingsStore() == nil {
+		t.Fatalf("expected session/settings stores to be wired: %+v", capabilities)
 	}
 }
 
@@ -190,6 +208,9 @@ func TestServiceConfigAssetStoresPersistRecords(t *testing.T) {
 	if err := service.PromptTemplateVersionStore().WritePromptTemplateVersion(context.Background(), PromptTemplateVersionRecord{PromptTemplateVersionID: "prompt_001", TemplateName: "default", Version: "v1", Source: "builtin", Summary: "summary", TemplateBody: "body", VariablesJSON: `[]`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
 		t.Fatalf("write prompt template version failed: %v", err)
 	}
+	if err := service.PluginManifestStore().WritePluginManifest(context.Background(), PluginManifestRecord{PluginID: "plugin_001", Name: "ocr", Version: "v1", Entry: "builtin://plugin/ocr", Source: "builtin", Summary: "summary", CapabilitiesJSON: `["ocr_image"]`, PermissionsJSON: `["artifact_read"]`, RuntimeNamesJSON: `["ocr_worker"]`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
+		t.Fatalf("write plugin manifest failed: %v", err)
+	}
 	if _, err := service.SkillManifestStore().GetSkillManifest(context.Background(), "skill_001"); err != nil {
 		t.Fatalf("get skill manifest failed: %v", err)
 	}
@@ -198,6 +219,43 @@ func TestServiceConfigAssetStoresPersistRecords(t *testing.T) {
 	}
 	if _, err := service.PromptTemplateVersionStore().GetPromptTemplateVersion(context.Background(), "prompt_001"); err != nil {
 		t.Fatalf("get prompt template version failed: %v", err)
+	}
+	if _, err := service.PluginManifestStore().GetPluginManifest(context.Background(), "plugin_001"); err != nil {
+		t.Fatalf("get plugin manifest failed: %v", err)
+	}
+}
+
+func TestServiceSessionAndSettingsStoresPersistRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-settings-service.db")
+	service := NewService(stubAdapter{databasePath: path})
+	defer func() { _ = service.Close() }()
+	if err := service.SessionStore().WriteSession(context.Background(), SessionRecord{SessionID: "sess_001", Title: "Session 001", Status: "active", CreatedAt: "2026-04-21T10:00:00Z", UpdatedAt: "2026-04-21T10:00:00Z"}); err != nil {
+		t.Fatalf("write session failed: %v", err)
+	}
+	if err := service.SettingsStore().SaveSettingsSnapshot(context.Background(), map[string]any{
+		"general": map[string]any{"language": "zh-CN"},
+		"models":  map[string]any{"provider": "openai", "credentials": map[string]any{"budget_auto_downgrade": true}},
+	}); err != nil {
+		t.Fatalf("save settings snapshot failed: %v", err)
+	}
+	session, err := service.SessionStore().GetSession(context.Background(), "sess_001")
+	if err != nil || session.Title != "Session 001" {
+		t.Fatalf("get session failed: session=%+v err=%v", session, err)
+	}
+	snapshot, err := service.SettingsStore().LoadSettingsSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("load settings snapshot failed: %v", err)
+	}
+	if snapshot["general"].(map[string]any)["language"] != "zh-CN" {
+		t.Fatalf("unexpected settings snapshot: %+v", snapshot)
+	}
+}
+
+func TestResolveModelAPIKeyFailsWhenSecretStoreMissing(t *testing.T) {
+	service := NewService(nil)
+	service.secretStore = nil
+	if _, err := service.ResolveModelAPIKey("openai_responses"); !errors.Is(err, ErrSecretStoreAccessFailed) {
+		t.Fatalf("expected ErrSecretStoreAccessFailed when secret store is missing, got %v", err)
 	}
 }
 

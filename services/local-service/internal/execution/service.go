@@ -1,4 +1,5 @@
-// 该文件负责主链路最小真实执行链路：收集输入、生成内容、写入 workspace 并返回交付结果。
+// Package execution wires the minimum task execution pipeline: collect input,
+// generate content, persist outputs, and return formal delivery artifacts.
 package execution
 
 import (
@@ -30,7 +31,7 @@ const (
 	internalScreenAnalyzeIntent = "screen_analyze_candidate"
 )
 
-// Service 负责在当前仓库代码范围内完成一条可运行的最小执行链路。
+// Service owns the minimum executable task pipeline inside local-service.
 type Service struct {
 	fileSystem          platform.FileSystemAdapter
 	execution           tools.ExecutionCapability
@@ -49,6 +50,7 @@ type Service struct {
 	executor            *tools.ToolExecutor
 	plugin              *plugin.Service
 	loopStore           storage.LoopRuntimeStore
+	extensionAssets     storage.ExtensionAssetCatalog
 	notificationEmitter func(taskID, method string, params map[string]any)
 	steeringPoller      func(taskID string) []string
 	workspace           string
@@ -74,6 +76,16 @@ func (s *Service) WithLoopRuntimeStore(store storage.LoopRuntimeStore) *Service 
 	return s
 }
 
+// WithExtensionAssetCatalog injects the versioned extension-asset catalog used
+// to attribute execution, trace, and eval snapshots to one concrete asset set.
+func (s *Service) WithExtensionAssetCatalog(catalog storage.ExtensionAssetCatalog) *Service {
+	if s == nil {
+		return nil
+	}
+	s.extensionAssets = catalog
+	return s
+}
+
 // WithNotificationEmitter lets the execution layer publish formal runtime
 // notifications without depending directly on runengine internals.
 func (s *Service) WithNotificationEmitter(emitter func(taskID, method string, params map[string]any)) *Service {
@@ -94,7 +106,7 @@ func (s *Service) WithSteeringPoller(poller func(taskID string) []string) *Servi
 	return s
 }
 
-// Request 描述一次任务执行所需的最小输入。
+// Request carries the minimum execution input for one task attempt.
 type Request struct {
 	TaskID               string
 	RunID                string
@@ -112,11 +124,12 @@ type Request struct {
 	BudgetDowngrade      map[string]any
 }
 
-// Result 描述执行完成后需要回填给 orchestrator 的交付与痕迹。
+// Result carries delivery outputs and trace fragments back to orchestrator.
 type Result struct {
 	Content         string
 	DeliveryResult  map[string]any
 	Artifacts       []map[string]any
+	ExtensionAssets []map[string]any
 	BubbleText      string
 	RecoveryPoint   map[string]any
 	ModelInvocation map[string]any
@@ -129,7 +142,7 @@ type Result struct {
 	DurationMS      int64
 }
 
-// GovernanceAssessment 描述一次潜在高风险动作的预执行治理判断结果。
+// GovernanceAssessment captures the pre-execution governance decision for one potentially risky action.
 type GovernanceAssessment struct {
 	OperationName      string
 	TargetObject       string
@@ -141,7 +154,7 @@ type GovernanceAssessment struct {
 	ImpactScope        map[string]any
 }
 
-// ErrRecoveryPointPrepareFailed 表示执行前的恢复点准备失败。
+// ErrRecoveryPointPrepareFailed reports that a pre-execution recovery point could not be prepared.
 var ErrRecoveryPointPrepareFailed = errors.New("execution: recovery point prepare failed")
 
 type generationTrace struct {
@@ -153,7 +166,7 @@ type generationTrace struct {
 	BudgetFailure    map[string]any
 }
 
-// NewService 创建执行服务。
+// NewService builds the execution service.
 func NewService(
 	fileSystem platform.FileSystemAdapter,
 	executionBackend tools.ExecutionCapability,
@@ -232,7 +245,7 @@ func (s *Service) ScreenClient() tools.ScreenCaptureClient {
 	return s.screen
 }
 
-// AssessGovernance 在真正执行前，基于将要落地的工具调用做一次统一风险判断。
+// AssessGovernance evaluates the pending tool action before it is executed.
 func (s *Service) AssessGovernance(ctx context.Context, request Request) (GovernanceAssessment, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -276,20 +289,18 @@ func (s *Service) AssessGovernance(ctx context.Context, request Request) (Govern
 	}, true, nil
 }
 
-// Execute 执行当前任务的最小内容生成与落盘链路。
+// Execute runs the minimum content-generation and persistence flow for one task.
 func (s *Service) Execute(ctx context.Context, request Request) (Result, error) {
 	startedAt := time.Now()
 	if result, ok, err := s.executeInternalScreenAnalysis(ctx, request); err != nil {
 		return result, err
 	} else if ok {
-		result.DurationMS = time.Since(startedAt).Milliseconds()
-		return result, nil
+		return s.finalizeExecutionResult(ctx, request, startedAt, result, "ocr_image"), nil
 	}
 	if result, ok, err := s.executeDirectBuiltinTool(ctx, request); err != nil {
 		return result, err
 	} else if ok {
-		result.DurationMS = time.Since(startedAt).Milliseconds()
-		return result, nil
+		return s.finalizeExecutionResult(ctx, request, startedAt, result), nil
 	}
 
 	inputText := s.buildExecutionInput(request.Snapshot)
@@ -324,12 +335,11 @@ func (s *Service) Execute(ctx context.Context, request Request) (Result, error) 
 		return toolResult, err
 	} else if ok {
 		toolResult.ToolCalls = append(append([]tools.ToolCallRecord(nil), result.ToolCalls...), toolResult.ToolCalls...)
-		// 当请求已走 ToolExecutor 路径时，保留真实工具输入，
-		// 仅把 execution 层的通用上下文附加到 execution_context，
-		// 避免后续 ToolCall 记录丢失实际工具参数。
+		// When ToolExecutor already produced the concrete tool input, keep it as the
+		// primary payload and only append generic execution context so downstream
+		// ToolCall records do not lose the original user-facing arguments.
 		toolResult.ToolInput = mergeToolInputs(toolResult.ToolInput, result.ToolInput)
-		toolResult.DurationMS = time.Since(startedAt).Milliseconds()
-		return toolResult, nil
+		return s.finalizeExecutionResult(ctx, request, startedAt, toolResult), nil
 	}
 
 	if deliveryType == "workspace_document" {
@@ -382,7 +392,7 @@ func (s *Service) Execute(ctx context.Context, request Request) (Result, error) 
 			"model_invocation": cloneMap(result.ModelInvocation),
 			"audit_record":     cloneMap(result.AuditRecord),
 		})
-		return result, nil
+		return s.finalizeExecutionResult(ctx, request, startedAt, result), nil
 	}
 
 	result.BubbleText = truncateBubbleText(trace.OutputText)
@@ -399,7 +409,7 @@ func (s *Service) Execute(ctx context.Context, request Request) (Result, error) 
 		"model_invocation": cloneMap(result.ModelInvocation),
 		"audit_record":     cloneMap(result.AuditRecord),
 	})
-	return result, nil
+	return s.finalizeExecutionResult(ctx, request, startedAt, result), nil
 }
 
 func (s *Service) executeInternalScreenAnalysis(ctx context.Context, request Request) (Result, bool, error) {
@@ -2823,6 +2833,97 @@ func latestToolCall(toolCalls []tools.ToolCallRecord) tools.ToolCallRecord {
 		return tools.ToolCallRecord{}
 	}
 	return toolCalls[len(toolCalls)-1]
+}
+
+func (s *Service) finalizeExecutionResult(ctx context.Context, _ Request, startedAt time.Time, result Result, directCapabilities ...string) Result {
+	if result.DurationMS <= 0 {
+		result.DurationMS = time.Since(startedAt).Milliseconds()
+	}
+	s.attachExtensionAssets(ctx, &result, directCapabilities...)
+	return result
+}
+
+func (s *Service) attachExtensionAssets(ctx context.Context, result *Result, directCapabilities ...string) {
+	if s == nil || result == nil || s.extensionAssets == nil {
+		return
+	}
+	refs := make([]storage.ExtensionAssetReference, 0)
+	if currentRefs, err := s.extensionAssets.CurrentExecutionAssets(ctx); err == nil {
+		refs = append(refs, currentRefs...)
+	}
+	capabilities := append(capabilityNamesFromToolCalls(result.ToolCalls), directCapabilities...)
+	if pluginRefs, err := s.extensionAssets.PluginAssetsForCapabilities(ctx, capabilities); err == nil {
+		refs = append(refs, pluginRefs...)
+	}
+	refs = dedupeExtensionAssetRefs(refs)
+	if len(refs) == 0 {
+		return
+	}
+	result.ExtensionAssets = extensionAssetReferenceMaps(refs)
+	refsPayload := cloneMapSlice(result.ExtensionAssets)
+	if result.ModelInvocation == nil {
+		result.ModelInvocation = map[string]any{}
+	}
+	result.ModelInvocation["extension_asset_refs"] = refsPayload
+	enrichToolTrace(result, map[string]any{"extension_asset_refs": cloneMapSlice(result.ExtensionAssets)})
+	enrichLatestToolCall(result, map[string]any{"extension_asset_refs": cloneMapSlice(result.ExtensionAssets)})
+}
+
+func capabilityNamesFromToolCalls(toolCalls []tools.ToolCallRecord) []string {
+	capabilities := make([]string, 0, len(toolCalls))
+	for _, toolCall := range toolCalls {
+		if candidate := strings.TrimSpace(toolCall.ToolName); candidate != "" {
+			capabilities = append(capabilities, candidate)
+		}
+	}
+	return capabilities
+}
+
+func dedupeExtensionAssetRefs(items []storage.ExtensionAssetReference) []storage.ExtensionAssetReference {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]storage.ExtensionAssetReference, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		key := strings.Join([]string{item.AssetKind, item.AssetID, item.Version}, "|")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, item)
+	}
+	return result
+}
+
+func extensionAssetReferenceMaps(items []storage.ExtensionAssetReference) []map[string]any {
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		entry := map[string]any{
+			"asset_kind": item.AssetKind,
+			"asset_id":   item.AssetID,
+			"name":       item.Name,
+			"version":    item.Version,
+			"source":     item.Source,
+		}
+		if item.Summary != "" {
+			entry["summary"] = item.Summary
+		}
+		if item.Entry != "" {
+			entry["entry"] = item.Entry
+		}
+		if len(item.Capabilities) > 0 {
+			entry["capabilities"] = append([]string(nil), item.Capabilities...)
+		}
+		if len(item.Permissions) > 0 {
+			entry["permissions"] = append([]string(nil), item.Permissions...)
+		}
+		if len(item.RuntimeNames) > 0 {
+			entry["runtime_names"] = append([]string(nil), item.RuntimeNames...)
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 func assignLatestToolTrace(result *Result, toolCall tools.ToolCallRecord) {

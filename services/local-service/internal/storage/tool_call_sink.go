@@ -28,6 +28,31 @@ func (s *inMemoryToolCallStore) SaveToolCall(_ context.Context, record tools.Too
 	return nil
 }
 
+func (s *inMemoryToolCallStore) ListToolCalls(_ context.Context, taskID, runID string, limit, offset int) ([]tools.ToolCallRecord, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]tools.ToolCallRecord, 0, len(s.records))
+	for index := len(s.records) - 1; index >= 0; index-- {
+		record := s.records[index]
+		if taskID != "" && record.TaskID != taskID {
+			continue
+		}
+		if runID != "" && record.RunID != runID {
+			continue
+		}
+		items = append(items, record)
+	}
+	total := len(items)
+	if offset >= total {
+		return []tools.ToolCallRecord{}, total, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return append([]tools.ToolCallRecord(nil), items[offset:end]...), total, nil
+}
+
 type SQLiteToolCallStore struct {
 	db *sql.DB
 }
@@ -86,6 +111,51 @@ func (s *SQLiteToolCallStore) SaveToolCall(ctx context.Context, record tools.Too
 	return nil
 }
 
+func (s *SQLiteToolCallStore) ListToolCalls(ctx context.Context, taskID, runID string, limit, offset int) ([]tools.ToolCallRecord, int, error) {
+	countQuery := `SELECT COUNT(1) FROM tool_calls WHERE 1 = 1`
+	query := `SELECT tool_call_id, run_id, task_id, step_id, tool_name, status, input_json, output_json, error_code, duration_ms FROM tool_calls WHERE 1 = 1`
+	args := make([]any, 0, 4)
+	countArgs := make([]any, 0, 2)
+	if taskID != "" {
+		countQuery += ` AND task_id = ?`
+		query += ` AND task_id = ?`
+		args = append(args, taskID)
+		countArgs = append(countArgs, taskID)
+	}
+	if runID != "" {
+		countQuery += ` AND run_id = ?`
+		query += ` AND run_id = ?`
+		args = append(args, runID)
+		countArgs = append(countArgs, runID)
+	}
+	query += ` ORDER BY rowid DESC`
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count tool calls: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list tool calls: %w", err)
+	}
+	defer rows.Close()
+	items := make([]tools.ToolCallRecord, 0)
+	for rows.Next() {
+		record, err := scanToolCallRecord(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate tool calls: %w", err)
+	}
+	return items, total, nil
+}
+
 func normalizeToolCallStatus(status tools.ToolCallStatus) string {
 	switch status {
 	case tools.ToolCallStatusStarted:
@@ -133,4 +203,48 @@ func (s *SQLiteToolCallStore) initialize(ctx context.Context) error {
 		return fmt.Errorf("create tool_calls index: %w", err)
 	}
 	return nil
+}
+
+func scanToolCallRecord(rows *sql.Rows) (tools.ToolCallRecord, error) {
+	var (
+		record     tools.ToolCallRecord
+		inputJSON  string
+		outputJSON string
+		errorCode  sql.NullInt64
+		status     string
+		stepID     string
+	)
+	if err := rows.Scan(&record.ToolCallID, &record.RunID, &record.TaskID, &stepID, &record.ToolName, &status, &inputJSON, &outputJSON, &errorCode, &record.DurationMS); err != nil {
+		return tools.ToolCallRecord{}, fmt.Errorf("scan tool call: %w", err)
+	}
+	record.StepID = stepID
+	record.Status = denormalizeToolCallStatus(status)
+	if errorCode.Valid {
+		converted := int(errorCode.Int64)
+		record.ErrorCode = &converted
+	}
+	if inputJSON != "" {
+		if err := json.Unmarshal([]byte(inputJSON), &record.Input); err != nil {
+			return tools.ToolCallRecord{}, fmt.Errorf("decode tool call input: %w", err)
+		}
+	}
+	if outputJSON != "" {
+		if err := json.Unmarshal([]byte(outputJSON), &record.Output); err != nil {
+			return tools.ToolCallRecord{}, fmt.Errorf("decode tool call output: %w", err)
+		}
+	}
+	return record, nil
+}
+
+func denormalizeToolCallStatus(status string) tools.ToolCallStatus {
+	switch status {
+	case "running":
+		return tools.ToolCallStatusStarted
+	case "succeeded":
+		return tools.ToolCallStatusSucceeded
+	case "failed":
+		return tools.ToolCallStatusFailed
+	default:
+		return tools.ToolCallStatusStarted
+	}
 }
