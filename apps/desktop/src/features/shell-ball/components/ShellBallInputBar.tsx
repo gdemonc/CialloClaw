@@ -231,9 +231,11 @@ const StyledInputBar = styled.div`
     top: 6px;
     width: 100%;
     padding: 10px;
-    background: transparent;
+    background: var(--shell-ball-input-paper-soft);
     outline: none;
-    box-shadow: none;
+    box-shadow:
+      0 10px 20px -20px rgba(122, 106, 79, 0.22),
+      0 1px 0 rgba(255, 255, 255, 0.34) inset;
     border: none;
     border-radius: 1rem;
     caret-color: rgba(106, 145, 200, 0.94);
@@ -299,12 +301,12 @@ const StyledInputBar = styled.div`
     left: 0;
     bottom: 0;
     width: 100%;
-    height: 6px;
-    background: linear-gradient(90deg, rgba(255, 236, 168, 0.96), rgba(255, 246, 203, 0.98));
-    border: 2px solid rgba(255, 247, 214, 0.9);
+    height: 5px;
+    background: linear-gradient(90deg, rgba(168, 194, 225, 0.82), rgba(255, 243, 230, 0.96));
+    border: 1px solid rgba(255, 255, 255, 0.72);
     border-radius: 1rem;
     box-shadow:
-      0 0 10px rgba(255, 223, 122, 0.3),
+      0 0 10px rgba(168, 194, 225, 0.18),
       0 8px 18px -18px rgba(122, 106, 79, 0.22);
     transform: none;
     transition:
