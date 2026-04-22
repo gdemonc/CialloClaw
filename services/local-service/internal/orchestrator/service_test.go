@@ -10287,25 +10287,16 @@ func TestServiceSubmitInputRoutesFollowUpIntoExistingTask(t *testing.T) {
 		},
 	})
 
-	startResult, err := service.StartTask(map[string]any{
-		"source":  "floating_ball",
-		"trigger": "hover_text_input",
-		"input": map[string]any{
-			"type": "text",
-			"text": "把这段报错分析一下",
-		},
-		"intent": map[string]any{
-			"name": "write_file",
-			"arguments": map[string]any{
-				"require_authorization": true,
-			},
-		},
+	activeTask := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_follow_up_processing",
+		Title:       "Analyze the current failure",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		CurrentStep: "agent_loop",
+		RiskLevel:   "green",
 	})
-	if err != nil {
-		t.Fatalf("start task failed: %v", err)
-	}
-	activeTaskID = startResult["task"].(map[string]any)["task_id"].(string)
-	activeSessionID := startResult["task"].(map[string]any)["session_id"].(string)
+	activeTaskID = activeTask.TaskID
+	activeSessionID := activeTask.SessionID
 
 	followUpResult, err := service.SubmitInput(map[string]any{
 		"source":  "floating_ball",
@@ -10356,24 +10347,15 @@ func TestServiceStartTaskRoutesFileAttachmentIntoExistingTask(t *testing.T) {
 		},
 	})
 
-	startResult, err := service.StartTask(map[string]any{
-		"source":  "floating_ball",
-		"trigger": "hover_text_input",
-		"input": map[string]any{
-			"type": "text",
-			"text": "分析一下这个服务异常",
-		},
-		"intent": map[string]any{
-			"name": "write_file",
-			"arguments": map[string]any{
-				"require_authorization": true,
-			},
-		},
+	activeTask := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_file_follow_up_processing",
+		Title:       "Analyze the current service failure",
+		SourceType:  "hover_input",
+		Status:      "processing",
+		CurrentStep: "agent_loop",
+		RiskLevel:   "green",
 	})
-	if err != nil {
-		t.Fatalf("start task failed: %v", err)
-	}
-	activeTaskID = startResult["task"].(map[string]any)["task_id"].(string)
+	activeTaskID = activeTask.TaskID
 
 	followUpResult, err := service.StartTask(map[string]any{
 		"source":  "floating_ball",
@@ -10396,6 +10378,47 @@ func TestServiceStartTaskRoutesFileAttachmentIntoExistingTask(t *testing.T) {
 	}
 	if len(record.Snapshot.Files) != 1 || record.Snapshot.Files[0] != "logs/network.log" {
 		t.Fatalf("expected file follow-up to merge snapshot files, got %+v", record.Snapshot.Files)
+	}
+}
+
+func TestServiceSubmitInputDoesNotContinueWaitingAuthorizationTask(t *testing.T) {
+	service := newTestService()
+
+	startResult, err := service.StartTask(map[string]any{
+		"source":  "floating_ball",
+		"trigger": "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "把这段报错分析一下",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"require_authorization": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start waiting_auth task failed: %v", err)
+	}
+	firstTask := startResult["task"].(map[string]any)
+
+	followUpResult, err := service.SubmitInput(map[string]any{
+		"source":  "floating_ball",
+		"trigger": "hover_text_input",
+		"input": map[string]any{
+			"type":       "text",
+			"text":       "重点看网络层，不要讲太泛",
+			"input_mode": "text",
+		},
+		"context": map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("submit follow-up after waiting_auth failed: %v", err)
+	}
+	secondTask := followUpResult["task"].(map[string]any)
+	if secondTask["task_id"] == firstTask["task_id"] {
+		t.Fatalf("expected waiting_auth task to reject implicit continuation, got %+v", secondTask)
 	}
 }
 

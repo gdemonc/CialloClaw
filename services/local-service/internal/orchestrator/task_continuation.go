@@ -122,11 +122,12 @@ func (s *Service) resolveTaskContinuationContext(explicitSessionID string) taskC
 	return taskContinuationContext{}
 }
 
-// canContinueTask keeps continuation scope limited to tasks that are still
-// waiting for user follow-up, approval, or in-flight execution.
+// canContinueTask keeps continuation scope limited to unfinished tasks that can
+// still absorb follow-up input without invalidating an approval boundary or
+// trapping the user inside a blocked state.
 func canContinueTask(task runengine.TaskRecord) bool {
 	switch task.Status {
-	case "confirming_intent", "processing", "waiting_auth", "waiting_input", "paused", "blocked":
+	case "confirming_intent", "processing", "waiting_input", "paused":
 		return true
 	default:
 		return false
@@ -263,11 +264,27 @@ func heuristicTaskContinuationDecision(snapshot contextsvc.TaskContextSnapshot, 
 // different request onto the wrong task.
 func shouldHeuristicallyContinueTask(snapshot contextsvc.TaskContextSnapshot, candidate runengine.TaskRecord) bool {
 	combined := strings.ToLower(strings.Join([]string{snapshot.Text, snapshot.SelectionText, snapshot.ErrorText}, " "))
-	hasFollowUpCue := continuationContainsAny(combined, "补充", "继续", "重点", "不要", "改成", "改为", "标题", "风格", "输出到", "follow-up", "continue", "instead", "focus", "title", "format", "tone")
-	if hasFollowUpCue {
-		return sameContinuationContext(snapshot, snapshotFromTask(candidate))
+	if !continuationContainsAny(combined,
+		"补充",
+		"继续",
+		"不要",
+		"改成",
+		"改为",
+		"follow-up",
+		"continue",
+		"instead",
+		"also include",
+		"attach this",
+	) {
+		return false
 	}
-	return false
+	if sameContinuationContext(snapshot, snapshotFromTask(candidate)) {
+		return true
+	}
+	// Pending clarification tasks are the only safe context-less fallback case:
+	// the backend already asked the user for more input and has not entered an
+	// approval gate or autonomous execution segment yet.
+	return candidate.Status == "waiting_input" || candidate.Status == "confirming_intent"
 }
 
 func sameContinuationContext(current, previous contextsvc.TaskContextSnapshot) bool {
@@ -283,7 +300,7 @@ func sameContinuationContext(current, previous contextsvc.TaskContextSnapshot) b
 	if strings.TrimSpace(current.AppName) != "" && current.AppName == previous.AppName {
 		return true
 	}
-	return previous.PageTitle == "" && previous.WindowTitle == "" && previous.AppName == ""
+	return false
 }
 
 func (s *Service) continueTask(task runengine.TaskRecord, snapshot contextsvc.TaskContextSnapshot, explicitIntent map[string]any, decision taskContinuationDecision) (map[string]any, error) {
@@ -474,7 +491,7 @@ func buildTaskContinuationInstruction(snapshot contextsvc.TaskContextSnapshot, e
 func continuationMarkerSummary(snapshot contextsvc.TaskContextSnapshot) string {
 	combined := strings.ToLower(strings.Join([]string{snapshot.Text, snapshot.SelectionText, snapshot.ErrorText}, " "))
 	markers := make([]string, 0, 6)
-	for _, marker := range []string{"补充", "继续", "重点", "不要", "改成", "改为", "标题", "风格", "输出到", "follow-up", "continue", "instead", "focus", "title", "format", "tone"} {
+	for _, marker := range []string{"补充", "继续", "不要", "改成", "改为", "follow-up", "continue", "instead", "also include", "attach this"} {
 		if marker != "" && strings.Contains(combined, strings.ToLower(marker)) {
 			markers = append(markers, marker)
 		}

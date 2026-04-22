@@ -15,8 +15,8 @@ func TestResolveTaskContinuationContextUsesSingleActiveSession(t *testing.T) {
 		SessionID:   "sess_active",
 		Title:       "Analyze the current failure",
 		SourceType:  "hover_input",
-		Status:      "waiting_auth",
-		CurrentStep: "waiting_authorization",
+		Status:      "processing",
+		CurrentStep: "agent_loop",
 		RiskLevel:   "yellow",
 	})
 
@@ -29,6 +29,23 @@ func TestResolveTaskContinuationContextUsesSingleActiveSession(t *testing.T) {
 	}
 	if len(continuationContext.Candidates) != 1 || continuationContext.Candidates[0].TaskID != activeTask.TaskID {
 		t.Fatalf("expected active task to remain the only continuation candidate, got %+v", continuationContext.Candidates)
+	}
+}
+
+func TestResolveTaskContinuationContextSkipsWaitingAuthorizationTasks(t *testing.T) {
+	service := newTestService()
+	service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_waiting_auth",
+		Title:       "Write into a file after approval",
+		SourceType:  "hover_input",
+		Status:      "waiting_auth",
+		CurrentStep: "waiting_authorization",
+		RiskLevel:   "yellow",
+	})
+
+	continuationContext := service.resolveTaskContinuationContext("")
+	if continuationContext.SessionID != "" || len(continuationContext.Candidates) != 0 {
+		t.Fatalf("expected waiting_auth task to stay out of implicit continuation candidates, got %+v", continuationContext)
 	}
 }
 
@@ -143,5 +160,32 @@ func TestClassifyTaskContinuationDoesNotAutoMergeSameExplicitIntentName(t *testi
 
 	if decision.Decision != "new_task" {
 		t.Fatalf("expected same explicit intent name to stay a new task in fallback mode, got %+v", decision)
+	}
+}
+
+func TestClassifyTaskContinuationDoesNotAutoMergeGenericFocusCueWithoutContext(t *testing.T) {
+	service := newTestService()
+	service.model = nil
+
+	decision := service.classifyTaskContinuation(
+		contextsvc.TaskContextSnapshot{
+			Trigger:   "hover_text_input",
+			InputType: "text",
+			Text:      "Focus on drafting a release checklist.",
+		},
+		nil,
+		taskContinuationContext{
+			Candidates: []runengine.TaskRecord{{
+				TaskID:      "task_001",
+				Status:      "processing",
+				CurrentStep: "agent_loop",
+				SourceType:  "hover_input",
+				UpdatedAt:   time.Now().Add(-10 * time.Second),
+			}},
+		},
+	)
+
+	if decision.Decision != "new_task" {
+		t.Fatalf("expected generic focus cue without shared context to stay a new task in fallback mode, got %+v", decision)
 	}
 }
