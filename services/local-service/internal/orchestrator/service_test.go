@@ -84,12 +84,13 @@ type screenSessionAction struct {
 }
 
 type recordingScreenCaptureClient struct {
-	base         tools.ScreenCaptureClient
-	startCalls   []tools.ScreenSessionStartInput
-	stopCalls    []screenSessionAction
-	expireCalls  []screenSessionAction
-	cleanupCalls []tools.ScreenCleanupInput
-	captureErr   error
+	base                    tools.ScreenCaptureClient
+	startCalls              []tools.ScreenSessionStartInput
+	stopCalls               []screenSessionAction
+	expireCalls             []screenSessionAction
+	cleanupCalls            []tools.ScreenCleanupInput
+	expiredCleanupScanCalls []tools.ScreenCleanupInput
+	captureErr              error
 }
 
 func (b successfulExecutionBackend) RunCommand(_ context.Context, _ string, _ []string, _ string) (tools.CommandExecutionResult, error) {
@@ -186,6 +187,7 @@ func (c *recordingScreenCaptureClient) CleanupSessionArtifacts(ctx context.Conte
 }
 
 func (c *recordingScreenCaptureClient) CleanupExpiredScreenTemps(ctx context.Context, input tools.ScreenCleanupInput) (tools.ScreenCleanupResult, error) {
+	c.expiredCleanupScanCalls = append(c.expiredCleanupScanCalls, input)
 	return c.base.CleanupExpiredScreenTemps(ctx, input)
 }
 
@@ -5747,7 +5749,16 @@ func TestServiceStartTaskInfersScreenAnalyzeFromVisualErrorRequest(t *testing.T)
 }
 
 func TestServiceScreenAnalyzeStopsSessionAfterSuccessfulApproval(t *testing.T) {
-	screenClient := &recordingScreenCaptureClient{base: sidecarclient.NewInMemoryScreenCaptureClient()}
+	baseScreenClient := sidecarclient.NewInMemoryScreenCaptureClient()
+	expiredSession, err := baseScreenClient.StartSession(context.Background(), tools.ScreenSessionStartInput{SessionID: "sess_expired_cleanup", TaskID: "task_expired_cleanup", RunID: "run_expired_cleanup", CaptureMode: tools.ScreenCaptureModeScreenshot, TTL: time.Millisecond})
+	if err != nil {
+		t.Fatalf("start expired cleanup seed session failed: %v", err)
+	}
+	if _, err := baseScreenClient.CaptureScreenshot(context.Background(), tools.ScreenCaptureInput{ScreenSessionID: expiredSession.ScreenSessionID, CaptureMode: tools.ScreenCaptureModeScreenshot, Source: "screen_capture"}); err != nil {
+		t.Fatalf("capture expired cleanup seed frame failed: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	screenClient := &recordingScreenCaptureClient{base: baseScreenClient}
 	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_sess_0001/frame_0001.png", Text: "fatal build error", Language: "eng", Source: "ocr_worker_text"}}
 	service, _ := newTestServiceWithExecutionWorkersAndScreen(t, "unused", platform.LocalExecutionBackend{}, nil, sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient(), screenClient)
 
@@ -5778,6 +5789,13 @@ func TestServiceScreenAnalyzeStopsSessionAfterSuccessfulApproval(t *testing.T) {
 	}
 	if len(screenClient.stopCalls) != 1 || screenClient.stopCalls[0].reason != "analysis_completed" {
 		t.Fatalf("expected one successful screen session stop, got %+v", screenClient.stopCalls)
+	}
+	if len(screenClient.expiredCleanupScanCalls) != 1 || screenClient.expiredCleanupScanCalls[0].Reason != "expired_session_scan" {
+		t.Fatalf("expected successful screen analysis to scan expired sessions once, got %+v", screenClient.expiredCleanupScanCalls)
+	}
+	cleanupResult, err := baseScreenClient.CleanupSessionArtifacts(context.Background(), tools.ScreenCleanupInput{ScreenSessionID: expiredSession.ScreenSessionID, Reason: "assert_cleanup_scan"})
+	if err != nil || cleanupResult.DeletedCount != 0 {
+		t.Fatalf("expected expired cleanup scan to reclaim old temp artifacts before new execution, result=%+v err=%v", cleanupResult, err)
 	}
 	if len(screenClient.expireCalls) != 0 || len(screenClient.cleanupCalls) != 0 {
 		t.Fatalf("expected successful screen analysis to avoid expire/cleanup, got expire=%+v cleanup=%+v", screenClient.expireCalls, screenClient.cleanupCalls)
@@ -5822,6 +5840,9 @@ func TestServiceScreenAnalyzeFailureExpiresAndCleansSession(t *testing.T) {
 	}
 	if len(screenClient.stopCalls) != 0 {
 		t.Fatalf("expected failed screen analysis to avoid stop semantics, got %+v", screenClient.stopCalls)
+	}
+	if len(screenClient.expiredCleanupScanCalls) != 1 || screenClient.expiredCleanupScanCalls[0].Reason != "expired_session_scan" {
+		t.Fatalf("expected failed screen analysis to scan expired sessions once, got %+v", screenClient.expiredCleanupScanCalls)
 	}
 	if len(screenClient.expireCalls) != 1 || screenClient.expireCalls[0].reason != "analysis_failed" {
 		t.Fatalf("expected failed screen analysis to expire session, got %+v", screenClient.expireCalls)
@@ -5868,6 +5889,9 @@ func TestServiceScreenAnalyzeCaptureFailureExpiresAndCleansSession(t *testing.T)
 	}
 	if len(screenClient.stopCalls) != 0 {
 		t.Fatalf("expected capture failure to avoid stop semantics, got %+v", screenClient.stopCalls)
+	}
+	if len(screenClient.expiredCleanupScanCalls) != 1 || screenClient.expiredCleanupScanCalls[0].Reason != "expired_session_scan" {
+		t.Fatalf("expected capture failure to scan expired sessions once, got %+v", screenClient.expiredCleanupScanCalls)
 	}
 	if len(screenClient.expireCalls) != 1 || screenClient.expireCalls[0].reason != "capture_failed" {
 		t.Fatalf("expected capture failure to expire session, got %+v", screenClient.expireCalls)
