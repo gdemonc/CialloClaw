@@ -2645,6 +2645,7 @@ func (s *Service) executeScreenAnalysisAfterApproval(task runengine.TaskRecord, 
 		return failedTask, failureBubble, nil, nil
 	}
 	screenClient := s.executor.ScreenClient()
+	cleanupExpiredScreenTemps(screenClient, "expired_session_scan", time.Now().UTC())
 	screenSession, err := screenClient.StartSession(context.Background(), tools.ScreenSessionStartInput{
 		SessionID:   task.SessionID,
 		TaskID:      task.TaskID,
@@ -2719,6 +2720,21 @@ func expireAndCleanupScreenSession(screenClient tools.ScreenCaptureClient, scree
 	_, _ = screenClient.CleanupSessionArtifacts(context.Background(), tools.ScreenCleanupInput{
 		ScreenSessionID: screenSessionID,
 		Reason:          reason,
+	})
+}
+
+// cleanupExpiredScreenTemps keeps new screen-analysis executions from piling up
+// abandoned temp outputs left behind by older expired sessions.
+func cleanupExpiredScreenTemps(screenClient tools.ScreenCaptureClient, reason string, expiredBefore time.Time) {
+	if screenClient == nil {
+		return
+	}
+	if expiredBefore.IsZero() {
+		expiredBefore = time.Now().UTC()
+	}
+	_, _ = screenClient.CleanupExpiredScreenTemps(context.Background(), tools.ScreenCleanupInput{
+		Reason:        reason,
+		ExpiredBefore: expiredBefore.UTC(),
 	})
 }
 
