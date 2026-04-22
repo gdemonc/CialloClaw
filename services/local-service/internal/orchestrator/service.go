@@ -2829,7 +2829,7 @@ func (s *Service) listTasksFromStorage(group, sortBy, sortOrder string, limit, o
 			return tasks, total, true
 		}
 	}
-	records, err := s.storage.TaskRunStore().LoadTaskRuns(context.Background())
+	records, err := s.storage.TaskRunStore().LoadLegacyTaskRuns(context.Background(), nil)
 	if err != nil || len(records) == 0 {
 		return nil, 0, false
 	}
@@ -2906,7 +2906,7 @@ func (s *Service) loadAllTasksFromTaskRunStorage() []runengine.TaskRecord {
 	if s.storage == nil || s.storage.TaskRunStore() == nil {
 		return nil
 	}
-	records, err := s.storage.TaskRunStore().LoadTaskRuns(context.Background())
+	records, err := s.storage.TaskRunStore().LoadLegacyTaskRuns(context.Background(), nil)
 	if err != nil || len(records) == 0 {
 		return nil
 	}
@@ -4833,70 +4833,6 @@ func (s *Service) writeRestoreAuditRecord(taskID string, point checkpoint.Recove
 		return record.Map()
 	}
 	return nil
-}
-
-func findTaskRecordFromStorage(records []storage.TaskRunRecord, taskID string) (runengine.TaskRecord, bool) {
-	for _, record := range records {
-		if record.TaskID == taskID {
-			return runengine.TaskRecord{
-				TaskID:            record.TaskID,
-				SessionID:         record.SessionID,
-				RunID:             record.RunID,
-				Title:             record.Title,
-				SourceType:        record.SourceType,
-				Status:            record.Status,
-				Intent:            cloneMap(record.Intent),
-				PreferredDelivery: record.PreferredDelivery,
-				FallbackDelivery:  record.FallbackDelivery,
-				CurrentStep:       record.CurrentStep,
-				RiskLevel:         record.RiskLevel,
-				StartedAt:         record.StartedAt,
-				UpdatedAt:         record.UpdatedAt,
-				FinishedAt:        cloneStorageTimePointer(record.FinishedAt),
-				Timeline:          taskTimelineFromStorage(record.Timeline),
-				BubbleMessage:     cloneMap(record.BubbleMessage),
-				DeliveryResult:    cloneMap(record.DeliveryResult),
-				Artifacts:         cloneMapSlice(record.Artifacts),
-				Citations:         cloneMapSlice(record.Citations),
-				AuditRecords:      cloneMapSlice(record.AuditRecords),
-				MirrorReferences:  cloneMapSlice(record.MirrorReferences),
-				SecuritySummary:   cloneMap(record.SecuritySummary),
-				ApprovalRequest:   cloneMap(record.ApprovalRequest),
-				PendingExecution:  cloneMap(record.PendingExecution),
-				Authorization:     cloneMap(record.Authorization),
-				ImpactScope:       cloneMap(record.ImpactScope),
-				TokenUsage:        cloneMap(record.TokenUsage),
-				MemoryReadPlans:   cloneMapSlice(record.MemoryReadPlans),
-				MemoryWritePlans:  cloneMapSlice(record.MemoryWritePlans),
-				StorageWritePlan:  cloneMap(record.StorageWritePlan),
-				ArtifactPlans:     cloneMapSlice(record.ArtifactPlans),
-				Notifications:     taskNotificationsFromStorage(record.Notifications),
-				LatestEvent:       cloneMap(record.LatestEvent),
-				LatestToolCall:    cloneMap(record.LatestToolCall),
-				CurrentStepStatus: record.CurrentStepStatus,
-			}, true
-		}
-	}
-	return runengine.TaskRecord{}, false
-}
-
-func taskTimelineFromStorage(timeline []storage.TaskStepSnapshot) []runengine.TaskStepRecord {
-	if len(timeline) == 0 {
-		return nil
-	}
-	result := make([]runengine.TaskStepRecord, len(timeline))
-	for index, step := range timeline {
-		result[index] = runengine.TaskStepRecord{
-			StepID:        step.StepID,
-			TaskID:        step.TaskID,
-			Name:          step.Name,
-			Status:        step.Status,
-			OrderIndex:    step.OrderIndex,
-			InputSummary:  step.InputSummary,
-			OutputSummary: step.OutputSummary,
-		}
-	}
-	return result
 }
 
 func normalizeTaskDetailAuthorizationRecord(taskID string, authorizationRecord map[string]any) map[string]any {
