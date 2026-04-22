@@ -1708,6 +1708,34 @@ func TestBuildScreenObservationFlowSucceeds(t *testing.T) {
 	}
 }
 
+func TestBuildScreenObservationFlowUsesMediaFramesForClip(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_sess_clip/frame-001.jpg", Text: "clip extracted frame shows error banner", Language: "eng", Source: "ocr_worker_text"}}
+	mediaStub := stubMediaWorkerClient{framesResult: tools.MediaFrameExtractResult{InputPath: "temp/screen_sess_clip/clip.webm", OutputDir: "temp/screen_sess_clip/frame_extract", FramePaths: []string{"temp/screen_sess_clip/frame_extract/frame-001.jpg"}, FrameCount: 1, Source: "media_worker_frames"}}
+	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, mediaStub)
+	flow, err := service.buildScreenObservationFlow(context.Background(), "task_screen_clip_001", tools.ScreenFrameCandidate{
+		FrameID:         "frame_clip_001",
+		ScreenSessionID: "screen_sess_clip",
+		CaptureMode:     tools.ScreenCaptureModeClip,
+		Source:          "voice",
+		Path:            "temp/screen_sess_clip/clip.webm",
+		CapturedAt:      time.Date(2026, 4, 19, 9, 0, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+		CleanupRequired: true,
+	}, "eng", "error_evidence", nil)
+	if err != nil {
+		t.Fatalf("buildScreenObservationFlow returned error: %v", err)
+	}
+	if flow.OCRInput["path"] != "temp/screen_sess_clip/frame_extract/frame-001.jpg" {
+		t.Fatalf("expected clip OCR input to use extracted frame, got %+v", flow.OCRInput)
+	}
+	if flow.ObservationSeed["analyzed_path"] != "temp/screen_sess_clip/frame_extract/frame-001.jpg" || flow.ObservationSeed["clip_frame_count"] != 1 {
+		t.Fatalf("expected clip observation patch, got %+v", flow.ObservationSeed)
+	}
+	if len(flow.CleanupPaths) != 1 || flow.CleanupPaths[0] != "temp/screen_sess_clip/frame_extract/frame-001.jpg" {
+		t.Fatalf("expected clip cleanup paths to include extracted frame, got %+v", flow.CleanupPaths)
+	}
+}
+
 func TestBuildScreenObservationFlowReturnsOCRFailure(t *testing.T) {
 	ocrStub := stubOCRWorkerClient{err: tools.ErrOCRWorkerFailed}
 	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
@@ -1722,6 +1750,23 @@ func TestBuildScreenObservationFlowReturnsOCRFailure(t *testing.T) {
 	}, "eng", "error_evidence", nil)
 	if !errors.Is(err, tools.ErrOCRWorkerFailed) {
 		t.Fatalf("expected OCR worker failure, got %v", err)
+	}
+}
+
+func TestBuildScreenObservationFlowReturnsClipFramePreparationFailure(t *testing.T) {
+	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), sidecarclient.NewNoopOCRWorkerClient(), stubMediaWorkerClient{err: tools.ErrMediaWorkerFailed})
+	_, err := service.buildScreenObservationFlow(context.Background(), "task_screen_clip_fail", tools.ScreenFrameCandidate{
+		FrameID:         "frame_clip_fail",
+		ScreenSessionID: "screen_sess_clip_fail",
+		CaptureMode:     tools.ScreenCaptureModeClip,
+		Source:          "voice",
+		Path:            "temp/screen_sess_clip_fail/clip.webm",
+		CapturedAt:      time.Date(2026, 4, 19, 9, 30, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+		CleanupRequired: true,
+	}, "eng", "error_evidence", nil)
+	if !errors.Is(err, tools.ErrScreenCaptureFailed) {
+		t.Fatalf("expected clip frame extraction failure to map to screen capture error, got %v", err)
 	}
 }
 
@@ -1751,6 +1796,31 @@ func TestBuildScreenAnalysisResultSucceeds(t *testing.T) {
 	}
 	if analysis.CitationSeed["artifact_id"] == "" || analysis.CitationSeed["ocr_excerpt"] == "" {
 		t.Fatalf("expected citation-ready seed, got %+v", analysis.CitationSeed)
+	}
+}
+
+func TestBuildScreenAnalysisResultKeepsClipCleanupPaths(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_clip/frame-001.jpg", Text: "clip summary text", Language: "eng", Source: "ocr_worker_text"}}
+	mediaStub := stubMediaWorkerClient{framesResult: tools.MediaFrameExtractResult{InputPath: "temp/screen_clip/clip.webm", OutputDir: "temp/screen_clip/frames", FramePaths: []string{"temp/screen_clip/frames/frame-001.jpg", "temp/screen_clip/frames/frame-002.jpg"}, FrameCount: 2, Source: "media_worker_frames"}}
+	service, _ := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, mediaStub)
+	analysis, err := service.buildScreenAnalysisResult(context.Background(), "task_screen_analysis_clip", tools.ScreenFrameCandidate{
+		FrameID:         "frame_clip_010",
+		ScreenSessionID: "screen_sess_clip_010",
+		CaptureMode:     tools.ScreenCaptureModeClip,
+		Source:          "voice",
+		Path:            "temp/screen_clip/clip.webm",
+		CapturedAt:      time.Date(2026, 4, 19, 10, 0, 0, 0, time.UTC),
+		RetentionPolicy: tools.ScreenRetentionReview,
+		CleanupRequired: true,
+	}, "eng", "error_evidence", nil)
+	if err != nil {
+		t.Fatalf("buildScreenAnalysisResult returned error: %v", err)
+	}
+	if len(analysis.CleanupPaths) != 2 || analysis.CleanupPaths[0] != "temp/screen_clip/frames/frame-001.jpg" {
+		t.Fatalf("expected clip cleanup paths to be preserved, got %+v", analysis.CleanupPaths)
+	}
+	if analysis.ObservationSummary["clip_worker_source"] != "media_worker_frames" {
+		t.Fatalf("expected clip observation summary to keep media worker source, got %+v", analysis.ObservationSummary)
 	}
 }
 
@@ -1865,6 +1935,56 @@ func TestExecuteInternalScreenAnalysisReturnsResult(t *testing.T) {
 	}
 }
 
+func TestExecuteInternalScreenAnalysisRetainsClipFrameCleanupPlan(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_clip_exec/frames/frame-001.jpg", Text: "clip execution summary", Language: "eng", Source: "ocr_worker_text"}}
+	mediaStub := stubMediaWorkerClient{framesResult: tools.MediaFrameExtractResult{InputPath: "temp/screen_clip_exec/clip.webm", OutputDir: "temp/screen_clip_exec/frames", FramePaths: []string{"temp/screen_clip_exec/frames/frame-001.jpg"}, FrameCount: 1, Source: "media_worker_frames"}}
+	service, workspaceRoot := newTestExecutionServiceWithWorkers(t, "unused", sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, mediaStub)
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "temp", "screen_clip_exec"), 0o755); err != nil {
+		t.Fatalf("mkdir clip temp dir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "temp", "screen_clip_exec", "clip.webm"), []byte("fake clip capture"), 0o644); err != nil {
+		t.Fatalf("write clip temp file failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "temp", "screen_clip_exec", "frames"), 0o755); err != nil {
+		t.Fatalf("mkdir clip frame dir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "temp", "screen_clip_exec", "frames", "frame-001.jpg"), []byte("fake frame"), 0o644); err != nil {
+		t.Fatalf("write clip frame file failed: %v", err)
+	}
+	result, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_screen_clip_exec",
+		RunID:        "run_screen_clip_exec",
+		Title:        "分析屏幕录屏",
+		Intent:       map[string]any{"name": internalScreenAnalyzeIntent, "arguments": map[string]any{"frame_id": "frame_clip_exec", "screen_session_id": "screen_clip_exec", "path": "temp/screen_clip_exec/clip.webm", "capture_mode": "clip", "language": "eng", "evidence_role": "error_evidence"}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "请分析录屏中的错误"},
+		DeliveryType: "bubble",
+		ResultTitle:  "屏幕录屏分析结果",
+	})
+	if err != nil {
+		t.Fatalf("internal clip screen analysis execute failed: %v", err)
+	}
+	cleanupPlan := mapValue(result.ToolOutput, "cleanup_plan")
+	paths := stringSliceValue(cleanupPlan, "paths")
+	if len(paths) != 1 || paths[0] != "temp/screen_clip_exec/frames/frame-001.jpg" {
+		t.Fatalf("expected clip cleanup plan to retain extracted frame cleanup, got %+v", cleanupPlan)
+	}
+	cleanupSummary := mapValue(result.ToolOutput, "cleanup_summary")
+	if cleanupSummary["deleted_count"] != 1 || cleanupSummary["skipped_count"] != 1 {
+		t.Fatalf("expected clip cleanup summary to merge promoted clip artifact and pending frame cleanup, got %+v", cleanupSummary)
+	}
+	recoveryPoint := mapValue(result.ToolOutput, "recovery_point")
+	if recoveryPoint["kind"] != "screen_cleanup" || recoveryPoint["cleanup_status"] != "pending_retry" {
+		t.Fatalf("expected clip analysis to keep deferred cleanup recovery semantics, got %+v", recoveryPoint)
+	}
+	artifactPath := result.Artifacts[0]["path"].(string)
+	if _, err := os.Stat(filepath.Join(workspaceRoot, filepath.FromSlash(artifactPath))); err != nil {
+		t.Fatalf("expected promoted clip artifact to exist, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "temp", "screen_clip_exec", "frames", "frame-001.jpg")); err != nil {
+		t.Fatalf("expected extracted clip frame to remain pending cleanup, got %v", err)
+	}
+}
+
 func TestExecuteInternalScreenAnalysisRejectsIncompleteCandidate(t *testing.T) {
 	service, _ := newTestExecutionService(t, "unused")
 	_, err := service.Execute(context.Background(), Request{
@@ -1898,10 +2018,10 @@ func TestScreenHelpersCoverNilAndPendingBranches(t *testing.T) {
 	if got := service.executeScreenCleanupPlan(nil); got != nil {
 		t.Fatalf("expected nil cleanup plan to skip execution, got %+v", got)
 	}
-	if got := service.screenAnalysisCleanupPlan(tools.ScreenFrameCandidate{}); got != nil {
+	if got := service.screenAnalysisCleanupPlan(tools.ScreenFrameCandidate{}, nil); got != nil {
 		t.Fatalf("expected no cleanup plan for empty candidate, got %+v", got)
 	}
-	if got := service.screenAnalysisCleanupSummary(tools.ScreenFrameCandidate{}); got != nil {
+	if got := service.screenAnalysisCleanupSummary(nil); got != nil {
 		t.Fatalf("expected no cleanup summary for empty candidate, got %+v", got)
 	}
 	if got := service.screenAnalysisRecoveryPoint(context.Background(), "task_screen_none", map[string]any{"paths": []string{}}, nil); got != nil {
@@ -1928,6 +2048,14 @@ func TestScreenHelpersCoverNilAndPendingBranches(t *testing.T) {
 	service.checkpoint = nil
 	if got := service.screenAnalysisRecoveryPoint(context.Background(), "task_screen_norecovery", map[string]any{"paths": []string{"temp/demo.png"}}, map[string]any{"skipped_count": 1, "skipped_paths": []string{"temp/demo.png"}}); got != nil {
 		t.Fatalf("expected nil recovery point when checkpoint unavailable, got %+v", got)
+	}
+	mergedCleanup := mergeScreenCleanupSummaries(map[string]any{"deleted_paths": []string{"temp/a.png"}, "deleted_count": 1}, map[string]any{"skipped_paths": []string{"temp/b.png"}, "skipped_count": 1})
+	if mergedCleanup["deleted_count"] != 1 || mergedCleanup["skipped_count"] != 1 {
+		t.Fatalf("expected merged cleanup summary to keep both deleted and skipped counts, got %+v", mergedCleanup)
+	}
+	trimmedPlan := removeScreenCleanupPaths(map[string]any{"paths": []string{"temp/a.png", "temp/b.png"}}, []string{"temp/a.png"})
+	if len(stringSliceValue(trimmedPlan, "paths")) != 1 || stringSliceValue(trimmedPlan, "paths")[0] != "temp/b.png" {
+		t.Fatalf("expected cleanup plan path removal to keep remaining paths, got %+v", trimmedPlan)
 	}
 }
 
