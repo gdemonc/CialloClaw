@@ -1379,9 +1379,14 @@ func (s *Service) generateOutputWithPrompt(ctx context.Context, request Request,
 	if err != nil {
 		return generationTrace{}, fmt.Errorf("generate text: %w", err)
 	}
-	if boolValue(toolResult.RawOutput, "fallback") && boolValue(request.BudgetDowngrade, "applied") {
+	if boolValue(toolResult.RawOutput, "fallback") {
+		fallbackErr := modelFallbackErrorFromToolOutput(toolResult.RawOutput)
+		if !boolValue(request.BudgetDowngrade, "applied") {
+			// The formal mainline must surface provider/secret/model failures instead of
+			// silently returning the local fallback text as if OpenAI Responses succeeded.
+			return generationTrace{}, fmt.Errorf("generate text: %w", fallbackErr)
+		}
 		auditRecord := mapValue(toolResult.RawOutput, "audit_record")
-		failureReason := stringValue(toolResult.RawOutput, "fallback_reason", model.ErrClientNotConfigured.Error())
 		return generationTrace{
 			OutputText: budgetDowngradeFallbackText(request, inputText),
 			ToolCalls:  []tools.ToolCallRecord{toolResult.ToolCall},
@@ -1394,7 +1399,7 @@ func (s *Service) generateOutputWithPrompt(ctx context.Context, request Request,
 			},
 			AuditRecord:      cloneMap(auditRecord),
 			GenerationOutput: cloneMap(toolResult.RawOutput),
-			BudgetFailure:    budgetFailureSignal(request, errors.New(failureReason)),
+			BudgetFailure:    budgetFailureSignal(request, fallbackErr),
 		}, nil
 	}
 
@@ -1545,6 +1550,38 @@ func invocationRecordFromToolResult(request Request, toolResult *tools.ToolExecu
 		},
 		LatencyMS: int64Value(toolResult.RawOutput, "latency_ms"),
 	}
+}
+
+// modelFallbackErrorFromToolOutput reconstructs a typed error chain from the
+// fallback payload that builtin generate_text emits when the configured model
+// client cannot execute the request. This keeps errors.Is checks working for
+// budget downgrade governance, audit classification, and formal task failures.
+func modelFallbackErrorFromToolOutput(raw map[string]any) error {
+	reason := strings.TrimSpace(stringValue(raw, "fallback_reason", ""))
+	if reason == "" {
+		return model.ErrClientNotConfigured
+	}
+
+	matched := make([]error, 0, 5)
+	for _, candidate := range []error{
+		model.ErrClientNotConfigured,
+		model.ErrToolCallingNotSupported,
+		model.ErrModelProviderUnsupported,
+		model.ErrSecretSourceFailed,
+		model.ErrSecretNotFound,
+	} {
+		if strings.Contains(reason, candidate.Error()) {
+			matched = append(matched, candidate)
+		}
+	}
+	if len(matched) == 0 {
+		return errors.New(reason)
+	}
+	if len(matched) == 1 && reason == matched[0].Error() {
+		return matched[0]
+	}
+	matched = append(matched, errors.New(reason))
+	return errors.Join(matched...)
 }
 
 func invocationRecordMap(record *model.InvocationRecord) map[string]any {

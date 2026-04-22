@@ -753,6 +753,38 @@ func TestExecuteBudgetDowngradeFallsBackWhenModelClientUnavailable(t *testing.T)
 	}
 }
 
+func TestExecuteFailsWhenPromptGenerationFallsBackWithoutBudgetDowngrade(t *testing.T) {
+	service, _ := newTestExecutionServiceWithModelClient(t, nil)
+	_, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_prompt_requires_formal_model",
+		RunID:        "run_prompt_requires_formal_model",
+		Title:        "Prompt requires formal model",
+		Intent:       map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "Please summarize this content."},
+		DeliveryType: "bubble",
+		ResultTitle:  "Formal prompt result",
+	})
+	if !errors.Is(err, model.ErrClientNotConfigured) {
+		t.Fatalf("expected ErrClientNotConfigured, got %v", err)
+	}
+}
+
+func TestExecutePreservesTypedSecretErrorsWhenPromptFallbackOccurs(t *testing.T) {
+	service, _ := newTestExecutionServiceWithModelClient(t, &stubModelClient{err: errors.Join(model.ErrSecretSourceFailed, model.ErrSecretNotFound)})
+	_, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_prompt_secret_error",
+		RunID:        "run_prompt_secret_error",
+		Title:        "Prompt secret error",
+		Intent:       map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "Please summarize this content."},
+		DeliveryType: "bubble",
+		ResultTitle:  "Secret error result",
+	})
+	if !errors.Is(err, model.ErrSecretSourceFailed) || !errors.Is(err, model.ErrSecretNotFound) {
+		t.Fatalf("expected joined secret resolution error, got %v", err)
+	}
+}
+
 func TestExecuteBudgetDowngradeAllowsReadOnlyAgentLoopTools(t *testing.T) {
 	modelClient := &stubModelClient{
 		toolCalls: []model.ToolCallResult{{
@@ -879,6 +911,35 @@ func TestExecuteBudgetDowngradePreservesFallbackReason(t *testing.T) {
 	}
 	if result.BudgetFailure == nil || result.BudgetFailure["reason"] != model.ErrClientNotConfigured.Error() {
 		t.Fatalf("expected budget failure reason to preserve actual fallback reason, got %+v", result.BudgetFailure)
+	}
+}
+
+func TestExecuteBudgetDowngradeRecognizesJoinedSecretFallbackReason(t *testing.T) {
+	service, _ := newTestExecutionServiceWithModelClient(t, &stubModelClient{err: errors.Join(model.ErrSecretSourceFailed, model.ErrSecretNotFound)})
+	result, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_budget_secret_reason",
+		RunID:        "run_budget_secret_reason",
+		Title:        "Budget secret reason",
+		Intent:       map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "Please summarize this content."},
+		DeliveryType: "bubble",
+		ResultTitle:  "Budget secret reason result",
+		BudgetDowngrade: map[string]any{
+			"applied":         true,
+			"trigger_reason":  "provider_unavailable",
+			"degrade_actions": []string{"lightweight_delivery"},
+			"summary":         "Budget downgrade fallback applied.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if result.BudgetFailure == nil {
+		t.Fatalf("expected joined secret fallback to produce budget failure signal, got %+v", result)
+	}
+	reason, _ := result.BudgetFailure["reason"].(string)
+	if !strings.Contains(reason, model.ErrSecretSourceFailed.Error()) || !strings.Contains(reason, model.ErrSecretNotFound.Error()) {
+		t.Fatalf("expected joined secret fallback reason to be preserved, got %+v", result.BudgetFailure)
 	}
 }
 
@@ -1508,7 +1569,7 @@ func TestExecuteDirectSidecarPageReadFailureReturnsMappedToolTrace(t *testing.T)
 	}
 }
 
-func TestExecuteFallsBackWhenModelFails(t *testing.T) {
+func TestExecuteFailsWhenModelFailsWithoutBudgetDowngrade(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	pathPolicy, err := platform.NewLocalPathPolicy(workspaceRoot)
 	if err != nil {
@@ -1536,7 +1597,7 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 		plugin.NewService(),
 	)
 
-	result, err := service.Execute(context.Background(), Request{
+	_, err = service.Execute(context.Background(), Request{
 		TaskID:       "task_004",
 		RunID:        "run_004",
 		Title:        "解释内容",
@@ -1545,11 +1606,11 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 		DeliveryType: "bubble",
 		ResultTitle:  "解释结果",
 	})
-	if err != nil {
-		t.Fatalf("execute failed: %v", err)
+	if err == nil {
+		t.Fatal("expected formal prompt path to fail when the model call falls back")
 	}
-	if !strings.Contains(result.BubbleText, "需要解释的文本") {
-		t.Fatalf("expected fallback bubble to include normalized input, got %s", result.BubbleText)
+	if !strings.Contains(err.Error(), "provider unavailable") {
+		t.Fatalf("expected model failure detail to be preserved, got %v", err)
 	}
 }
 
