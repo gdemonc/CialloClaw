@@ -3676,6 +3676,40 @@ test("shell-ball coordinator prefers bubble_message text over empty delivery pre
   assert.equal(createdItem.role, "agent");
 });
 
+test("shell-ball coordinator prefers bubble_message text over non-empty delivery preview", () => {
+  const createdItem = createShellBallAgentBubbleItem(
+    {
+      task: {
+        task_id: "task-bubble-message-preview",
+      },
+      bubble_message: {
+        bubble_id: "bubble-message-preview-1",
+        task_id: "task-bubble-message-preview",
+        type: "result",
+        text: "完整的回复正文，不应该被预览文本替换。",
+        pinned: false,
+        hidden: true,
+        created_at: "2026-04-11T10:10:30.000Z",
+      },
+      delivery_result: {
+        type: "bubble",
+        title: "Preview title",
+        payload: {
+          path: null,
+          task_id: "task-bubble-message-preview",
+          url: null,
+        },
+        preview_text: "被截断的预览…",
+      },
+    } as any,
+    "2026-04-11T10:10:40.000Z",
+  );
+
+  assert.equal(createdItem.bubble.text, "完整的回复正文，不应该被预览文本替换。");
+  assert.equal(createdItem.bubble.created_at, "2026-04-11T10:10:30.000Z");
+  assert.equal(createdItem.role, "agent");
+});
+
 test("shell-ball coordinator bubble actions restore unpinned bubbles by timestamp then id", () => {
   const sourceItems: ShellBallBubbleItem[] = [
     {

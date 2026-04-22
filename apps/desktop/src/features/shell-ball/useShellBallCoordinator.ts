@@ -270,10 +270,11 @@ function createShellBallDeliveryResultBubbleItem(input: {
   createdAt: string;
   turnIndex?: number;
   turnPhase?: number;
+  textOverride?: string;
 }) {
   return createShellBallTextBubbleItem({
     role: "agent",
-    text: input.deliveryResult.preview_text.trim() || input.deliveryResult.title,
+    text: input.textOverride?.trim() || input.deliveryResult.preview_text.trim() || input.deliveryResult.title,
     bubbleType: "result",
     createdAt: input.createdAt,
     taskId: input.taskId,
@@ -293,8 +294,34 @@ export function createShellBallAgentBubbleItem(
   fallbackCreatedAt: string,
   turnOrder: ShellBallBubbleTurnOrder = {},
 ) {
-  const deliveryPreview = result.delivery_result?.type === "bubble" ? result.delivery_result.preview_text?.trim() ?? "" : "";
   const bubbleMessage = result.bubble_message;
+  const bubbleText = bubbleMessage?.text.trim() ?? "";
+  const deliveryPreview = result.delivery_result?.type === "bubble" ? result.delivery_result.preview_text?.trim() ?? "" : "";
+
+  if (bubbleMessage !== null && bubbleText !== "") {
+    const bubbleType = bubbleMessage.type;
+
+    if (bubbleType === "result" && result.delivery_result !== null) {
+      return createShellBallDeliveryResultBubbleItem({
+        taskId: result.task.task_id,
+        deliveryResult: result.delivery_result,
+        createdAt: bubbleMessage.created_at || fallbackCreatedAt,
+        turnIndex: turnOrder.turnIndex,
+        turnPhase: turnOrder.turnPhase,
+        textOverride: bubbleText,
+      });
+    }
+
+    return {
+      bubble: {
+        ...bubbleMessage,
+        hidden: false,
+        pinned: false,
+      },
+      role: "agent",
+      desktop: createShellBallBubbleDesktopState(turnOrder),
+    } satisfies ShellBallBubbleItem;
+  }
 
   if (deliveryPreview !== "") {
     return createShellBallTextBubbleItem({
@@ -306,18 +333,6 @@ export function createShellBallAgentBubbleItem(
       turnIndex: turnOrder.turnIndex,
       turnPhase: turnOrder.turnPhase,
     });
-  }
-
-  if (bubbleMessage?.text.trim()) {
-    return {
-      bubble: {
-        ...bubbleMessage,
-        hidden: false,
-        pinned: false,
-      },
-      role: "agent",
-      desktop: createShellBallBubbleDesktopState(turnOrder),
-    } satisfies ShellBallBubbleItem;
   }
 
   return createShellBallTextBubbleItem({
@@ -1046,7 +1061,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
             (item) =>
               item.bubble.task_id === payload.task_id &&
               item.bubble.type === "result" &&
-              item.bubble.text === bubbleText,
+              item.role === "agent",
           )
         ) {
           return currentItems;
