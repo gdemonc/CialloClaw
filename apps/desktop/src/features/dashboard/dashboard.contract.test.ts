@@ -810,6 +810,17 @@ test("task page no longer exposes edit guidance and uses 安全总览 without an
   assert.doesNotMatch(taskPageSource, /action === "edit"/);
 });
 
+test("dashboard home entrance labels stay hidden until hover or focus", () => {
+  const dashboardHomeStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.css"), "utf8");
+  const entranceOrbSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/components/DashboardEntranceOrb.tsx"), "utf8");
+
+  assert.match(entranceOrbSource, /data-hovered=\{isHovered \? "true" : "false"\}/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance__label \{[\s\S]*opacity: 0;/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance:hover \.dashboard-orbit-entrance__label,/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance:focus-visible \.dashboard-orbit-entrance__label,/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance\[data-hovered="true"\] \.dashboard-orbit-entrance__label \{/);
+});
+
 test("security board styles stay scoped to the safety feature stylesheet", () => {
   const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
   const securityBoardSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/securityBoard.css"), "utf8");
