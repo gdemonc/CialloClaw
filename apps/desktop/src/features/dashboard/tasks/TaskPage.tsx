@@ -101,6 +101,7 @@ export function TaskPage() {
   // Keep the current task focus stable across transient bucket refreshes so
   // the detail modal does not snap back to an auto-picked fallback selection.
   const [requestedTaskId, setRequestedTaskId] = useState<string | null>(null);
+  const [stageInitialized, setStageInitialized] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [showMoreFinished, setShowMoreFinished] = useState(false);
   const [expandedClusterKey, setExpandedClusterKey] = useState<TaskClusterKey | null>(null);
@@ -281,6 +282,22 @@ export function TaskPage() {
   }, [location.pathname, navigate, routeFocusState?.openDetail, routeFocusTaskId]);
 
   useEffect(() => {
+    if (routeFocusTaskId || stageInitialized || selectedTaskId) {
+      return;
+    }
+
+    // Seed the stage with the current highest-priority task on first entry so
+    // the workspace opens with a concrete focal task instead of an empty dock.
+    const stageEntryTask = departureTasks[0] ?? holdingTasks[0] ?? irregularTasks[0] ?? archiveTasks[0] ?? allTasks[0] ?? null;
+    if (!stageEntryTask) {
+      return;
+    }
+
+    focusTaskDetail(stageEntryTask.task.task_id, false);
+    setStageInitialized(true);
+  }, [allTasks, archiveTasks, departureTasks, holdingTasks, irregularTasks, routeFocusTaskId, selectedTaskId, stageInitialized]);
+
+  useEffect(() => {
     if (routeFocusTaskId) {
       return;
     }
@@ -400,6 +417,7 @@ export function TaskPage() {
   function clearStagePreview() {
     setRequestedTaskId(null);
     setSelectedTaskId(null);
+    setStageInitialized(true);
     setDetailOpen(false);
   }
 
