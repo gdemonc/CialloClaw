@@ -1572,13 +1572,21 @@ func modelFallbackErrorFromToolOutput(raw map[string]any) error {
 		return model.ErrClientNotConfigured
 	}
 
-	matched := make([]error, 0, 5)
+	matched := make([]error, 0, 12)
 	for _, candidate := range []error{
 		model.ErrClientNotConfigured,
 		model.ErrToolCallingNotSupported,
+		model.ErrModelProviderRequired,
 		model.ErrModelProviderUnsupported,
 		model.ErrSecretSourceFailed,
 		model.ErrSecretNotFound,
+		model.ErrOpenAIAPIKeyRequired,
+		model.ErrOpenAIEndpointRequired,
+		model.ErrOpenAIModelIDRequired,
+		model.ErrOpenAIHTTPStatus,
+		model.ErrOpenAIRequestFailed,
+		model.ErrOpenAIRequestTimeout,
+		model.ErrOpenAIResponseInvalid,
 		tools.ErrToolOutputInvalid,
 	} {
 		if strings.Contains(reason, candidate.Error()) {
@@ -1695,7 +1703,7 @@ func budgetFailureSignal(request Request, generationErr error) map[string]any {
 		return nil
 	}
 	reason := strings.TrimSpace(generationErr.Error())
-	if !errors.Is(generationErr, model.ErrClientNotConfigured) && !errors.Is(generationErr, model.ErrToolCallingNotSupported) && !errors.Is(generationErr, model.ErrModelProviderUnsupported) && !errors.Is(generationErr, model.ErrSecretNotFound) && !errors.Is(generationErr, model.ErrSecretSourceFailed) && !isBudgetFailureReason(reason) {
+	if !errors.Is(generationErr, model.ErrClientNotConfigured) && !errors.Is(generationErr, model.ErrToolCallingNotSupported) && !errors.Is(generationErr, model.ErrModelProviderRequired) && !errors.Is(generationErr, model.ErrModelProviderUnsupported) && !errors.Is(generationErr, model.ErrSecretNotFound) && !errors.Is(generationErr, model.ErrSecretSourceFailed) && !errors.Is(generationErr, model.ErrOpenAIAPIKeyRequired) && !errors.Is(generationErr, model.ErrOpenAIEndpointRequired) && !errors.Is(generationErr, model.ErrOpenAIModelIDRequired) && !errors.Is(generationErr, model.ErrOpenAIHTTPStatus) && !errors.Is(generationErr, model.ErrOpenAIRequestFailed) && !errors.Is(generationErr, model.ErrOpenAIRequestTimeout) && !errors.Is(generationErr, model.ErrOpenAIResponseInvalid) && !errors.Is(generationErr, tools.ErrToolOutputInvalid) && !isBudgetFailureReason(reason) {
 		return nil
 	}
 	return map[string]any{
@@ -1709,7 +1717,7 @@ func budgetFailureSignal(request Request, generationErr error) map[string]any {
 func isBudgetFailureReason(reason string) bool {
 	trimmed := strings.TrimSpace(reason)
 	switch trimmed {
-	case model.ErrClientNotConfigured.Error(), model.ErrToolCallingNotSupported.Error(), model.ErrModelProviderUnsupported.Error(), model.ErrSecretNotFound.Error(), model.ErrSecretSourceFailed.Error():
+	case model.ErrClientNotConfigured.Error(), model.ErrToolCallingNotSupported.Error(), model.ErrModelProviderRequired.Error(), model.ErrModelProviderUnsupported.Error(), model.ErrSecretNotFound.Error(), model.ErrSecretSourceFailed.Error(), model.ErrOpenAIAPIKeyRequired.Error(), model.ErrOpenAIEndpointRequired.Error(), model.ErrOpenAIModelIDRequired.Error(), model.ErrOpenAIHTTPStatus.Error(), model.ErrOpenAIRequestFailed.Error(), model.ErrOpenAIRequestTimeout.Error(), model.ErrOpenAIResponseInvalid.Error(), tools.ErrToolOutputInvalid.Error():
 		return true
 	default:
 		return false

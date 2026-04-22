@@ -873,6 +873,22 @@ func TestExecutePreservesTypedSecretErrorsWhenPromptFallbackOccurs(t *testing.T)
 	}
 }
 
+func TestExecutePreservesModelConfigurationErrorsWhenPromptFallbackOccurs(t *testing.T) {
+	service, _ := newTestExecutionServiceWithModelClient(t, &stubModelClient{err: errors.Join(model.ErrModelProviderRequired, model.ErrOpenAIEndpointRequired)})
+	_, err := service.Execute(context.Background(), Request{
+		TaskID:       "task_prompt_model_config_error",
+		RunID:        "run_prompt_model_config_error",
+		Title:        "Prompt model config error",
+		Intent:       map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		Snapshot:     contextsvc.TaskContextSnapshot{InputType: "text", Text: "Please summarize this content."},
+		DeliveryType: "bubble",
+		ResultTitle:  "Model config error result",
+	})
+	if !errors.Is(err, model.ErrModelProviderRequired) || !errors.Is(err, model.ErrOpenAIEndpointRequired) {
+		t.Fatalf("expected joined provider/config error, got %v", err)
+	}
+}
+
 func TestExecuteFailsWhenModelReturnsEmptyPromptOutput(t *testing.T) {
 	service, _ := newTestExecutionServiceWithModelClient(t, &stubModelClient{output: ""})
 	_, err := service.Execute(context.Background(), Request{
@@ -1061,6 +1077,19 @@ func TestModelFallbackErrorFromToolOutputRecognizesToolOutputInvalid(t *testing.
 	}
 }
 
+func TestModelFallbackErrorFromToolOutputRecognizesProviderAndTransportErrors(t *testing.T) {
+	err := modelFallbackErrorFromToolOutput(map[string]any{"fallback_reason": errors.Join(model.ErrModelProviderRequired, model.ErrOpenAIEndpointRequired, model.ErrOpenAIRequestTimeout).Error()})
+	if !errors.Is(err, model.ErrModelProviderRequired) {
+		t.Fatalf("expected ErrModelProviderRequired, got %v", err)
+	}
+	if !errors.Is(err, model.ErrOpenAIEndpointRequired) {
+		t.Fatalf("expected ErrOpenAIEndpointRequired, got %v", err)
+	}
+	if !errors.Is(err, model.ErrOpenAIRequestTimeout) {
+		t.Fatalf("expected ErrOpenAIRequestTimeout, got %v", err)
+	}
+}
+
 func TestBudgetDowngradeGenerationFallbackBuildsStructuredFallback(t *testing.T) {
 	trace, ok := budgetDowngradeGenerationFallback(Request{
 		TaskID:          "task_budget_helper",
@@ -1085,9 +1114,18 @@ func TestIsBudgetFailureReasonRecognizesFormalFailureStrings(t *testing.T) {
 	for _, reason := range []string{
 		model.ErrClientNotConfigured.Error(),
 		model.ErrToolCallingNotSupported.Error(),
+		model.ErrModelProviderRequired.Error(),
 		model.ErrModelProviderUnsupported.Error(),
 		model.ErrSecretNotFound.Error(),
 		model.ErrSecretSourceFailed.Error(),
+		model.ErrOpenAIAPIKeyRequired.Error(),
+		model.ErrOpenAIEndpointRequired.Error(),
+		model.ErrOpenAIModelIDRequired.Error(),
+		model.ErrOpenAIHTTPStatus.Error(),
+		model.ErrOpenAIRequestFailed.Error(),
+		model.ErrOpenAIRequestTimeout.Error(),
+		model.ErrOpenAIResponseInvalid.Error(),
+		tools.ErrToolOutputInvalid.Error(),
 	} {
 		if !isBudgetFailureReason(reason) {
 			t.Fatalf("expected budget failure reason %q to be recognized", reason)
@@ -1095,6 +1133,16 @@ func TestIsBudgetFailureReasonRecognizesFormalFailureStrings(t *testing.T) {
 	}
 	if isBudgetFailureReason("some unrelated failure") {
 		t.Fatal("expected unrelated error string to be ignored")
+	}
+}
+
+func TestBudgetFailureSignalRecognizesToolOutputInvalid(t *testing.T) {
+	signal := budgetFailureSignal(Request{BudgetDowngrade: map[string]any{"applied": true}}, tools.ErrToolOutputInvalid)
+	if signal == nil {
+		t.Fatal("expected tool output invalid to produce budget failure signal")
+	}
+	if signal["reason"] != tools.ErrToolOutputInvalid.Error() {
+		t.Fatalf("expected tool output invalid reason to be preserved, got %+v", signal)
 	}
 }
 

@@ -1358,6 +1358,16 @@ func TestDispatchMapsModelClientConfigurationErrorsToStronghold(t *testing.T) {
 	}
 }
 
+func TestDispatchMapsAPIKeyConfigurationErrorsToStronghold(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, model.ErrOpenAIAPIKeyRequired)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1005004 || rpcErr.Message != "STRONGHOLD_ACCESS_FAILED" {
+		t.Fatalf("expected STRONGHOLD_ACCESS_FAILED mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
 func TestDispatchMapsModelProviderErrors(t *testing.T) {
 	_, rpcErr := wrapOrchestratorResult(nil, model.ErrModelProviderUnsupported)
 	if rpcErr == nil {
@@ -1385,6 +1395,16 @@ func TestDispatchMapsModelConfigurationErrors(t *testing.T) {
 	}
 	if rpcErr.Code != 1008002 || rpcErr.Message != "MODEL_NOT_ALLOWED" {
 		t.Fatalf("expected MODEL_NOT_ALLOWED mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
+func TestDispatchMapsModelOutputInvalidErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, tools.ErrToolOutputInvalid)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1003004 || rpcErr.Message != "TOOL_OUTPUT_INVALID" {
+		t.Fatalf("expected TOOL_OUTPUT_INVALID mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
 	}
 }
 
@@ -1508,6 +1528,9 @@ func TestDispatchReturnsSettingsUpdate(t *testing.T) {
 	}
 	if _, exists := models["api_key"]; exists {
 		t.Fatalf("expected settings update response to keep api_key redacted, got %+v", models)
+	}
+	if success.Result.Data.(map[string]any)["apply_mode"] != "restart_required" || success.Result.Data.(map[string]any)["need_restart"] != true {
+		t.Fatalf("expected model settings update to require restart, got %+v", success.Result.Data)
 	}
 }
 

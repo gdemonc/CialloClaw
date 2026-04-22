@@ -5116,10 +5116,40 @@ func TestClassifyModelFailureUsesFormalCodes(t *testing.T) {
 			wantType: "model_provider",
 		},
 		{
+			name:     "missing provider config",
+			err:      model.ErrModelProviderRequired,
+			wantCode: "MODEL_PROVIDER_NOT_FOUND",
+			wantType: "model_provider",
+		},
+		{
 			name:     "tool calling unsupported",
 			err:      model.ErrToolCallingNotSupported,
 			wantCode: "MODEL_NOT_ALLOWED",
 			wantType: "model_capability",
+		},
+		{
+			name:     "endpoint missing",
+			err:      model.ErrOpenAIEndpointRequired,
+			wantCode: "MODEL_NOT_ALLOWED",
+			wantType: "model_capability",
+		},
+		{
+			name:     "api key missing",
+			err:      model.ErrOpenAIAPIKeyRequired,
+			wantCode: "STRONGHOLD_ACCESS_FAILED",
+			wantType: "model_credentials",
+		},
+		{
+			name:     "provider timeout",
+			err:      model.ErrOpenAIRequestTimeout,
+			wantCode: "MODEL_NOT_ALLOWED",
+			wantType: "model_capability",
+		},
+		{
+			name:     "output invalid",
+			err:      tools.ErrToolOutputInvalid,
+			wantCode: "TOOL_OUTPUT_INVALID",
+			wantType: "model_output",
 		},
 		{
 			name:     "secret resolution unavailable",
@@ -5142,6 +5172,20 @@ func TestClassifyModelFailureUsesFormalCodes(t *testing.T) {
 				t.Fatalf("expected %s/%s, got %s/%s", testCase.wantCode, testCase.wantType, failureCode, failureCategory)
 			}
 		})
+	}
+}
+
+func TestBuildBudgetFailureAuditTracksFormalModelFailures(t *testing.T) {
+	service := newTestService()
+	auditRecord := service.buildBudgetFailureAudit(runengine.TaskRecord{TaskID: "task_budget_failure_audit", RunID: "run_budget_failure_audit"}, errors.Join(model.ErrOpenAIEndpointRequired, model.ErrOpenAIRequestTimeout))
+	if auditRecord == nil {
+		t.Fatal("expected formal model failure to produce budget failure audit")
+	}
+	if stringValue(auditRecord, "action", "") != "budget_auto_downgrade.failure_signal" {
+		t.Fatalf("expected budget failure audit action, got %+v", auditRecord)
+	}
+	if !strings.Contains(stringValue(auditRecord, "reason", ""), model.ErrOpenAIEndpointRequired.Error()) {
+		t.Fatalf("expected budget failure audit reason to retain model config detail, got %+v", auditRecord)
 	}
 }
 

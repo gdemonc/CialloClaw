@@ -3492,7 +3492,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户修改设置并点击保存时
-- **系统处理**：写入设置并返回生效结果；`models.api_key` 只用于当前请求写入 Stronghold，不会进入正式设置快照或回传明文
+- **系统处理**：写入设置并返回当前生效快照与生效方式；`models.api_key` 只用于当前请求写入 Stronghold，不会进入正式设置快照或回传明文。当前 `models.provider / models.api_key / models.base_url / models.model` 仍需重启后才会重建 active model service。
 - **入参**：要更新的设置项
 - **出参**：已更新字段、生效设置、生效方式、是否需重启
 
@@ -3606,8 +3606,8 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
           "model": "gpt-3.5-turbo"
         }
       },
-      "apply_mode": "immediate",
-      "need_restart": false
+      "apply_mode": "restart_required",
+      "need_restart": true
     },
     "meta": {
       "server_time": "2026-04-07T11:06:01+08:00"

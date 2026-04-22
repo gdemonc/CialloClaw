@@ -2615,6 +2615,13 @@ func (s *Service) SettingsUpdate(params map[string]any) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
+	if modelSettingsRequireRestart(normalizedParams, secretUpdatedKeys) {
+		// The active model service is still constructed at bootstrap time, so
+		// provider/credential/base-url/model changes must surface as restart
+		// required until hot-reload semantics are implemented across the runtime.
+		applyMode = "restart_required"
+		needRestart = true
+	}
 	if modelSecretTouched {
 		if _, ok := effectiveSettings["models"]; !ok {
 			effectiveSettings["models"] = map[string]any{}
@@ -2635,6 +2642,24 @@ func (s *Service) SettingsUpdate(params map[string]any) (map[string]any, error) 
 		"apply_mode":         applyMode,
 		"need_restart":       needRestart,
 	}, nil
+}
+
+func modelSettingsRequireRestart(normalizedParams map[string]any, secretUpdatedKeys []string) bool {
+	for _, key := range secretUpdatedKeys {
+		if key == "models.api_key" || key == "models.delete_api_key" {
+			return true
+		}
+	}
+	models := cloneMap(mapValue(normalizedParams, "models"))
+	if len(models) == 0 {
+		return false
+	}
+	for _, key := range []string{"provider", "base_url", "model"} {
+		if _, ok := models[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) executeScreenAnalysisAfterApproval(task runengine.TaskRecord, pendingExecution map[string]any) (runengine.TaskRecord, map[string]any, map[string]any, error) {
@@ -6896,9 +6921,13 @@ func classifyModelFailure(err error) (string, string) {
 	switch {
 	case errors.Is(err, model.ErrModelProviderUnsupported):
 		return "MODEL_PROVIDER_NOT_FOUND", "model_provider"
-	case errors.Is(err, model.ErrToolCallingNotSupported):
+	case errors.Is(err, model.ErrModelProviderRequired):
+		return "MODEL_PROVIDER_NOT_FOUND", "model_provider"
+	case errors.Is(err, model.ErrToolCallingNotSupported), errors.Is(err, model.ErrOpenAIEndpointRequired), errors.Is(err, model.ErrOpenAIModelIDRequired), errors.Is(err, model.ErrOpenAIHTTPStatus), errors.Is(err, model.ErrOpenAIRequestFailed), errors.Is(err, model.ErrOpenAIRequestTimeout), errors.Is(err, model.ErrOpenAIResponseInvalid):
 		return "MODEL_NOT_ALLOWED", "model_capability"
-	case errors.Is(err, model.ErrClientNotConfigured), errors.Is(err, model.ErrSecretSourceFailed), errors.Is(err, model.ErrSecretNotFound), errors.Is(err, storage.ErrSecretNotFound), errors.Is(err, storage.ErrStrongholdUnavailable), errors.Is(err, storage.ErrSecretStoreAccessFailed):
+	case errors.Is(err, tools.ErrToolOutputInvalid):
+		return "TOOL_OUTPUT_INVALID", "model_output"
+	case errors.Is(err, model.ErrClientNotConfigured), errors.Is(err, model.ErrOpenAIAPIKeyRequired), errors.Is(err, model.ErrSecretSourceFailed), errors.Is(err, model.ErrSecretNotFound), errors.Is(err, storage.ErrSecretNotFound), errors.Is(err, storage.ErrStrongholdUnavailable), errors.Is(err, storage.ErrSecretStoreAccessFailed):
 		return "STRONGHOLD_ACCESS_FAILED", "model_credentials"
 	default:
 		return "", ""
@@ -6909,12 +6938,16 @@ func executionFailureBubble(err error) string {
 	switch {
 	case errors.Is(err, execution.ErrRecoveryPointPrepareFailed):
 		return "执行失败：执行前恢复点创建失败，请稍后重试。"
-	case errors.Is(err, model.ErrClientNotConfigured), errors.Is(err, model.ErrSecretSourceFailed), errors.Is(err, model.ErrSecretNotFound), errors.Is(err, storage.ErrSecretNotFound), errors.Is(err, storage.ErrStrongholdUnavailable), errors.Is(err, storage.ErrSecretStoreAccessFailed):
+	case errors.Is(err, model.ErrClientNotConfigured), errors.Is(err, model.ErrOpenAIAPIKeyRequired), errors.Is(err, model.ErrSecretSourceFailed), errors.Is(err, model.ErrSecretNotFound), errors.Is(err, storage.ErrSecretNotFound), errors.Is(err, storage.ErrStrongholdUnavailable), errors.Is(err, storage.ErrSecretStoreAccessFailed):
 		return "执行失败：当前模型凭证未配置或不可访问，请先完成模型设置后重试。"
-	case errors.Is(err, model.ErrModelProviderUnsupported):
+	case errors.Is(err, model.ErrModelProviderRequired), errors.Is(err, model.ErrModelProviderUnsupported):
 		return "执行失败：当前模型提供方未登记，请检查模型设置后重试。"
 	case errors.Is(err, model.ErrToolCallingNotSupported):
 		return "执行失败：当前模型不支持所需的工具调用能力，请调整模型设置后重试。"
+	case errors.Is(err, model.ErrOpenAIEndpointRequired), errors.Is(err, model.ErrOpenAIModelIDRequired), errors.Is(err, model.ErrOpenAIHTTPStatus), errors.Is(err, model.ErrOpenAIRequestFailed), errors.Is(err, model.ErrOpenAIRequestTimeout), errors.Is(err, model.ErrOpenAIResponseInvalid):
+		return "执行失败：当前模型配置或响应不可用，请检查模型设置后重试。"
+	case errors.Is(err, tools.ErrToolOutputInvalid):
+		return "执行失败：当前模型返回结果不完整，请稍后重试。"
 	case errors.Is(err, tools.ErrWorkspaceBoundaryDenied):
 		return "执行失败：目标超出工作区边界，已阻止本次操作。"
 	case errors.Is(err, tools.ErrCommandNotAllowed):
@@ -6988,7 +7021,7 @@ func (s *Service) buildBudgetFailureAudit(task runengine.TaskRecord, executionEr
 	if executionErr == nil {
 		return nil
 	}
-	if !errors.Is(executionErr, model.ErrClientNotConfigured) && !errors.Is(executionErr, model.ErrToolCallingNotSupported) && !errors.Is(executionErr, model.ErrModelProviderUnsupported) && !errors.Is(executionErr, model.ErrSecretNotFound) && !errors.Is(executionErr, model.ErrSecretSourceFailed) {
+	if failureCode, _ := classifyModelFailure(executionErr); failureCode == "" {
 		return nil
 	}
 	return map[string]any{

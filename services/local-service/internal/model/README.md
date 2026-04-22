@@ -25,7 +25,7 @@ This module is the only backend entry point for LLM provider access inside `serv
 - Structured JSON output contracts
 - Provider failover or routing strategies
 - Stronghold lifecycle completion and hot-reload semantics across the full settings flow
-- Protocol-layer error code mapping
+- Full protocol/error-taxonomy coverage for future providers beyond the current OpenAI Responses path
 
 ## Boundary Rules
 
@@ -45,7 +45,7 @@ This module is the only backend entry point for LLM provider access inside `serv
 - API key source: environment, Stronghold, or external injection
 - Whether streaming is required in the first integrated flow
 - Whether tool calling belongs in the first integrated flow
-- Final mapping from module errors to protocol error codes
+- Final failure taxonomy for future non-OpenAI providers beyond the current stable protocol mapping
 
 ## Current Architecture Blockers
 
@@ -53,8 +53,8 @@ Because the current change scope is limited to `services/local-service/internal/
 
 The remaining blockers that require changes outside this directory are:
 
-- Move model input/output contracts into `/packages/protocol`
-- Add `api_key` and budget-related settings into the shared config and secret-management path
+- Replace the temporary Go mirrors with a generated cross-language protocol source of truth in `/packages/protocol`
+- Complete the Stronghold-backed settings lifecycle, live credential mutation flow, and hot-reload semantics outside this module
 
 Inside the current module-only scope, the package now preserves `task_id`, `run_id`, `request_id`, usage, and latency through `GenerateTextResponse` and `InvocationRecord`, and those structures are mirrored to `/packages/protocol/types/core.ts`. The Go types remain temporary backend mirrors until a cross-language protocol generation path is introduced.
 
