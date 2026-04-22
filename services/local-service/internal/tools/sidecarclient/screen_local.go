@@ -126,17 +126,39 @@ func (c *localScreenCaptureClient) CleanupSessionArtifacts(_ context.Context, in
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	deleted := make([]string, 0)
-	for _, tempPath := range c.tempPaths[input.ScreenSessionID] {
+	skipped := make([]string, 0)
+	paths := screenCleanupPaths(c.tempPaths[input.ScreenSessionID], input.Paths)
+	for _, tempPath := range paths {
 		if err := c.fileSystem.Remove(tempPath); err == nil {
 			deleted = append(deleted, tempPath)
+		} else {
+			skipped = append(skipped, tempPath)
 		}
 	}
-	delete(c.tempPaths, input.ScreenSessionID)
+	remaining := removeScreenPaths(c.tempPaths[input.ScreenSessionID], deleted)
+	remaining = append(remaining, skipped...)
+	remaining = uniqueScreenPaths(remaining)
+	if len(remaining) == 0 {
+		delete(c.tempPaths, input.ScreenSessionID)
+		delete(c.frameCount, input.ScreenSessionID)
+		delete(c.sessions, input.ScreenSessionID)
+	} else {
+		c.tempPaths[input.ScreenSessionID] = remaining
+		if state, ok := c.sessions[input.ScreenSessionID]; ok {
+			stoppedAt := c.now().UTC()
+			state.AuthorizationState = tools.ScreenAuthorizationEnded
+			state.EndedAt = &stoppedAt
+			state.TerminalReason = firstNonEmpty(input.Reason, "session_cleanup_pending_retry")
+			c.sessions[input.ScreenSessionID] = state
+		}
+	}
 	return tools.ScreenCleanupResult{
 		ScreenSessionID: input.ScreenSessionID,
 		Reason:          firstNonEmpty(input.Reason, "session_cleanup"),
 		DeletedPaths:    deleted,
+		SkippedPaths:    skipped,
 		DeletedCount:    len(deleted),
+		SkippedCount:    len(skipped),
 	}, nil
 }
 
@@ -144,20 +166,38 @@ func (c *localScreenCaptureClient) CleanupExpiredScreenTemps(_ context.Context, 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	deleted := make([]string, 0)
+	skipped := make([]string, 0)
 	for sessionID, state := range c.sessions {
 		if !state.ExpiresAt.IsZero() && !state.ExpiresAt.After(input.ExpiredBefore) {
+			expired := expireState(state, c.now().UTC(), firstNonEmpty(input.Reason, "expired_cleanup"))
+			sessionDeleted := make([]string, 0)
+			sessionSkipped := make([]string, 0)
 			for _, tempPath := range c.tempPaths[sessionID] {
 				if err := c.fileSystem.Remove(tempPath); err == nil {
-					deleted = append(deleted, tempPath)
+					sessionDeleted = append(sessionDeleted, tempPath)
+				} else {
+					sessionSkipped = append(sessionSkipped, tempPath)
 				}
 			}
-			delete(c.tempPaths, sessionID)
+			deleted = append(deleted, sessionDeleted...)
+			skipped = append(skipped, sessionSkipped...)
+			remaining := uniqueScreenPaths(append(removeScreenPaths(c.tempPaths[sessionID], sessionDeleted), sessionSkipped...))
+			if len(remaining) == 0 {
+				delete(c.tempPaths, sessionID)
+				delete(c.frameCount, sessionID)
+				delete(c.sessions, sessionID)
+				continue
+			}
+			c.tempPaths[sessionID] = remaining
+			c.sessions[sessionID] = expired
 		}
 	}
 	return tools.ScreenCleanupResult{
 		Reason:       firstNonEmpty(input.Reason, "expired_cleanup"),
 		DeletedPaths: deleted,
+		SkippedPaths: skipped,
 		DeletedCount: len(deleted),
+		SkippedCount: len(skipped),
 	}, nil
 }
 
@@ -195,11 +235,17 @@ func (c *localScreenCaptureClient) captureFromWorkspaceSource(input tools.Screen
 		}
 	}
 	frameID := fmt.Sprintf("frame_%04d", frameNumber)
-	outputPath := filepath.ToSlash(filepath.Join("temp", input.ScreenSessionID, fmt.Sprintf("%s%s", frameID, filepath.Ext(sourcePath))))
+	outputPath := filepath.ToSlash(filepath.Join("temp", input.ScreenSessionID, fmt.Sprintf("%s%s", frameID, screenCaptureExtension(mode, sourcePath))))
 	if err := c.fileSystem.WriteFile(outputPath, content); err != nil {
 		return tools.ScreenFrameCandidate{}, tools.ErrScreenCaptureFailed
 	}
 	now := c.now().UTC()
+	retentionPolicy := tools.ScreenRetentionTemporary
+	cleanupRequired := true
+	if input.AllowPersist {
+		retentionPolicy = tools.ScreenRetentionArtifact
+		cleanupRequired = false
+	}
 	candidate := tools.ScreenFrameCandidate{
 		FrameID:           frameID,
 		ScreenSessionID:   input.ScreenSessionID,
@@ -211,14 +257,39 @@ func (c *localScreenCaptureClient) captureFromWorkspaceSource(input tools.Screen
 		CapturedAt:        now,
 		IsKeyframe:        keyframe,
 		DedupeFingerprint: fmt.Sprintf("%s:%s:%s:%d", input.ScreenSessionID, mode, sourcePath, frameNumber),
-		RetentionPolicy:   tools.ScreenRetentionTemporary,
-		CleanupRequired:   true,
+		RetentionPolicy:   retentionPolicy,
+		CleanupRequired:   cleanupRequired,
 	}
-	c.tempPaths[input.ScreenSessionID] = append(c.tempPaths[input.ScreenSessionID], outputPath)
+	if cleanupRequired {
+		c.tempPaths[input.ScreenSessionID] = append(c.tempPaths[input.ScreenSessionID], outputPath)
+	}
 	return candidate, nil
 }
 
 func (c *localScreenCaptureClient) nextScreenSessionID() string {
 	c.nextID++
 	return fmt.Sprintf("screen_local_%04d", c.nextID)
+}
+
+func uniqueScreenPaths(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

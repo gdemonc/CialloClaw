@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,9 @@ func TestLocalScreenCaptureClientCapturesWorkspaceSourceAndCleansUp(t *testing.T
 	if _, err := os.Stat(filepath.Join(workspaceRoot, filepath.FromSlash(candidate.Path))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected cleaned temp file to be removed, got %v", err)
 	}
+	if _, err := client.GetSession(context.Background(), session.ScreenSessionID); !errors.Is(err, tools.ErrScreenCaptureSessionExpired) {
+		t.Fatalf("expected cleaned session to retire lifecycle state, got %v", err)
+	}
 }
 
 func TestLocalScreenCaptureClientRejectsMissingWorkspaceSource(t *testing.T) {
@@ -120,6 +124,16 @@ func TestLocalScreenCaptureClientGetExpireAndKeyframeBranches(t *testing.T) {
 	if !keyframe.Candidate.IsKeyframe || keyframe.PromotionReason != "review_pending" {
 		t.Fatalf("expected keyframe capture result, got %+v", keyframe)
 	}
+	if err := fileSystem.WriteFile("inputs/clip.webm", []byte("fake-clip")); err != nil {
+		t.Fatalf("write source clip failed: %v", err)
+	}
+	clip, err := client.CaptureScreenshot(context.Background(), tools.ScreenCaptureInput{ScreenSessionID: session.ScreenSessionID, CaptureMode: tools.ScreenCaptureModeClip, SourcePath: "inputs/clip.webm", AllowPersist: true})
+	if err != nil {
+		t.Fatalf("capture retained clip failed: %v", err)
+	}
+	if !strings.HasSuffix(clip.Path, ".webm") || clip.RetentionPolicy != tools.ScreenRetentionArtifact || clip.CleanupRequired {
+		t.Fatalf("expected retained clip capture result, got %+v", clip)
+	}
 	expired, err := client.ExpireSession(context.Background(), session.ScreenSessionID, "ttl_hit")
 	if err != nil || expired.TerminalReason != "ttl_hit" {
 		t.Fatalf("expected explicit expire path, got session=%+v err=%v", expired, err)
@@ -127,5 +141,35 @@ func TestLocalScreenCaptureClientGetExpireAndKeyframeBranches(t *testing.T) {
 	cleanup, err := client.CleanupExpiredScreenTemps(context.Background(), tools.ScreenCleanupInput{Reason: "ttl_cleanup", ExpiredBefore: now.Add(time.Minute)})
 	if err != nil || cleanup.DeletedCount != 1 {
 		t.Fatalf("expected expired temp cleanup, got cleanup=%+v err=%v", cleanup, err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, filepath.FromSlash(clip.Path))); err != nil {
+		t.Fatalf("expected retained clip artifact to remain on disk, got %v", err)
+	}
+}
+
+func TestLocalScreenCaptureClientStopAndHelperBranches(t *testing.T) {
+	if _, ok := NewLocalScreenCaptureClient(nil).(noopScreenCaptureClient); !ok {
+		t.Fatal("expected nil filesystem local client constructor to fall back to noop client")
+	}
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	policy, err := platform.NewLocalPathPolicy(workspaceRoot)
+	if err != nil {
+		t.Fatalf("new local path policy failed: %v", err)
+	}
+	client := NewLocalScreenCaptureClient(platform.NewLocalFileSystemAdapter(policy)).(*localScreenCaptureClient)
+	client.now = func() time.Time { return time.Date(2026, 4, 18, 23, 0, 0, 0, time.UTC) }
+	session, err := client.StartSession(context.Background(), tools.ScreenSessionStartInput{SessionID: "sess_screen_004", TaskID: "task_screen_004", RunID: "run_screen_004"})
+	if err != nil {
+		t.Fatalf("start session failed: %v", err)
+	}
+	stopped, err := client.StopSession(context.Background(), session.ScreenSessionID, "user_stop")
+	if err != nil {
+		t.Fatalf("stop session failed: %v", err)
+	}
+	if stopped.AuthorizationState != tools.ScreenAuthorizationEnded || stopped.TerminalReason != "user_stop" {
+		t.Fatalf("expected stopped session state, got %+v", stopped)
+	}
+	if got := uniqueScreenPaths([]string{"a", " ", "a", "b"}); len(got) != 2 || got[1] != "b" {
+		t.Fatalf("expected uniqueScreenPaths to trim and dedupe, got %+v", got)
 	}
 }
