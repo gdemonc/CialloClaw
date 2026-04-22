@@ -29,6 +29,7 @@ import { requestCurrentDesktopWindowClose, startCurrentDesktopWindowDragging } f
 import "./controlPanel.css";
 
 type ControlPanelSectionId = "general" | "desktop" | "memory" | "automation" | "models";
+type ControlPanelAppearance = "light" | "dark";
 
 type NavigationGroup = {
   label: string;
@@ -62,12 +63,14 @@ type SettingsCardProps = {
 type ControlLineProps = {
   children: ReactNode;
   className?: string;
+  disabled?: boolean;
   hint?: string;
   label: string;
 };
 
 type ToggleLineProps = {
   checked: boolean;
+  disabled?: boolean;
   description?: string;
   label: string;
   onCheckedChange: (checked: boolean) => void;
@@ -203,6 +206,21 @@ function getApplyModeCopy(applyMode: string, needRestart: boolean, source: Contr
   return `设置已即时生效。${localSnapshotSuffix}`;
 }
 
+function resolveControlPanelAppearance(
+  themeMode: ControlPanelData["settings"]["general"]["theme_mode"],
+  systemAppearance: ControlPanelAppearance,
+): ControlPanelAppearance {
+  if (themeMode === "dark") {
+    return "dark";
+  }
+
+  if (themeMode === "light") {
+    return "light";
+  }
+
+  return systemAppearance;
+}
+
 function StatusPill({ children, tone }: StatusPillProps) {
   return <span className={`control-panel-shell__status-pill control-panel-shell__status-pill--${tone}`}>{children}</span>;
 }
@@ -252,11 +270,11 @@ function SettingsCard({ children, description, title }: SettingsCardProps) {
   );
 }
 
-function ControlLine({ children, className, hint, label }: ControlLineProps) {
+function ControlLine({ children, className, disabled = false, hint, label }: ControlLineProps) {
   const classes = ["control-panel-shell__row", className].filter(Boolean).join(" ");
 
   return (
-    <div className={classes}>
+    <div className={classes} data-disabled={disabled ? "true" : "false"}>
       <div className="control-panel-shell__row-copy">
         <div className="control-panel-shell__title-row control-panel-shell__title-row--field">
           <Text as="p" size="2" weight="medium" className="control-panel-shell__row-label">
@@ -270,9 +288,9 @@ function ControlLine({ children, className, hint, label }: ControlLineProps) {
   );
 }
 
-function ToggleLine({ checked, description, label, onCheckedChange }: ToggleLineProps) {
+function ToggleLine({ checked, description, disabled = false, label, onCheckedChange }: ToggleLineProps) {
   return (
-    <div className="control-panel-shell__row control-panel-shell__row--toggle">
+    <div className="control-panel-shell__row control-panel-shell__row--toggle" data-disabled={disabled ? "true" : "false"}>
       <div className="control-panel-shell__row-copy">
         <div className="control-panel-shell__title-row control-panel-shell__title-row--field">
           <Text as="p" size="2" weight="medium" className="control-panel-shell__row-label">
@@ -285,9 +303,11 @@ function ToggleLine({ checked, description, label, onCheckedChange }: ToggleLine
         <button
           type="button"
           role="switch"
+          aria-disabled={disabled}
           aria-checked={checked}
           className="control-panel-shell__toggle"
           data-state={checked ? "checked" : "unchecked"}
+          disabled={disabled}
           onClick={() => onCheckedChange(!checked)}
         >
           <span className="control-panel-shell__toggle-handle" aria-hidden="true" />
@@ -381,6 +401,34 @@ export function ControlPanelApp() {
   const [inspectionSummary, setInspectionSummary] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRunningInspection, setIsRunningInspection] = useState(false);
+  const [systemAppearance, setSystemAppearance] = useState<ControlPanelAppearance>(() => {
+    if (typeof window === "undefined") {
+      return "light";
+    }
+
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateSystemAppearance = (event?: MediaQueryListEvent) => {
+      setSystemAppearance((event?.matches ?? mediaQuery.matches) ? "dark" : "light");
+    };
+
+    updateSystemAppearance();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateSystemAppearance);
+      return () => mediaQuery.removeEventListener("change", updateSystemAppearance);
+    }
+
+    mediaQuery.addListener(updateSystemAppearance);
+    return () => mediaQuery.removeListener(updateSystemAppearance);
+  }, []);
 
   useEffect(() => {
     void loadControlPanelData().then((nextData) => {
@@ -391,7 +439,7 @@ export function ControlPanelApp() {
 
   if (!draft || !panelData) {
     return (
-      <main className="app-shell control-panel-shell">
+      <main className="app-shell control-panel-shell" data-appearance={systemAppearance}>
         <div className="control-panel-shell__loading">
           <Text size="2" className="control-panel-shell__loading-copy">
             正在载入控制面板…
@@ -405,9 +453,11 @@ export function ControlPanelApp() {
   const inspectorDirty = !isEqual(draft.inspector, panelData.inspector);
   const settingsDirty = !isEqual(draft.settings, panelData.settings) || draft.providerApiKeyInput.trim() !== "";
   const hasChanges = inspectorDirty || settingsDirty;
+  const pendingFloatingBallHint = "悬浮球联调中：当前仅展示快照，不从控制面板写回。";
   const workSummaryCadence = `${draft.settings.memory.work_summary_interval.value}${draft.settings.memory.work_summary_interval.unit}`;
   const profileCadence = `${draft.settings.memory.profile_refresh_interval.value}${draft.settings.memory.profile_refresh_interval.unit}`;
   const providerApiKeyStatus = draft.settings.models.provider_api_key_configured ? "已配置" : "未配置";
+  const resolvedAppearance = resolveControlPanelAppearance(draft.settings.general.theme_mode, systemAppearance);
   const providerApiKeyHint =
     draft.source === "rpc"
       ? "通过 JSON-RPC `agent.settings.update` 提交；只写入后端 Stronghold，不会回显明文。"
@@ -606,17 +656,10 @@ export function ControlPanelApp() {
             <SettingsCard title="悬浮球状态" description="控制悬浮球在桌面上的默认表现。">
               <ToggleLine
                 label="自动贴边"
-                description="结束拖动后自动吸附到屏幕边缘。"
+                description={pendingFloatingBallHint}
                 checked={draft.settings.floating_ball.auto_snap}
-                onCheckedChange={(checked) =>
-                  updateSettings((current) => ({
-                    ...current,
-                    settings: {
-                      ...current.settings,
-                      floating_ball: { ...current.settings.floating_ball, auto_snap: checked },
-                    },
-                  }))
-                }
+                disabled
+                onCheckedChange={() => {}}
               />
 
               <ToggleLine
@@ -636,25 +679,18 @@ export function ControlPanelApp() {
             </SettingsCard>
 
             <SettingsCard title="在场方式" description="调整悬浮球的尺寸与停靠模式。">
-              <ControlLine label="尺寸" hint="在多窗口协作时决定悬浮球的可发现程度。">
+              <ControlLine label="尺寸" hint="在多窗口协作时决定悬浮球的可发现程度。" disabled>
                 <div className="control-panel-shell__slider-stack">
+                  <Text as="p" size="1" className="control-panel-shell__field-note">
+                    {pendingFloatingBallHint}
+                  </Text>
                   <Slider
                     min={0}
                     max={2}
                     step={1}
+                    disabled
                     value={[draft.settings.floating_ball.size === "small" ? 0 : draft.settings.floating_ball.size === "medium" ? 1 : 2]}
-                    onValueChange={([value]) =>
-                      updateSettings((current) => ({
-                        ...current,
-                        settings: {
-                          ...current.settings,
-                          floating_ball: {
-                            ...current.settings.floating_ball,
-                            size: value === 0 ? "small" : value === 1 ? "medium" : "large",
-                          },
-                        },
-                      }))
-                    }
+                    onValueChange={() => {}}
                   />
                   <div className="control-panel-shell__slider-legend">
                     <span>小</span>
@@ -950,7 +986,7 @@ export function ControlPanelApp() {
   };
 
   return (
-    <main className="app-shell control-panel-shell">
+    <main className="app-shell control-panel-shell" data-appearance={resolvedAppearance}>
       <div className="control-panel-shell__titlebar" aria-label="控制面板窗口操作" onPointerDown={handleTopbarPointerDown}>
         <div className="control-panel-shell__titlebar-copy">
           <Heading size="5" className="control-panel-shell__titlebar-title">
@@ -1020,6 +1056,11 @@ export function ControlPanelApp() {
           <div className="control-panel-shell__action-bar">
             <div className="control-panel-shell__action-statuses">
               {saveStateValue}
+              {draft.warnings && draft.warnings.length > 0 ? (
+                <Text as="p" size="2" color="amber" className="control-panel-shell__action-feedback" aria-live="polite">
+                  {draft.warnings[0]}
+                </Text>
+              ) : null}
               {saveFeedback ? (
                 <Text as="p" size="2" className="control-panel-shell__action-feedback" aria-live="polite">
                   {saveFeedback}

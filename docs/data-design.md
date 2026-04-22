@@ -20,7 +20,7 @@
 1. **产品主对象层**：`tasks / task_steps / delivery_results / artifacts / todo_items / recurring_rules`
 2. **执行兼容层**：`runs / steps / events / tool_calls`
 3. **治理与记忆层**：`approval_requests / authorization_records / audit_records / recovery_points / memory_*`
-4. **前馈与反馈层**：`skill_manifests / blueprint_definitions / prompt_template_versions / trace_records / eval_snapshots`
+4. **前馈与反馈层**：`skill_manifests / blueprint_definitions / prompt_template_versions / plugin_manifests / trace_records / eval_snapshots`
 
 这样就能避免把所有表都看成“普通业务表”。
 
@@ -90,6 +90,7 @@
 补充约束：
 
 - Stronghold 必须独立于普通设置快照与业务状态存储路径；
+- 当前正式 Stronghold backend 使用专用机密存储路径；Windows 上由 DPAPI-backed secret store 承担正式实现，若正式 backend 打开失败，SQLite fallback 只能作为开发态兼容兜底，不得继续冒充正式真源；
 - 模型 API Key、长期令牌和其他敏感配置不能继续作为普通 `settings` 字段或环境变量的正式真源；
 - `settings.get / settings.update` 只能暴露脱敏状态，例如“是否已配置”，不能回传真实 secret。
 
@@ -174,7 +175,7 @@
 - owner-5 为 notes 详情预留的底座字段优先落在既有对象扩展上：`todo_items` 侧承接 `note_text / prerequisite / planned_at / source_bucket / previous_bucket / previous_due_at / previous_status / ended_at / related_resources`，`recurring_rules` 侧承接 `repeat_rule_text / next_occurrence_at / recent_instance_status / effective_scope / recurring_enabled`。
 - notes 动作底座（complete / cancel / restore / toggle-recurring / delete）应直接更新既有 `todo_items / recurring_rules` 生命周期，不得绕过它们直接改写 `tasks`。
 - MemorySummary、MemoryCandidate、RetrievalHit 通过引用关联 Task 与 Run，不混存原始运行态。
-- SkillManifest、BlueprintDefinition、PromptTemplateVersion 与具体 Run 之间必须可追踪，便于 Trace / Eval、回放和问题定位。
+- SkillManifest、BlueprintDefinition、PromptTemplateVersion、PluginManifest 与具体 Run 之间必须可追踪，便于 Trace / Eval、回放和问题定位。
 - TraceRecord、EvalSnapshot、Hook 记录、审查结果和熔断事件应与 Task / Run / Step 形成稳定引用关系。
 
 ### 5.5 表总览与职责矩阵
@@ -202,6 +203,8 @@
 | `skill_manifests` | Skill 配置 | 前馈层 | Skill Loader | Skill 元数据和版本 |
 | `blueprint_definitions` | 蓝图定义 | 前馈层 | Blueprint Loader | 计划模板 |
 | `prompt_template_versions` | Prompt 模板 | 前馈层 | Prompt Composer | Prompt 版本 |
+| `plugin_manifests` | 插件静态资产 | 扩展层、仪表盘 | Plugin Manager | 插件版本、来源、权限、runtime 关联 |
+| `settings_snapshots` | 普通设置快照 | 设置中心 | Settings Manager | `general / floating_ball / memory / task_automation / models` 正式非敏感设置 |
 | `trace_records` | 运行轨迹 | 排障、Eval | Trace Engine | LLM、规则、延迟、成本 |
 | `eval_snapshots` | 评估快照 | Eval、回放 | Eval Engine | 质量和回归结果 |
 
@@ -244,7 +247,7 @@
 - 主要表：`tasks / task_steps / events / delivery_results / artifacts / approval_requests / trace_records`
 - 关键字段：`events.type / payload_json`
 - 作用：为任务列表、详情、安全摘要和结果区提供统一真源和事件驱动刷新。
-- 当前 owner-5 P0-2 迁移策略采用 `task_runs` 兼容快照与 `tasks / task_steps` 一等记录双写；任务列表、详情和部分 overview 回退读侧应优先读取 `tasks / task_steps`，仅在正式表缺失时再回退 `task_runs`。
+- 当前 owner-5 P0-2 迁移策略采用 `task_runs` 兼容快照与 `tasks / task_steps` 一等记录双写；任务列表、详情、安全摘要和部分 overview 已优先读取 `tasks / task_steps / runs / events / tool_calls / delivery_results / approval_requests / authorization_records / audit_records / recovery_points`，`task_runs` 只继续回填 citation / steering / mirror 等尚未完全结构化的兼容字段。
 
 ### 6.7 结果审查、Trace 与熔断
 - 主要表：`trace_records / eval_snapshots / events / tool_calls / audit_records`
@@ -257,8 +260,13 @@
 - 作用：当前阶段不新增独立主表，通过事件和 Trace 先承接推荐和感知结果。
 
 ### 6.9 扩展能力中心与多模型配置
-- 主要表：`skill_manifests / blueprint_definitions / prompt_template_versions / trace_records`
-- 作用：保证前馈配置与扩展能力可版本化、可追踪。
+- 主要表：`skill_manifests / blueprint_definitions / prompt_template_versions / plugin_manifests / trace_records / eval_snapshots`
+- 作用：保证前馈配置与扩展能力可版本化、可追踪，并能回溯某次 `task / run` 实际命中的配置与插件资产版本。
+
+### 6.10 设置中心与普通设置持久化
+- 主要表：`settings_snapshots`
+- 关键字段：`snapshot_key / snapshot_json / updated_at`
+- 作用：持久化普通非敏感设置快照；模型密钥仍只能进入 Stronghold，不得回落到普通 settings 真源。
 
 ## 7A. 关键字段说明与表级语义
 
@@ -333,20 +341,28 @@
 - `retrieval_hits.score`：召回分数，仅用于排序和过滤，不直接进入运行态主表。
 - `retrieval_hits.source`：区分 FTS、向量召回、结构化 KV 等来源，便于分析命中质量。
 
-### 7A.9 skill_manifests / blueprint_definitions / prompt_template_versions
+### 7A.9 skill_manifests / blueprint_definitions / prompt_template_versions / plugin_manifests
 
 - `version`：前馈配置版本号，是回放、问题定位和评估的关键字段。
 - `manifest_json / definition_json / template_body`：运行时装配真源，必须保持可审计和可回溯。
 - `source / summary`：前馈配置资产的来源与摘要，用于后续审计、加载器诊断和边界预留。
 - `variables_json`：Prompt 模板变量声明，预留后续参数化装配边界，但当前阶段不提前扩展生态 UI。
+- `plugin_manifests.entry / capabilities_json / permissions_json / runtime_names_json`：插件静态资产真源，必须能稳定指向当前 runtime 读模型，而不是只保留运行时缓存。
 
 ### 7A.10 trace_records / eval_snapshots
 
 - `loop_round`：当前 ReAct 循环轮次，是 Doom Loop 检测的重要依据。
 - `llm_input_summary / llm_output_summary`：保留关键摘要，帮助排障而不强依赖原始长上下文。
+- `asset_refs_json`：记录当前 `task / run` 实际命中的 Skill / Blueprint / Prompt / Plugin 资产版本，是回放和问题定位的关键字段。
 - `rule_hits_json`：命中规则、Hook、审查项摘要。
 - `review_result`：表达通过、失败或需人工升级的结果。
 - `eval_snapshots.metrics_json`：保存评估维度与分数，是回归和质量分析的真源。
+
+### 7A.10A settings_snapshots
+
+- `snapshot_key`：当前阶段固定为单行普通设置快照锚点，不与 secret store 混写。
+- `snapshot_json`：只保存 `general / floating_ball / memory / task_automation / models` 的非敏感设置；不得写入明文 API Key。
+- `updated_at`：用于设置中心判断最新落盘时间与重启后的回填顺序。
 
 ---
 
@@ -750,6 +766,34 @@ CREATE TABLE prompt_template_versions (
 );
 ```
 
+### 7.21A plugin_manifests
+
+```sql
+CREATE TABLE plugin_manifests (
+    plugin_id TEXT PRIMARY KEY,                   -- 插件ID
+    name TEXT NOT NULL,                           -- 插件名称
+    version TEXT NOT NULL,                        -- 版本
+    entry TEXT NOT NULL,                          -- 插件入口
+    source TEXT NOT NULL,                         -- 来源
+    summary TEXT NOT NULL,                        -- 摘要
+    capabilities_json TEXT NOT NULL,              -- 能力声明(JSON)
+    permissions_json TEXT NOT NULL,               -- 权限边界(JSON)
+    runtime_names_json TEXT NOT NULL,             -- 关联runtime名称(JSON)
+    created_at TEXT NOT NULL,                     -- 创建时间
+    updated_at TEXT NOT NULL                      -- 更新时间
+);
+```
+
+### 7.21B settings_snapshots
+
+```sql
+CREATE TABLE settings_snapshots (
+    snapshot_key TEXT PRIMARY KEY,               -- 当前快照锚点
+    snapshot_json TEXT NOT NULL,                 -- 普通设置快照(JSON)
+    updated_at TEXT NOT NULL                     -- 更新时间
+);
+```
+
 ### 7.22 trace_records
 
 ```sql
@@ -762,6 +806,7 @@ CREATE TABLE trace_records (
     llm_output_summary TEXT,                     -- 输出摘要
     latency_ms INTEGER NOT NULL DEFAULT 0,       -- 延迟
     cost REAL NOT NULL DEFAULT 0,                -- 成本
+    asset_refs_json TEXT,                        -- 命中扩展资产(JSON)
     rule_hits_json TEXT,                         -- 规则命中(JSON)
     review_result TEXT,                          -- 审查结果
     created_at TEXT NOT NULL                     -- 创建时间
@@ -777,6 +822,7 @@ CREATE TABLE eval_snapshots (
     trace_id TEXT NOT NULL,                      -- 关联trace
     task_id TEXT NOT NULL,                       -- 所属task
     status TEXT NOT NULL,                        -- 评估状态
+    asset_refs_json TEXT,                        -- 命中扩展资产(JSON)
     metrics_json TEXT NOT NULL,                  -- 指标(JSON)
     created_at TEXT NOT NULL,                    -- 创建时间,
     FOREIGN KEY(trace_id) REFERENCES trace_records(trace_id)
@@ -904,8 +950,10 @@ CREATE VIRTUAL TABLE memory_summaries_fts USING fts5(
 19. `skill_manifests`
 20. `blueprint_definitions`
 21. `prompt_template_versions`
-22. `trace_records`
-23. `eval_snapshots`
+22. `plugin_manifests`
+23. `settings_snapshots`
+24. `trace_records`
+25. `eval_snapshots`
 
 ---
 

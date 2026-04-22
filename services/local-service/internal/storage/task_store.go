@@ -55,6 +55,21 @@ func (s *inMemoryTaskStore) ListTasks(_ context.Context, limit, offset int) ([]T
 	return pageTasks(items, limit, offset), len(items), nil
 }
 
+func (s *inMemoryTaskStore) ListTasksBySession(_ context.Context, sessionID string, limit, offset int) ([]TaskRecord, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]TaskRecord, 0)
+	for _, record := range s.records {
+		if record.SessionID == sessionID {
+			items = append(items, record)
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return parseGovernanceTime(items[i].StartedAt).After(parseGovernanceTime(items[j].StartedAt))
+	})
+	return pageTasks(items, limit, offset), len(items), nil
+}
+
 type inMemoryTaskStepStore struct {
 	mu      sync.Mutex
 	records map[string][]TaskStepRecord
@@ -165,6 +180,37 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, limit, offset int) ([]T
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate tasks: %w", err)
+	}
+	return items, total, nil
+}
+
+func (s *SQLiteTaskStore) ListTasksBySession(ctx context.Context, sessionID string, limit, offset int) ([]TaskRecord, int, error) {
+	query := `SELECT task_id, session_id, run_id, title, source_type, status, intent_name, intent_arguments_json, preferred_delivery, fallback_delivery, current_step, current_step_status, risk_level, started_at, updated_at, COALESCE(finished_at, ''), snapshot_json FROM tasks WHERE session_id = ? ORDER BY started_at DESC, task_id DESC`
+	countQuery := `SELECT COUNT(1) FROM tasks WHERE session_id = ?`
+	args := []any{sessionID}
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery, sessionID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count tasks by session: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list tasks by session: %w", err)
+	}
+	defer rows.Close()
+	items := make([]TaskRecord, 0)
+	for rows.Next() {
+		var record TaskRecord
+		if err := rows.Scan(&record.TaskID, &record.SessionID, &record.RunID, &record.Title, &record.SourceType, &record.Status, &record.IntentName, &record.IntentArgumentsJSON, &record.PreferredDelivery, &record.FallbackDelivery, &record.CurrentStep, &record.CurrentStepStatus, &record.RiskLevel, &record.StartedAt, &record.UpdatedAt, &record.FinishedAt, &record.SnapshotJSON); err != nil {
+			return nil, 0, fmt.Errorf("scan task by session: %w", err)
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate tasks by session: %w", err)
 	}
 	return items, total, nil
 }

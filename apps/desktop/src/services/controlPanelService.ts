@@ -31,6 +31,7 @@ export type ControlPanelData = {
   securitySummary: AgentSecuritySummaryGetResult["summary"];
   providerApiKeyInput: string;
   source: ControlPanelSource;
+  warnings?: string[];
 };
 
 export type ControlPanelSaveResult = {
@@ -73,6 +74,38 @@ export class ControlPanelSaveError extends Error {
     this.name = "ControlPanelSaveError";
     this.partialResult = partialResult;
   }
+}
+
+function buildEditableFloatingBallUpdate(
+  floatingBall: DesktopSettingsData["floating_ball"],
+): Partial<SettingsSnapshot["settings"]["floating_ball"]> {
+  return {
+    idle_translucent: floatingBall.idle_translucent,
+    position_mode: floatingBall.position_mode,
+  };
+}
+
+/**
+ * Floating-ball size and edge snapping are still owned by the shell-ball work.
+ * Preserve the last persisted values so control-panel saves only update the
+ * fields that are already safe to edit from this window.
+ *
+ * @param nextSettings Draft settings produced by the control panel flow.
+ * @param persistedSettings Last persisted desktop snapshot.
+ * @returns Settings with detached floating-ball fields restored.
+ */
+function preserveDetachedFloatingBallFields(
+  nextSettings: DesktopSettingsData,
+  persistedSettings: DesktopSettingsData,
+): DesktopSettingsData {
+  return hydrateDesktopSettings({
+    ...nextSettings,
+    floating_ball: {
+      ...nextSettings.floating_ball,
+      auto_snap: persistedSettings.floating_ball.auto_snap,
+      size: persistedSettings.floating_ball.size,
+    },
+  });
 }
 
 function projectInspectorToTaskAutomation(
@@ -146,6 +179,13 @@ function mergeProtocolSettings(
             ...patch.data_log,
           }
         : base.data_log,
+      models: patch.models
+        ? {
+            ...base.models,
+            ...patch.models,
+            ...(patch.models.credentials ?? {}),
+          }
+        : base.models,
     }),
   };
 }
@@ -161,6 +201,7 @@ function buildSettingsWithProviderApiKeyConfigured(
       provider: settings.models.provider,
       budget_auto_downgrade: settings.models.budget_auto_downgrade,
       provider_api_key_configured: providerApiKeyConfigured,
+      stronghold: settings.models.stronghold,
     },
     models: {
       ...settings.models,
@@ -169,12 +210,14 @@ function buildSettingsWithProviderApiKeyConfigured(
   });
 }
 
-function buildDataLogUpdatePayload(input: ControlPanelData) {
+function buildModelsUpdatePayload(input: ControlPanelData) {
   const apiKey = input.providerApiKeyInput.trim();
 
   return {
     provider: input.settings.models.provider,
     budget_auto_downgrade: input.settings.models.budget_auto_downgrade,
+    base_url: input.settings.models.base_url,
+    model: input.settings.models.model,
     ...(apiKey === "" ? {} : { api_key: apiKey }),
   };
 }
@@ -183,9 +226,9 @@ function buildSettingsUpdatePayload(input: ControlPanelData) {
   return {
     request_meta: createRequestMeta(),
     general: input.settings.general,
-    floating_ball: input.settings.floating_ball,
+    floating_ball: buildEditableFloatingBallUpdate(input.settings.floating_ball),
     memory: input.settings.memory,
-    data_log: buildDataLogUpdatePayload(input),
+    models: buildModelsUpdatePayload(input),
   };
 }
 
@@ -287,7 +330,7 @@ function buildMockInspector(settings: DesktopSettings): AgentTaskInspectorConfig
   };
 }
 
-function getInitialControlPanelData(): ControlPanelData {
+function getInitialControlPanelData(warnings: string[] = []): ControlPanelData {
   const settings = loadSettings();
   const inspector = buildMockInspector(settings);
   const normalizedSettings = projectInspectorToTaskAutomation(settings.settings, inspector);
@@ -297,6 +340,7 @@ function getInitialControlPanelData(): ControlPanelData {
     providerApiKeyInput: "",
     securitySummary: buildMockSecuritySummary(),
     source: "mock",
+    warnings,
   };
 }
 
@@ -326,9 +370,15 @@ export async function loadControlPanelData(): Promise<ControlPanelData> {
       providerApiKeyInput: "",
       securitySummary: securityResult.summary,
       source: "rpc",
+      warnings: [],
     };
   } catch (error) {
-    console.warn("Control panel RPC unavailable, using local settings fallback.", error);
+    if (!isRpcChannelUnavailable(error)) {
+      console.warn("Control panel RPC failed, using local settings fallback.", error);
+      return getInitialControlPanelData([error instanceof Error ? error.message : "control panel unavailable"]);
+    }
+
+    logRpcMockFallback("control panel load", error);
     return getInitialControlPanelData();
   }
 }
@@ -344,6 +394,7 @@ export async function saveControlPanelData(
   const saveSettingsRequested = options.saveSettings ?? true;
   const saveInspectorRequested = options.saveInspector ?? true;
   const timeoutMs = options.timeoutMs ?? CONTROL_PANEL_RPC_TIMEOUT_MS;
+  const persistedSettings = loadSettings().settings;
 
   if (!saveSettingsRequested && !saveInspectorRequested) {
     return buildControlPanelSaveResult(data.settings, data.inspector, data.source, {
@@ -356,9 +407,12 @@ export async function saveControlPanelData(
   }
 
   if (data.source === "mock") {
-    const nextSettingsSnapshot = buildSettingsWithProviderApiKeyConfigured(
-      projectInspectorToTaskAutomation(data.settings, data.inspector),
-      data.settings.models.provider_api_key_configured,
+    const nextSettingsSnapshot = preserveDetachedFloatingBallFields(
+      buildSettingsWithProviderApiKeyConfigured(
+        projectInspectorToTaskAutomation(data.settings, data.inspector),
+        data.settings.models.provider_api_key_configured,
+      ),
+      persistedSettings,
     );
     const nextDesktopSettings: DesktopSettings = {
       settings: nextSettingsSnapshot,
@@ -388,6 +442,7 @@ export async function saveControlPanelData(
     if (saveSettingsRequested) {
       const settingsResult = await withRpcTimeout(updateSettings(buildSettingsUpdatePayload(data)), timeoutMs, "设置保存");
       effectiveSettings = mergeProtocolSettings(data.settings, settingsResult.effective_settings as Partial<SettingsSnapshot["settings"]>);
+      effectiveSettings = preserveDetachedFloatingBallFields(effectiveSettings, persistedSettings);
       effectiveSettings = projectInspectorToTaskAutomation(effectiveSettings, effectiveInspector);
       applyMode = settingsResult.apply_mode;
       needRestart = settingsResult.need_restart;
