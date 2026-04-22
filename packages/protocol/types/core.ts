@@ -85,7 +85,7 @@ export const APPROVAL_DECISIONS = ["allow_once", "deny_once"] as const;
 export const APPROVAL_STATUSES = ["pending", "approved", "denied"] as const;
 
 // SETTINGS_SCOPES 定义共享常量。
-export const SETTINGS_SCOPES = ["all", "general", "floating_ball", "memory", "task_automation", "data_log"] as const;
+export const SETTINGS_SCOPES = ["all", "general", "floating_ball", "memory", "task_automation", "models"] as const;
 
 // APPLY_MODES 定义共享常量。
 export const APPLY_MODES = ["immediate", "restart_required", "next_task_effective"] as const;
@@ -444,11 +444,23 @@ export interface SettingsSnapshot {
       remind_before_deadline: boolean;
       remind_when_stale: boolean;
     };
-    data_log: {
+    models: {
+      provider: string;
+      credentials: {
+        budget_auto_downgrade: boolean;
+        provider_api_key_configured: boolean;
+        base_url: string;
+        model: string;
+        stronghold: StrongholdStatus;
+      };
+    };
+    data_log?: {
       provider: string;
       budget_auto_downgrade: boolean;
       provider_api_key_configured: boolean;
       stronghold: StrongholdStatus;
+      base_url?: string;
+      model?: string;
     };
   };
 }
@@ -476,7 +488,7 @@ export interface AsyncJob {
 export interface Session {
   session_id: string;
   title: string;
-  status: "active" | "archived";
+  status: "active" | "idle" | "archived";
   created_at: string;
   updated_at: string;
 }
@@ -580,10 +592,22 @@ export interface RetrievalHit {
 export interface PluginManifest {
   plugin_id: string;
   name: string;
+  display_name: string;
+  summary: string;
   version: string;
+  source: "builtin" | "local_dir" | "github" | "marketplace";
   entry: string;
-  capabilities: string[];
+  enabled: boolean;
   permissions: string[];
+  capabilities: PluginCapabilitySummary[];
+}
+
+export interface PluginCapabilitySummary {
+  tool_name: string;
+  display_name: string;
+  description: string;
+  source: "builtin" | "worker" | "sidecar";
+  risk_hint: RiskLevel;
 }
 
 // PluginRuntimeState 定义当前模块的接口约束。
@@ -596,6 +620,7 @@ export interface PluginRuntimeState {
   last_seen_at: string;
   last_error: string | null;
   capabilities: string[];
+  manifest?: PluginManifest;
 }
 
 // PluginMetricSnapshot 定义当前模块的接口约束。
@@ -608,6 +633,52 @@ export interface PluginMetricSnapshot {
   last_started_at: string;
   last_failed_at: string;
   last_seen_at: string;
+}
+
+export interface PluginRuntimeEvent {
+  name: string;
+  kind: PluginRuntimeState["kind"];
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface PluginContractField {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  example?: string | null;
+}
+
+export interface PluginDataContract {
+  schema_ref: string;
+  schema_json: Record<string, unknown> | null;
+  fields: PluginContractField[];
+}
+
+export interface PluginDeliveryMapping {
+  emits_tool_call: boolean;
+  artifact_types: string[];
+  delivery_types: DeliveryType[];
+  citation_source_types: Citation["source_type"][];
+}
+
+export interface PluginToolContract {
+  tool_name: string;
+  display_name: string;
+  description: string;
+  source: "builtin" | "worker" | "sidecar";
+  risk_hint: RiskLevel;
+  timeout_sec: number;
+  supports_dry_run: boolean;
+  input_contract: PluginDataContract;
+  output_contract: PluginDataContract;
+  delivery_mapping: PluginDeliveryMapping;
+}
+
+export interface PluginListItem extends PluginManifest {
+  runtimes: PluginRuntimeState[];
 }
 
 // RpcResponseMeta 定义当前模块的接口约束。

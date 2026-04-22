@@ -133,6 +133,40 @@ func (s *inMemoryLoopRuntimeStore) SaveDeliveryResult(_ context.Context, record 
 	return nil
 }
 
+func (s *inMemoryLoopRuntimeStore) GetRun(_ context.Context, runID string) (RunRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.runs[runID]
+	if !ok {
+		return RunRecord{}, sql.ErrNoRows
+	}
+	return record, nil
+}
+
+func (s *inMemoryLoopRuntimeStore) ListDeliveryResults(_ context.Context, taskID string, limit, offset int) ([]DeliveryResultRecord, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]DeliveryResultRecord, 0, len(s.deliveryResults))
+	for _, record := range s.deliveryResults {
+		if taskID != "" && record.TaskID != taskID {
+			continue
+		}
+		items = append(items, record)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].CreatedAt > items[j].CreatedAt
+	})
+	total := len(items)
+	if offset >= total {
+		return []DeliveryResultRecord{}, total, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return append([]DeliveryResultRecord(nil), items[offset:end]...), total, nil
+}
+
 func (s *inMemoryLoopRuntimeStore) ReplaceTaskCitations(_ context.Context, taskID string, records []CitationRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -275,6 +309,46 @@ func (s *SQLiteLoopRuntimeStore) SaveDeliveryResult(ctx context.Context, record 
 		return fmt.Errorf("write delivery_result record: %w", err)
 	}
 	return nil
+}
+
+func (s *SQLiteLoopRuntimeStore) GetRun(ctx context.Context, runID string) (RunRecord, error) {
+	var record RunRecord
+	err := s.db.QueryRowContext(ctx, `SELECT run_id, task_id, session_id, status, intent_name, started_at, updated_at, COALESCE(finished_at, ''), COALESCE(stop_reason, '') FROM runs WHERE run_id = ?`, runID).Scan(&record.RunID, &record.TaskID, &record.SessionID, &record.Status, &record.IntentName, &record.StartedAt, &record.UpdatedAt, &record.FinishedAt, &record.StopReason)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *SQLiteLoopRuntimeStore) ListDeliveryResults(ctx context.Context, taskID string, limit, offset int) ([]DeliveryResultRecord, int, error) {
+	countQuery := `SELECT COUNT(1) FROM delivery_results WHERE task_id = ?`
+	query := `SELECT delivery_result_id, task_id, type, title, payload_json, COALESCE(preview_text, ''), created_at FROM delivery_results WHERE task_id = ? ORDER BY created_at DESC, delivery_result_id DESC`
+	args := []any{taskID}
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery, taskID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count delivery results: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list delivery results: %w", err)
+	}
+	defer rows.Close()
+	items := make([]DeliveryResultRecord, 0)
+	for rows.Next() {
+		var record DeliveryResultRecord
+		if err := rows.Scan(&record.DeliveryResultID, &record.TaskID, &record.Type, &record.Title, &record.PayloadJSON, &record.PreviewText, &record.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan delivery result: %w", err)
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate delivery results: %w", err)
+	}
+	return items, total, nil
 }
 
 func (s *SQLiteLoopRuntimeStore) ReplaceTaskCitations(ctx context.Context, taskID string, records []CitationRecord) error {

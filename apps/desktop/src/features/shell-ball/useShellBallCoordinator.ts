@@ -71,6 +71,47 @@ type ShellBallHelperSnapshotInput = {
   windowLabel?: string;
 };
 
+type ShellBallTaskOutputServiceModule = {
+  openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source?: "rpc" | "mock") => Promise<unknown>;
+  performTaskOpenExecution: (plan: {
+    feedback: string;
+    mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+    path: string | null;
+    taskId: string | null;
+    url: string | null;
+  }) => Promise<string>;
+  resolveTaskOpenExecutionPlan: (result: unknown) => {
+    feedback: string;
+    mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+    path: string | null;
+    taskId: string | null;
+    url: string | null;
+  };
+};
+
+let shellBallTaskOutputServicePromise: Promise<ShellBallTaskOutputServiceModule> | null = null;
+
+// Lazy-load the dashboard delivery-open helpers so shell-ball can reuse the
+// formal desktop open path without creating a hard startup dependency.
+function loadShellBallTaskOutputService() {
+  if (shellBallTaskOutputServicePromise === null) {
+    if (typeof require === "function") {
+      const requireTaskOutputService = new Function(
+        "loader",
+        "return loader('@/features/dashboard/tasks/taskOutput.service')",
+      ) as (loader: NodeRequire) => ShellBallTaskOutputServiceModule;
+      shellBallTaskOutputServicePromise = Promise.resolve(requireTaskOutputService(require));
+    } else {
+      const importTaskOutputService = new Function(
+        "return import('../dashboard/tasks/taskOutput.service')",
+      ) as () => Promise<ShellBallTaskOutputServiceModule>;
+      shellBallTaskOutputServicePromise = importTaskOutputService();
+    }
+  }
+
+  return shellBallTaskOutputServicePromise;
+}
+
 const SHELL_BALL_LOCAL_BUBBLE_ITEMS: ShellBallBubbleItem[] = [];
 const SHELL_BALL_BUBBLE_HIDE_DELAY_MS = 5_000;
 const SHELL_BALL_BUBBLE_FADE_DURATION_MS = 420;
@@ -283,6 +324,42 @@ function createShellBallDeliveryResultBubbleItem(input: {
   });
 }
 
+function buildShellBallDeliveryResultKey(taskId: string, deliveryResult: DeliveryResult) {
+  return [
+    taskId,
+    deliveryResult.type,
+    deliveryResult.title,
+    deliveryResult.preview_text,
+    deliveryResult.payload.path ?? "",
+    deliveryResult.payload.url ?? "",
+  ].join("::");
+}
+
+/**
+ * Shell-ball only auto-opens formal results that the desktop can immediately
+ * hand off to the OS or browser. Bubble-only replies remain in the local chat.
+ *
+ * @param deliveryResult The formal result returned by task creation or delivery.ready.
+ * @returns Whether shell-ball should resolve and execute the formal open flow.
+ */
+export function shouldAutoOpenShellBallDeliveryResult(
+  deliveryResult: DeliveryResult | null | undefined,
+): deliveryResult is DeliveryResult {
+  if (!deliveryResult) {
+    return false;
+  }
+
+  switch (deliveryResult.type) {
+    case "workspace_document":
+    case "open_file":
+    case "reveal_in_folder":
+    case "result_page":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function syncShellBallVisualStateFromTaskStatus(status: Parameters<typeof getShellBallVisualStateForTaskStatus>[0]) {
   const currentState = useShellBallStore.getState().visualState;
   const nextState = getShellBallVisualStateForTaskStatus(status, currentState);
@@ -296,7 +373,7 @@ export function createShellBallAgentBubbleItem(
 ) {
   const bubbleMessage = result.bubble_message;
   const bubbleText = bubbleMessage?.text.trim() ?? "";
-  const deliveryPreview = result.delivery_result?.type === "bubble" ? result.delivery_result.preview_text?.trim() ?? "" : "";
+  const deliveryPreview = result.delivery_result?.preview_text?.trim() ?? "";
 
   if (bubbleMessage !== null && bubbleText !== "") {
     const bubbleType = bubbleMessage.type;
@@ -442,6 +519,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   const previousVisibleBubbleCountRef = useRef(visibleBubbleCountRef.current);
   const detachedPinnedBubbleIdsRef = useRef(new Set<string>());
   const deliveryReadyBubbleKeysRef = useRef(new Set<string>());
+  const autoOpenedDeliveryKeysRef = useRef(new Set<string>());
   const shellBallTaskIdsRef = useRef(new Set<string>());
   const shellBallTaskTurnIndexRef = useRef(new Map<string, number>());
   const revealBubbleRegionRef = useRef<() => void>(() => {});
@@ -528,6 +606,70 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
 
     applyBubbleVisibilityPhase("visible");
   }, [applyBubbleVisibilityPhase, clearBubbleVisibilityTimers]);
+
+  const appendShellBallAutoOpenFeedback = useCallback((input: {
+    taskId: string;
+    text: string;
+  }) => {
+    const turnIndex = getTaskBubbleTurnIndex(input.taskId) ?? allocateBubbleTurnIndex();
+    bindTaskToBubbleTurn(input.taskId, turnIndex);
+
+    setBubbleItems((currentItems) =>
+      sortShellBallBubbleItemsByTimestamp([
+        ...currentItems,
+        createShellBallTextBubbleItem({
+          role: "agent",
+          text: input.text,
+          bubbleType: "status",
+          createdAt: new Date().toISOString(),
+          taskId: input.taskId,
+          turnIndex,
+          turnPhase: 3,
+        }),
+      ]),
+    );
+    revealBubbleRegion();
+  }, [autoOpenShellBallDeliveryResult, revealBubbleRegion]);
+
+  /**
+   * Shell-ball only resolves and executes the formal delivery-open flow after
+   * a task has already produced a formal delivery result. The actual open
+   * action still comes from `agent.delivery.open`.
+   */
+  const autoOpenShellBallDeliveryResult = useCallback(async (taskId: string, deliveryResult: DeliveryResult | null | undefined) => {
+    if (!shouldAutoOpenShellBallDeliveryResult(deliveryResult)) {
+      return;
+    }
+
+    const deliveryKey = buildShellBallDeliveryResultKey(taskId, deliveryResult);
+
+    if (autoOpenedDeliveryKeysRef.current.has(deliveryKey)) {
+      return;
+    }
+
+    autoOpenedDeliveryKeysRef.current.add(deliveryKey);
+
+    try {
+      const taskOutputService = await loadShellBallTaskOutputService();
+      const openResult = await taskOutputService.openTaskDeliveryForTask(taskId, undefined, "rpc");
+      const plan = taskOutputService.resolveTaskOpenExecutionPlan(openResult);
+      const feedback = await taskOutputService.performTaskOpenExecution(plan);
+
+      if (plan.mode === "copy_path" || feedback !== plan.feedback) {
+        appendShellBallAutoOpenFeedback({
+          taskId,
+          text: feedback,
+        });
+      }
+    } catch (error) {
+      autoOpenedDeliveryKeysRef.current.delete(deliveryKey);
+      console.warn("shell-ball delivery auto-open failed", error);
+      appendShellBallAutoOpenFeedback({
+        taskId,
+        text: "结果已生成，但自动打开失败，请从任务详情里重新打开。",
+      });
+    }
+  }, [appendShellBallAutoOpenFeedback]);
 
   const scheduleBubbleRegionHide = useCallback(() => {
     clearBubbleVisibilityTimers();
@@ -669,6 +811,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         ]);
       });
       revealBubbleRegion();
+      void autoOpenShellBallDeliveryResult(result.task.task_id, result.delivery_result);
     } catch (error) {
       console.warn("shell-ball clipboard prompt submit failed", error);
       setBubbleItems((currentItems) =>
@@ -1172,6 +1315,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
           ]),
         );
         revealBubbleRegionRef.current();
+        void autoOpenShellBallDeliveryResult(result.task.task_id, result.delivery_result);
       } catch (error) {
         console.warn("shell-ball intent decision failed", error);
         setBubbleItems((currentItems) =>
@@ -1236,7 +1380,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         cleanup();
       }
     };
-  }, []);
+  }, [autoOpenShellBallDeliveryResult]);
 
   const handlePrimaryAction = useCallback(async (action: ShellBallPrimaryAction) => {
     switch (action) {
@@ -1327,7 +1471,13 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         });
 
         if (submittedPreview === "") {
-          await handlersRef.current.onSubmitText();
+          const immediateResult = await handlersRef.current.onSubmitText();
+
+          if (isShellBallInputSubmitResult(immediateResult)) {
+            shellBallTaskIdsRef.current.add(immediateResult.task.task_id);
+            void autoOpenShellBallDeliveryResult(immediateResult.task.task_id, immediateResult.delivery_result);
+          }
+
           break;
         }
 
@@ -1399,6 +1549,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
             );
           });
           revealBubbleRegion();
+          void autoOpenShellBallDeliveryResult(result.task.task_id, result.delivery_result);
           break;
         }
 

@@ -1,7 +1,7 @@
 import type { AgentSettingsGetParams, RequestMeta, SettingsSnapshot, TimeInterval } from "@cialloclaw/protocol";
 import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import { getSettingsDetailed } from "@/rpc/methods";
-import { loadSettings } from "@/services/settingsService";
+import { loadSettings, toProtocolSettingsSnapshot } from "@/services/settingsService";
 
 export type DashboardSettingsSource = "rpc" | "mock";
 
@@ -42,7 +42,7 @@ function createRequestMeta(): RequestMeta {
 // UI render immediately and remain usable when the RPC pipe is unavailable.
 export function getInitialDashboardSettingsSnapshot(): DashboardSettingsSnapshotData {
   return {
-    settings: loadSettings().settings,
+    settings: toProtocolSettingsSnapshot(loadSettings().settings),
     source: "mock",
     rpcContext: {
       serverTime: null,
@@ -67,7 +67,7 @@ export async function loadDashboardSettingsSnapshot(source: DashboardSettingsSou
     const response = await getSettingsDetailed(params);
 
     return {
-      settings: response.data.settings,
+      settings: response.data.settings as unknown as SettingsSnapshot["settings"],
       source: "rpc",
       rpcContext: {
         serverTime: response.meta?.server_time ?? null,
@@ -75,10 +75,10 @@ export async function loadDashboardSettingsSnapshot(source: DashboardSettingsSou
       },
     };
   } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("dashboard settings snapshot", error);
-    } else {
+    if (!isRpcChannelUnavailable(error)) {
       console.warn("Dashboard settings snapshot failed, using local settings fallback.", error);
+    } else {
+      logRpcMockFallback("dashboard settings snapshot", error);
     }
 
     return {

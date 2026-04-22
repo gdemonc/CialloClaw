@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -375,6 +376,10 @@ func (s *countingTaskStore) ListTasks(ctx context.Context, limit, offset int) ([
 	return s.base.ListTasks(ctx, limit, offset)
 }
 
+func (s *countingTaskStore) ListTasksBySession(ctx context.Context, sessionID string, limit, offset int) ([]storage.TaskRecord, int, error) {
+	return s.base.ListTasksBySession(ctx, sessionID, limit, offset)
+}
+
 func (s stubModelClient) GenerateText(_ context.Context, request model.GenerateTextRequest) (model.GenerateTextResponse, error) {
 	return model.GenerateTextResponse{
 		TaskID:     request.TaskID,
@@ -457,8 +462,9 @@ func newTestServiceWithExecutionWorkers(t *testing.T, modelOutput string, execut
 	}
 	toolExecutor := tools.NewToolExecutor(toolRegistry)
 	pluginService := plugin.NewService()
+	seedTestExtensionAssets(t, storageService, pluginService)
 	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
-	executor := execution.NewService(fileSystem, executionBackend, playwrightClient, ocrClient, mediaClient, sidecarclient.NewLocalScreenCaptureClient(fileSystem), modelService, auditService, checkpoint.NewService(checkpointWriter), deliveryService, toolRegistry, toolExecutor, pluginService).WithArtifactStore(storageService.ArtifactStore())
+	executor := execution.NewService(fileSystem, executionBackend, playwrightClient, ocrClient, mediaClient, sidecarclient.NewLocalScreenCaptureClient(fileSystem), modelService, auditService, checkpoint.NewService(checkpointWriter), deliveryService, toolRegistry, toolExecutor, pluginService).WithArtifactStore(storageService.ArtifactStore()).WithExtensionAssetCatalog(storageService)
 
 	service := NewService(
 		contextsvc.NewService(),
@@ -473,6 +479,95 @@ func newTestServiceWithExecutionWorkers(t *testing.T, modelOutput string, execut
 	).WithAudit(auditService).WithStorage(storageService).WithExecutor(executor).WithTaskInspector(taskinspector.NewService(fileSystem)).WithTraceEval(traceeval.NewService(storageService.TraceStore(), storageService.EvalStore()))
 
 	return service, workspaceRoot
+}
+
+func newTestServiceWithModelService(t *testing.T, modelService *model.Service) (*Service, string, *storage.Service) {
+	t.Helper()
+
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	pathPolicy, err := platform.NewLocalPathPolicy(workspaceRoot)
+	if err != nil {
+		t.Fatalf("new local path policy: %v", err)
+	}
+	storageService := storage.NewService(platform.NewLocalStorageAdapter(filepath.Join(t.TempDir(), "service.db")))
+	t.Cleanup(func() { _ = storageService.Close() })
+	auditService := audit.NewService(storageService.AuditWriter())
+	deliveryService := delivery.NewService()
+	toolRegistry := tools.NewRegistry()
+	if err := builtin.RegisterBuiltinTools(toolRegistry); err != nil {
+		t.Fatalf("register builtin tools: %v", err)
+	}
+	if err := sidecarclient.RegisterPlaywrightTools(toolRegistry); err != nil {
+		t.Fatalf("register playwright tools: %v", err)
+	}
+	if err := sidecarclient.RegisterOCRTools(toolRegistry); err != nil {
+		t.Fatalf("register ocr tools: %v", err)
+	}
+	if err := sidecarclient.RegisterMediaTools(toolRegistry); err != nil {
+		t.Fatalf("register media tools: %v", err)
+	}
+	toolExecutor := tools.NewToolExecutor(toolRegistry)
+	pluginService := plugin.NewService()
+	seedTestExtensionAssets(t, storageService, pluginService)
+	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
+	executor := execution.NewService(fileSystem, platform.LocalExecutionBackend{}, sidecarclient.NewNoopPlaywrightSidecarClient(), sidecarclient.NewNoopOCRWorkerClient(), sidecarclient.NewNoopMediaWorkerClient(), sidecarclient.NewLocalScreenCaptureClient(fileSystem), modelService, auditService, checkpoint.NewService(storageService.RecoveryPointWriter()), deliveryService, toolRegistry, toolExecutor, pluginService).WithArtifactStore(storageService.ArtifactStore()).WithExtensionAssetCatalog(storageService)
+
+	service := NewService(
+		contextsvc.NewService(),
+		intent.NewService(),
+		mustNewStoredEngine(t, storageService.TaskRunStore()),
+		deliveryService,
+		memory.NewServiceFromStorage(storageService.MemoryStore(), storageService.Capabilities().MemoryRetrievalBackend),
+		risk.NewService(),
+		modelService,
+		toolRegistry,
+		pluginService,
+	).WithAudit(auditService).WithStorage(storageService).WithExecutor(executor).WithTaskInspector(taskinspector.NewService(fileSystem)).WithTraceEval(traceeval.NewService(storageService.TraceStore(), storageService.EvalStore()))
+
+	return service, workspaceRoot, storageService
+}
+
+func seedTestExtensionAssets(t *testing.T, storageService *storage.Service, pluginService *plugin.Service) {
+	t.Helper()
+	if err := storageService.EnsureBuiltinExecutionAssets(context.Background()); err != nil {
+		t.Fatalf("ensure builtin execution assets: %v", err)
+	}
+	runtimeNamesByPluginID := map[string][]string{}
+	for _, runtime := range pluginService.RuntimeStates() {
+		if runtime.Manifest == nil || runtime.Manifest.PluginID == "" {
+			continue
+		}
+		runtimeNamesByPluginID[runtime.Manifest.PluginID] = append(runtimeNamesByPluginID[runtime.Manifest.PluginID], runtime.Name)
+	}
+	for _, manifest := range pluginService.Manifests() {
+		capabilitiesJSON, err := json.Marshal(manifest.Capabilities)
+		if err != nil {
+			t.Fatalf("marshal plugin capabilities: %v", err)
+		}
+		permissionsJSON, err := json.Marshal(manifest.Permissions)
+		if err != nil {
+			t.Fatalf("marshal plugin permissions: %v", err)
+		}
+		runtimeNamesJSON, err := json.Marshal(runtimeNamesByPluginID[manifest.PluginID])
+		if err != nil {
+			t.Fatalf("marshal plugin runtime names: %v", err)
+		}
+		if err := storageService.PluginManifestStore().WritePluginManifest(context.Background(), storage.PluginManifestRecord{
+			PluginID:         manifest.PluginID,
+			Name:             manifest.Name,
+			Version:          manifest.Version,
+			Entry:            manifest.Entry,
+			Source:           manifest.Source,
+			Summary:          "test manifest",
+			CapabilitiesJSON: string(capabilitiesJSON),
+			PermissionsJSON:  string(permissionsJSON),
+			RuntimeNamesJSON: string(runtimeNamesJSON),
+			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+			UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatalf("write plugin manifest: %v", err)
+		}
+	}
 }
 
 func mustNewStoredEngine(t *testing.T, taskStore storage.TaskRunStore) *runengine.Engine {
@@ -500,6 +595,19 @@ func (s storageTestAdapter) SecretStorePath() string {
 }
 
 func newTestService() *Service {
+	toolRegistry := tools.NewRegistry()
+	if err := builtin.RegisterBuiltinTools(toolRegistry); err != nil {
+		panic(err)
+	}
+	if err := sidecarclient.RegisterPlaywrightTools(toolRegistry); err != nil {
+		panic(err)
+	}
+	if err := sidecarclient.RegisterOCRTools(toolRegistry); err != nil {
+		panic(err)
+	}
+	if err := sidecarclient.RegisterMediaTools(toolRegistry); err != nil {
+		panic(err)
+	}
 	return NewService(
 		contextsvc.NewService(),
 		intent.NewService(),
@@ -508,7 +616,7 @@ func newTestService() *Service {
 		memory.NewService(),
 		risk.NewService(),
 		model.NewService(modelConfig()),
-		tools.NewRegistry(),
+		toolRegistry,
 		plugin.NewService(),
 	)
 }
@@ -716,6 +824,77 @@ func TestServiceSubmitInputRoutesClearCommandToAgentLoopWithoutForcedConfirmatio
 	}
 	if deliveryResult["type"] != "bubble" {
 		t.Fatalf("expected short command to prefer bubble delivery, got %v", deliveryResult["type"])
+	}
+}
+
+func TestServiceSubmitInputUsesConfiguredOpenAIResponsesClient(t *testing.T) {
+	type capturedRequest struct {
+		Model      string        `json:"model"`
+		Input      string        `json:"input"`
+		Tools      []interface{} `json:"tools"`
+		ToolChoice string        `json:"tool_choice"`
+	}
+
+	var captured capturedRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if got := r.Header.Get("Authorization"); got != "Bearer formal-mainline-key" {
+			t.Fatalf("authorization header mismatch: got %q", got)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("parse request body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_formal_mainline","model":"gpt-5.4","output_text":"Configured Responses output.","usage":{"input_tokens":5,"output_tokens":7,"total_tokens":12}}`))
+	}))
+	defer server.Close()
+
+	modelService, err := model.NewServiceFromConfig(model.ServiceConfig{
+		ModelConfig: serviceconfig.ModelConfig{
+			Provider: model.OpenAIResponsesProvider,
+			ModelID:  "gpt-5.4",
+			Endpoint: server.URL,
+		},
+		APIKey: "formal-mainline-key",
+	})
+	if err != nil {
+		t.Fatalf("new model service from config: %v", err)
+	}
+
+	service, _, _ := newTestServiceWithModelService(t, modelService)
+	result, err := service.SubmitInput(map[string]any{
+		"session_id": "sess_formal_mainline",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Translate this note into English",
+		},
+	})
+	if err != nil {
+		t.Fatalf("submit input failed: %v", err)
+	}
+	task := result["task"].(map[string]any)
+	if task["status"] != "completed" {
+		t.Fatalf("expected configured model path to complete task, got %+v", task)
+	}
+	if captured.Model != "gpt-5.4" {
+		t.Fatalf("expected configured model id to reach responses client, got %+v", captured)
+	}
+	if captured.ToolChoice != "auto" || len(captured.Tools) == 0 {
+		t.Fatalf("expected configured responses request to include tool-calling metadata, got %+v", captured)
+	}
+	if !strings.Contains(captured.Input, "Translate this note into English") {
+		t.Fatalf("expected user request to reach responses client, got %+v", captured)
+	}
+	deliveryResult, ok := result["delivery_result"].(map[string]any)
+	if !ok || deliveryResult["type"] != "bubble" {
+		t.Fatalf("expected configured model path to return bubble delivery, got %+v", result["delivery_result"])
 	}
 }
 
@@ -1935,12 +2114,18 @@ func TestExecuteTaskPersistsTraceAndEvalSnapshots(t *testing.T) {
 	if traces[0].ReviewResult != "passed" {
 		t.Fatalf("expected passing trace review result, got %+v", traces[0])
 	}
+	if traces[0].AssetRefsJSON == "" {
+		t.Fatalf("expected trace record to keep extension asset refs, got %+v", traces[0])
+	}
 	evals, total, err := service.storage.EvalStore().ListEvalSnapshots(context.Background(), updated.TaskID, 10, 0)
 	if err != nil || total != 1 || len(evals) != 1 {
 		t.Fatalf("expected one eval snapshot, total=%d len=%d err=%v", total, len(evals), err)
 	}
 	if evals[0].Status != "passed" {
 		t.Fatalf("expected passing eval snapshot status, got %+v", evals[0])
+	}
+	if evals[0].AssetRefsJSON == "" {
+		t.Fatalf("expected eval snapshot to keep extension asset refs, got %+v", evals[0])
 	}
 }
 
@@ -4055,6 +4240,98 @@ func TestServiceTaskListPrefersStructuredTaskStoreFallback(t *testing.T) {
 	}
 }
 
+func TestServiceTaskListKeepsLegacyTaskRunsAlongsideStructuredTasks(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "merged storage task list")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	if err := service.storage.TaskRunStore().SaveTaskRun(context.Background(), storage.TaskRunRecord{
+		TaskID:      "task_structured_merged",
+		SessionID:   "sess_structured_merged",
+		RunID:       "run_structured_merged",
+		Title:       "legacy structured snapshot title",
+		SourceType:  "hover_input",
+		Status:      "completed",
+		CurrentStep: "deliver_result",
+		RiskLevel:   "green",
+		StartedAt:   time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 16, 9, 4, 0, 0, time.UTC),
+		FinishedAt:  timePointer(time.Date(2026, 4, 16, 9, 6, 0, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("save structured compatibility task run failed: %v", err)
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              "task_structured_merged",
+		SessionID:           "sess_structured_merged",
+		RunID:               "run_structured_merged",
+		Title:               "structured finished task",
+		SourceType:          "hover_input",
+		Status:              "completed",
+		IntentName:          "summarize",
+		IntentArgumentsJSON: `{"style":"key_points"}`,
+		PreferredDelivery:   "workspace_document",
+		FallbackDelivery:    "bubble",
+		CurrentStep:         "deliver_result",
+		CurrentStepStatus:   "completed",
+		RiskLevel:           "green",
+		StartedAt:           time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:           time.Date(2026, 4, 16, 9, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		FinishedAt:          time.Date(2026, 4, 16, 9, 6, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write structured task failed: %v", err)
+	}
+	if err := service.storage.TaskRunStore().SaveTaskRun(context.Background(), storage.TaskRunRecord{
+		TaskID:      "task_legacy_only_001",
+		SessionID:   "sess_legacy_only",
+		RunID:       "run_legacy_only_001",
+		Title:       "legacy finished task",
+		SourceType:  "hover_input",
+		Status:      "completed",
+		CurrentStep: "deliver_result",
+		RiskLevel:   "green",
+		StartedAt:   time.Date(2026, 4, 15, 9, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 15, 9, 5, 0, 0, time.UTC),
+		FinishedAt:  timePointer(time.Date(2026, 4, 15, 9, 6, 0, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("save legacy-only task run failed: %v", err)
+	}
+	// Emulate an upgraded database where this older task still exists only in
+	// task_runs because it predates the first-class tasks table rollout.
+	if err := service.storage.TaskStore().DeleteTask(context.Background(), "task_legacy_only_001"); err != nil {
+		t.Fatalf("delete structured legacy-only task failed: %v", err)
+	}
+
+	listResult, err := service.TaskList(map[string]any{
+		"group":      "finished",
+		"limit":      float64(10),
+		"offset":     float64(0),
+		"sort_by":    "updated_at",
+		"sort_order": "desc",
+	})
+	if err != nil {
+		t.Fatalf("task list failed: %v", err)
+	}
+
+	items := listResult["items"].([]map[string]any)
+	if len(items) != 2 {
+		t.Fatalf("expected merged structured and legacy task list items, got %+v", items)
+	}
+	itemsByID := map[string]map[string]any{}
+	for _, item := range items {
+		itemsByID[item["task_id"].(string)] = item
+	}
+	if itemsByID["task_structured_merged"]["title"] != "structured finished task" {
+		t.Fatalf("expected structured task row to stay authoritative, got %+v", itemsByID["task_structured_merged"])
+	}
+	if itemsByID["task_legacy_only_001"]["title"] != "legacy finished task" {
+		t.Fatalf("expected legacy-only task run to remain visible, got %+v", itemsByID["task_legacy_only_001"])
+	}
+	page := listResult["page"].(map[string]any)
+	if page["total"] != 2 {
+		t.Fatalf("expected merged storage total 2, got %+v", page)
+	}
+}
+
 func TestServiceTaskListUsesStructuredStoreUnlimitedPaginationInMemoryFallback(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "structured task list unlimited in-memory")
 	if service.storage == nil {
@@ -4088,7 +4365,7 @@ func TestServiceTaskListUsesStructuredStoreUnlimitedPaginationInMemoryFallback(t
 	}
 }
 
-func TestServiceTaskListDoesNotFallbackWhenOffsetExceedsRuntimePage(t *testing.T) {
+func TestServiceTaskListMergesStructuredStorageWhenOffsetExceedsRuntimePage(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "runtime paging")
 
 	_, err := service.StartTask(map[string]any{
@@ -4145,8 +4422,8 @@ func TestServiceTaskListDoesNotFallbackWhenOffsetExceedsRuntimePage(t *testing.T
 		t.Fatalf("expected empty page beyond runtime total, got %+v", items)
 	}
 	page := listResult["page"].(map[string]any)
-	if page["total"] != 1 {
-		t.Fatalf("expected runtime total to stay unchanged, got %+v", page)
+	if page["total"] != 2 {
+		t.Fatalf("expected structured and runtime totals to merge, got %+v", page)
 	}
 }
 
@@ -4785,6 +5062,142 @@ func TestServiceTaskDetailGetIncludesFailureSummaryForFailedScreenTask(t *testin
 	citations := detailResult["citations"].([]map[string]any)
 	if len(citations) != 1 || citations[0]["source_ref"] != "art_screen_failure_detail" {
 		t.Fatalf("expected failed screen task to retain formal citations, got %+v", citations)
+	}
+}
+
+func TestServiceTaskDetailGetIncludesFailureSummaryForFailedModelTask(t *testing.T) {
+	service := newTestService()
+	task := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:         "sess_model_failure_detail",
+		Title:             "总结当前报错",
+		SourceType:        "hover_input",
+		Status:            "processing",
+		Intent:            map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		PreferredDelivery: "bubble",
+		FallbackDelivery:  "bubble",
+		CurrentStep:       "generate_output",
+		RiskLevel:         "green",
+		Timeline:          initialTimeline("processing", "generate_output"),
+		Snapshot: contextsvc.TaskContextSnapshot{
+			Text:      "Provider failure should remain visible in runtime summary.",
+			InputType: "text",
+		},
+	})
+	updatedTask, _ := service.failExecutionTask(task, task.Intent, execution.Result{}, errors.Join(model.ErrSecretSourceFailed, model.ErrSecretNotFound))
+
+	detailResult, err := service.TaskDetailGet(map[string]any{"task_id": updatedTask.TaskID})
+	if err != nil {
+		t.Fatalf("task detail get failed: %v", err)
+	}
+	runtimeSummary := detailResult["runtime_summary"].(map[string]any)
+	if runtimeSummary["latest_failure_code"] != "STRONGHOLD_ACCESS_FAILED" {
+		t.Fatalf("expected failed model task to expose formal latest_failure_code, got %+v", runtimeSummary)
+	}
+	if runtimeSummary["latest_failure_category"] != "model_credentials" {
+		t.Fatalf("expected failed model task to expose latest_failure_category, got %+v", runtimeSummary)
+	}
+	summary, _ := runtimeSummary["latest_failure_summary"].(string)
+	if !strings.Contains(summary, "模型凭证") {
+		t.Fatalf("expected failed model task to expose credentials-focused summary, got %+v", runtimeSummary)
+	}
+}
+
+func TestClassifyModelFailureUsesFormalCodes(t *testing.T) {
+	testCases := []struct {
+		name     string
+		err      error
+		wantCode string
+		wantType string
+	}{
+		{
+			name:     "unsupported provider",
+			err:      model.ErrModelProviderUnsupported,
+			wantCode: "MODEL_PROVIDER_NOT_FOUND",
+			wantType: "model_provider",
+		},
+		{
+			name:     "missing provider config",
+			err:      model.ErrModelProviderRequired,
+			wantCode: "MODEL_PROVIDER_NOT_FOUND",
+			wantType: "model_provider",
+		},
+		{
+			name:     "tool calling unsupported",
+			err:      model.ErrToolCallingNotSupported,
+			wantCode: "MODEL_NOT_ALLOWED",
+			wantType: "model_capability",
+		},
+		{
+			name:     "endpoint missing",
+			err:      model.ErrOpenAIEndpointRequired,
+			wantCode: "MODEL_NOT_ALLOWED",
+			wantType: "model_configuration",
+		},
+		{
+			name:     "api key missing",
+			err:      model.ErrOpenAIAPIKeyRequired,
+			wantCode: "STRONGHOLD_ACCESS_FAILED",
+			wantType: "model_credentials",
+		},
+		{
+			name:     "provider timeout",
+			err:      model.ErrOpenAIRequestTimeout,
+			wantCode: "MODEL_RUNTIME_UNAVAILABLE",
+			wantType: "model_runtime",
+		},
+		{
+			name:     "provider rate limited",
+			err:      &model.OpenAIHTTPStatusError{StatusCode: 429, Message: "rate limited"},
+			wantCode: "MODEL_RUNTIME_UNAVAILABLE",
+			wantType: "model_runtime",
+		},
+		{
+			name:     "provider rejects request",
+			err:      &model.OpenAIHTTPStatusError{StatusCode: 400, Message: "bad request"},
+			wantCode: "MODEL_NOT_ALLOWED",
+			wantType: "model_configuration",
+		},
+		{
+			name:     "output invalid",
+			err:      tools.ErrToolOutputInvalid,
+			wantCode: "TOOL_OUTPUT_INVALID",
+			wantType: "model_output",
+		},
+		{
+			name:     "secret resolution unavailable",
+			err:      errors.Join(model.ErrSecretSourceFailed, model.ErrSecretNotFound),
+			wantCode: "STRONGHOLD_ACCESS_FAILED",
+			wantType: "model_credentials",
+		},
+		{
+			name:     "missing client",
+			err:      model.ErrClientNotConfigured,
+			wantCode: "STRONGHOLD_ACCESS_FAILED",
+			wantType: "model_credentials",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			failureCode, failureCategory := classifyModelFailure(testCase.err)
+			if failureCode != testCase.wantCode || failureCategory != testCase.wantType {
+				t.Fatalf("expected %s/%s, got %s/%s", testCase.wantCode, testCase.wantType, failureCode, failureCategory)
+			}
+		})
+	}
+}
+
+func TestBuildBudgetFailureAuditTracksFormalModelFailures(t *testing.T) {
+	service := newTestService()
+	auditRecord := service.buildBudgetFailureAudit(runengine.TaskRecord{TaskID: "task_budget_failure_audit", RunID: "run_budget_failure_audit"}, errors.Join(model.ErrOpenAIEndpointRequired, model.ErrOpenAIRequestTimeout))
+	if auditRecord == nil {
+		t.Fatal("expected formal model failure to produce budget failure audit")
+	}
+	if stringValue(auditRecord, "action", "") != "budget_auto_downgrade.failure_signal" {
+		t.Fatalf("expected budget failure audit action, got %+v", auditRecord)
+	}
+	if !strings.Contains(stringValue(auditRecord, "reason", ""), model.ErrOpenAIEndpointRequired.Error()) {
+		t.Fatalf("expected budget failure audit reason to retain model config detail, got %+v", auditRecord)
 	}
 }
 
@@ -6071,7 +6484,7 @@ func TestServiceBudgetAutoDowngradeSwitchesWorkspaceDeliveryToBubble(t *testing.
 func TestServiceBudgetAutoDowngradeProviderUnavailableDisablesExpensiveTools(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed provider unavailable")
 	if _, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":              "unsupported_provider",
 			"budget_auto_downgrade": true,
 		},
@@ -6113,7 +6526,7 @@ func TestServiceBudgetAutoDowngradeProviderUnavailableDisablesExpensiveTools(t *
 func TestServiceBudgetAutoDowngradeDisabledKeepsWorkspaceDelivery(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed no downgrade")
 	if _, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"budget_auto_downgrade": false,
 		},
 	}); err != nil {
@@ -6263,8 +6676,8 @@ func TestServiceBudgetFallbackSuccessStillAppendsFailureSignal(t *testing.T) {
 
 func TestServiceBudgetAutoDowngradeUsesConfiguredPolicyThresholds(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed configured thresholds")
-	_, _, _, needRestart := service.runEngine.UpdateSettings(map[string]any{
-		"data_log": map[string]any{
+	_, _, _, needRestart, err := service.runEngine.UpdateSettings(map[string]any{
+		"models": map[string]any{
 			"budget_auto_downgrade": true,
 			"budget_policy": map[string]any{
 				"failure_signal_window":     3,
@@ -6275,6 +6688,9 @@ func TestServiceBudgetAutoDowngradeUsesConfiguredPolicyThresholds(t *testing.T) 
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("update settings failed: %v", err)
+	}
 	if needRestart {
 		t.Fatal("expected nested budget policy update to remain immediate")
 	}
@@ -7786,6 +8202,111 @@ func TestServiceTaskDetailGetPrefersStructuredTaskStoreFallback(t *testing.T) {
 	}
 }
 
+func TestServiceTaskDetailGetStructuredFallbackUsesSessionAndRunStores(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "structured session run detail")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	if err := service.storage.SessionStore().WriteSession(context.Background(), storage.SessionRecord{
+		SessionID: "sess_structured_link",
+		Title:     "Structured Session Title",
+		Status:    "idle",
+		CreatedAt: time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt: time.Date(2026, 4, 15, 10, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write session failed: %v", err)
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              "task_structured_session_run",
+		SessionID:           "sess_structured_link",
+		RunID:               "run_structured_session_run",
+		Title:               "",
+		SourceType:          "hover_input",
+		Status:              "processing",
+		IntentName:          "summarize",
+		IntentArgumentsJSON: `{"style":"key_points"}`,
+		PreferredDelivery:   "workspace_document",
+		FallbackDelivery:    "bubble",
+		CurrentStep:         "generate_output",
+		CurrentStepStatus:   "processing",
+		RiskLevel:           "green",
+		StartedAt:           time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:           time.Date(2026, 4, 15, 10, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write structured task failed: %v", err)
+	}
+	if err := service.storage.LoopRuntimeStore().SaveRun(context.Background(), storage.RunRecord{
+		RunID:      "run_structured_session_run",
+		TaskID:     "task_structured_session_run",
+		SessionID:  "sess_structured_link",
+		Status:     "processing",
+		IntentName: "summarize",
+		StartedAt:  time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:  time.Date(2026, 4, 15, 10, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		StopReason: "paused_by_session",
+	}); err != nil {
+		t.Fatalf("write run failed: %v", err)
+	}
+	result, err := service.TaskDetailGet(map[string]any{"task_id": "task_structured_session_run"})
+	if err != nil {
+		t.Fatalf("task detail get failed: %v", err)
+	}
+	task := result["task"].(map[string]any)
+	if task["title"] != "Structured Session Title" {
+		t.Fatalf("expected session store to backfill task title, got %+v", task)
+	}
+	if task["loop_stop_reason"] != "paused_by_session" {
+		t.Fatalf("expected run store to backfill loop stop reason, got %+v", task)
+	}
+}
+
+func TestServiceTaskDetailGetPrefersRuntimeStateWhenStructuredRowIsStale(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "runtime detail beats stale storage")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	runtimeTask := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_runtime_freshness",
+		Title:       "Runtime freshness task",
+		SourceType:  "hover_input",
+		Status:      "confirming_intent",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{"style": "key_points"}},
+		CurrentStep: "confirming_intent",
+		RiskLevel:   "green",
+	})
+	runtimeTask, ok := service.runEngine.BeginExecution(runtimeTask.TaskID, "generate_output", "Working on the response.")
+	if !ok {
+		t.Fatal("expected runtime task to begin execution")
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              runtimeTask.TaskID,
+		SessionID:           runtimeTask.SessionID,
+		RunID:               runtimeTask.RunID,
+		Title:               runtimeTask.Title,
+		SourceType:          runtimeTask.SourceType,
+		Status:              "confirming_intent",
+		IntentName:          "summarize",
+		IntentArgumentsJSON: `{"style":"key_points"}`,
+		PreferredDelivery:   runtimeTask.PreferredDelivery,
+		FallbackDelivery:    runtimeTask.FallbackDelivery,
+		CurrentStep:         "confirming_intent",
+		CurrentStepStatus:   "pending",
+		RiskLevel:           runtimeTask.RiskLevel,
+		StartedAt:           runtimeTask.StartedAt.Format(time.RFC3339Nano),
+		UpdatedAt:           runtimeTask.StartedAt.Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write stale structured task failed: %v", err)
+	}
+	detailResult, err := service.TaskDetailGet(map[string]any{"task_id": runtimeTask.TaskID})
+	if err != nil {
+		t.Fatalf("task detail get failed: %v", err)
+	}
+	task := detailResult["task"].(map[string]any)
+	if task["status"] != "processing" || task["current_step"] != "generate_output" {
+		t.Fatalf("expected runtime task state to override stale storage, got %+v", task)
+	}
+}
+
 func TestServiceTaskDetailGetStructuredFallbackBackfillsTaskRunEvidence(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "structured screen detail evidence")
 	if service.storage == nil {
@@ -8939,11 +9460,12 @@ func TestSettingsGetIncludesSecretConfigurationAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings get failed: %v", err)
 	}
-	dataLog := result["settings"].(map[string]any)["data_log"].(map[string]any)
-	if dataLog["provider_api_key_configured"] != false {
-		t.Fatalf("expected unset provider key flag, got %+v", dataLog)
+	models := result["settings"].(map[string]any)["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if credentials["provider_api_key_configured"] != false {
+		t.Fatalf("expected unset provider key flag, got %+v", credentials)
 	}
-	stronghold := dataLog["stronghold"].(map[string]any)
+	stronghold := credentials["stronghold"].(map[string]any)
 	if stronghold["backend"] == "" || stronghold["available"] != true {
 		t.Fatalf("expected stronghold status metadata, got %+v", stronghold)
 	}
@@ -8959,9 +9481,10 @@ func TestSettingsGetIncludesSecretConfigurationAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings get with secret failed: %v", err)
 	}
-	dataLog = result["settings"].(map[string]any)["data_log"].(map[string]any)
-	if dataLog["provider_api_key_configured"] != true {
-		t.Fatalf("expected configured provider key flag, got %+v", dataLog)
+	models = result["settings"].(map[string]any)["models"].(map[string]any)
+	credentials = models["credentials"].(map[string]any)
+	if credentials["provider_api_key_configured"] != true {
+		t.Fatalf("expected configured provider key flag, got %+v", credentials)
 	}
 }
 
@@ -8972,8 +9495,8 @@ func TestSettingsGetWithoutStorageStillReturnsStrongholdStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings get failed: %v", err)
 	}
-	dataLog := result["settings"].(map[string]any)["data_log"].(map[string]any)
-	stronghold := dataLog["stronghold"].(map[string]any)
+	models := result["settings"].(map[string]any)["models"].(map[string]any)
+	stronghold := models["credentials"].(map[string]any)["stronghold"].(map[string]any)
 	if stronghold["backend"] != "none" || stronghold["available"] != false || stronghold["formal_store"] != false {
 		t.Fatalf("expected degraded settings get to still expose stronghold defaults, got %+v", stronghold)
 	}
@@ -9017,7 +9540,7 @@ func TestSettingsUpdatePersistsSecretOutsideRegularSettings(t *testing.T) {
 		t.Fatal("expected storage service to be wired")
 	}
 	result, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":              "openai",
 			"budget_auto_downgrade": false,
 			"api_key":               "persisted-secret-key",
@@ -9034,15 +9557,53 @@ func TestSettingsUpdatePersistsSecretOutsideRegularSettings(t *testing.T) {
 		t.Fatalf("unexpected stored secret: %+v", stored)
 	}
 	effectiveSettings := result["effective_settings"].(map[string]any)
-	dataLog := effectiveSettings["data_log"].(map[string]any)
-	if _, exists := dataLog["api_key"]; exists {
-		t.Fatalf("expected api_key to stay out of regular settings path, got %+v", dataLog)
+	models := effectiveSettings["models"].(map[string]any)
+	if _, exists := models["api_key"]; exists {
+		t.Fatalf("expected api_key to stay out of regular settings path, got %+v", models)
 	}
-	if dataLog["provider_api_key_configured"] != true {
-		t.Fatalf("expected configured flag in settings response, got %+v", dataLog)
+	if models["provider_api_key_configured"] != true {
+		t.Fatalf("expected configured flag in settings response, got %+v", models)
 	}
-	if _, exists := dataLog["stronghold"]; !exists {
-		t.Fatalf("expected stronghold status in settings response, got %+v", dataLog)
+	if _, exists := models["stronghold"]; !exists {
+		t.Fatalf("expected stronghold status in settings response, got %+v", models)
+	}
+}
+
+func TestSettingsUpdateReturnsLeafModelKeys(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "settings leaf model keys")
+	result, err := service.SettingsUpdate(map[string]any{
+		"models": map[string]any{
+			"provider": "anthropic",
+			"base_url": "https://example.invalid/v1",
+			"model":    "claude-test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("settings update failed: %v", err)
+	}
+	updatedKeys := result["updated_keys"].([]string)
+	expectedKeys := []string{"models.base_url", "models.model", "models.provider"}
+	if !reflect.DeepEqual(updatedKeys, expectedKeys) {
+		t.Fatalf("expected leaf model updated keys, got %+v", updatedKeys)
+	}
+}
+
+func TestNormalizeSettingsSnapshotAccumulatesLegacyDataLogFields(t *testing.T) {
+	normalized := normalizeSettingsSnapshot(map[string]any{
+		"data_log": map[string]any{
+			"provider":              "openai",
+			"budget_auto_downgrade": true,
+			"base_url":              "https://example.invalid/v1",
+			"model":                 "gpt-test",
+		},
+	})
+	models := normalized["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if models["provider"] != "openai" {
+		t.Fatalf("expected legacy provider to map into models provider, got %+v", models)
+	}
+	if credentials["budget_auto_downgrade"] != true || credentials["base_url"] != "https://example.invalid/v1" || credentials["model"] != "gpt-test" {
+		t.Fatalf("expected legacy data_log fields to accumulate into models.credentials, got %+v", credentials)
 	}
 }
 
@@ -9052,7 +9613,7 @@ func TestSettingsUpdatePersistsSecretForRequestedProvider(t *testing.T) {
 		t.Fatal("expected storage service to be wired")
 	}
 	_, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":              "anthropic",
 			"budget_auto_downgrade": true,
 			"api_key":               "anthropic-secret-key",
@@ -9072,13 +9633,14 @@ func TestSettingsUpdatePersistsSecretForRequestedProvider(t *testing.T) {
 	if !errors.Is(err, storage.ErrSecretNotFound) {
 		t.Fatalf("expected default provider secret to remain unset, got %v", err)
 	}
-	result, err := service.SettingsGet(map[string]any{"scope": "data_log"})
+	result, err := service.SettingsGet(map[string]any{"scope": "models"})
 	if err != nil {
 		t.Fatalf("settings get failed: %v", err)
 	}
-	dataLog := result["settings"].(map[string]any)["data_log"].(map[string]any)
-	if dataLog["provider"] != "anthropic" || dataLog["provider_api_key_configured"] != true {
-		t.Fatalf("expected settings get to reflect anthropic provider secret, got %+v", dataLog)
+	models := result["settings"].(map[string]any)["models"].(map[string]any)
+	credentials := models["credentials"].(map[string]any)
+	if models["provider"] != "anthropic" || credentials["provider_api_key_configured"] != true {
+		t.Fatalf("expected settings get to reflect anthropic provider secret, got models=%+v credentials=%+v", models, credentials)
 	}
 }
 
@@ -9096,7 +9658,7 @@ func TestSettingsUpdateDeletesProviderSecretWithoutLeakingValue(t *testing.T) {
 		t.Fatalf("seed secret store failed: %v", err)
 	}
 	result, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider":       "openai",
 			"delete_api_key": true,
 		},
@@ -9108,12 +9670,12 @@ func TestSettingsUpdateDeletesProviderSecretWithoutLeakingValue(t *testing.T) {
 	if !errors.Is(err, storage.ErrSecretNotFound) {
 		t.Fatalf("expected secret to be deleted, got %v", err)
 	}
-	dataLog := result["effective_settings"].(map[string]any)["data_log"].(map[string]any)
-	if _, exists := dataLog["api_key"]; exists {
-		t.Fatalf("expected settings delete response to stay redacted, got %+v", dataLog)
+	models := result["effective_settings"].(map[string]any)["models"].(map[string]any)
+	if _, exists := models["api_key"]; exists {
+		t.Fatalf("expected settings delete response to stay redacted, got %+v", models)
 	}
-	if dataLog["provider_api_key_configured"] != false {
-		t.Fatalf("expected delete to clear configured flag, got %+v", dataLog)
+	if models["provider_api_key_configured"] != false {
+		t.Fatalf("expected delete to clear configured flag, got %+v", models)
 	}
 }
 
@@ -9134,7 +9696,7 @@ func TestSettingsUpdateReturnsStrongholdErrorWhenStoreUnavailable(t *testing.T) 
 	service.storage = storage.NewService(nil)
 	replaceSecretStore(t, service.storage, storage.UnavailableSecretStore{})
 	_, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider": "openai",
 			"api_key":  "secret-key",
 		},
@@ -9147,7 +9709,7 @@ func TestSettingsUpdateReturnsStrongholdErrorWhenStoreUnavailable(t *testing.T) 
 func TestSettingsUpdateReturnsStrongholdErrorWithoutStorage(t *testing.T) {
 	service := newTestService()
 	_, err := service.SettingsUpdate(map[string]any{
-		"data_log": map[string]any{
+		"models": map[string]any{
 			"provider": "openai",
 			"api_key":  "sk-test",
 		},
@@ -9177,8 +9739,8 @@ func TestSettingsUpdateUnrelatedScopeIgnoresSecretStoreOutage(t *testing.T) {
 	if _, ok := effectiveSettings["general"].(map[string]any); !ok {
 		t.Fatalf("expected general effective settings payload, got %+v", effectiveSettings)
 	}
-	if _, exists := effectiveSettings["data_log"]; exists {
-		t.Fatalf("expected unrelated settings update to avoid attaching data_log metadata, got %+v", effectiveSettings)
+	if _, exists := effectiveSettings["models"]; exists {
+		t.Fatalf("expected unrelated settings update to avoid attaching model metadata, got %+v", effectiveSettings)
 	}
 }
 
@@ -9206,6 +9768,117 @@ func TestServicePluginRuntimeListReturnsStructuredState(t *testing.T) {
 	}
 	if !foundFailedSidecar {
 		t.Fatalf("expected runtime query to expose failed sidecar state, got %+v", items)
+	}
+}
+
+func TestServicePluginListReturnsStructuredCatalog(t *testing.T) {
+	service := newTestService()
+	service.plugin.MarkRuntimeHealthy(plugin.RuntimeKindWorker, "ocr_worker")
+	service.plugin.MarkRuntimeFailed(plugin.RuntimeKindSidecar, "playwright_sidecar", errors.New("sidecar failed"))
+
+	result, err := service.PluginList(map[string]any{
+		"query":  "ocr",
+		"kinds":  []any{"worker"},
+		"health": []any{"healthy"},
+		"page": map[string]any{
+			"limit":  10,
+			"offset": 0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("plugin list failed: %v", err)
+	}
+	items := result["items"].([]map[string]any)
+	if len(items) != 1 || items[0]["plugin_id"] != "ocr" {
+		t.Fatalf("expected plugin list to return filtered ocr plugin, got %+v", items)
+	}
+	runtime, ok := service.plugin.RuntimeState(plugin.RuntimeKindWorker, "ocr_worker")
+	if !ok {
+		t.Fatalf("expected ocr worker runtime to exist")
+	}
+	capabilities := items[0]["capabilities"].([]map[string]any)
+	if len(capabilities) != len(runtime.Capabilities) {
+		t.Fatalf("expected plugin list item to expose all registered capabilities, got %+v", capabilities)
+	}
+	for _, capability := range capabilities {
+		toolName := capability["tool_name"].(string)
+		tool, err := service.tools.Get(toolName)
+		if err != nil {
+			t.Fatalf("expected capability %q to resolve from registry: %v", toolName, err)
+		}
+		metadata := tool.Metadata()
+		if capability["display_name"] != metadata.DisplayName || capability["description"] != metadata.Description || capability["source"] != string(metadata.Source) || capability["risk_hint"] != metadata.RiskHint {
+			t.Fatalf("expected plugin list capability to mirror registry metadata for %q, got %+v", toolName, capability)
+		}
+	}
+	if len(items[0]["runtimes"].([]map[string]any)) == 0 {
+		t.Fatalf("expected plugin list item to expose runtimes, got %+v", items[0])
+	}
+	page := result["page"].(map[string]any)
+	if page["total"] != 1 || page["has_more"] != false {
+		t.Fatalf("expected plugin list page metadata, got %+v", page)
+	}
+}
+
+func TestServicePluginDetailGetReturnsStructuredContracts(t *testing.T) {
+	service := newTestService()
+	service.plugin.MarkRuntimeHealthy(plugin.RuntimeKindWorker, "ocr_worker")
+
+	result, err := service.PluginDetailGet(map[string]any{
+		"plugin_id":       "ocr",
+		"include_runtime": true,
+		"include_metrics": true,
+		"include_events":  true,
+	})
+	if err != nil {
+		t.Fatalf("plugin detail get failed: %v", err)
+	}
+	pluginValue := result["plugin"].(map[string]any)
+	if pluginValue["plugin_id"] != "ocr" || pluginValue["display_name"] != "OCR Worker" {
+		t.Fatalf("expected structured plugin detail header, got %+v", pluginValue)
+	}
+	runtimes := result["runtimes"].([]map[string]any)
+	if len(runtimes) != 1 || runtimes[0]["name"] != "ocr_worker" {
+		t.Fatalf("expected plugin detail runtimes for ocr worker, got %+v", runtimes)
+	}
+	metrics := result["metrics"].([]map[string]any)
+	if len(metrics) != 1 || metrics[0]["name"] != "ocr_worker" {
+		t.Fatalf("expected plugin detail metrics for ocr worker, got %+v", metrics)
+	}
+	events := result["recent_events"].([]map[string]any)
+	if len(events) == 0 {
+		t.Fatalf("expected plugin detail events, got %+v", events)
+	}
+	runtime, ok := service.plugin.RuntimeState(plugin.RuntimeKindWorker, "ocr_worker")
+	if !ok {
+		t.Fatalf("expected ocr worker runtime to exist")
+	}
+	tools := result["tools"].([]map[string]any)
+	if len(tools) != len(runtime.Capabilities) {
+		t.Fatalf("expected plugin detail tools to match declared runtime capabilities, got %+v", tools)
+	}
+	for _, item := range tools {
+		toolName := item["tool_name"].(string)
+		tool, err := service.tools.Get(toolName)
+		if err != nil {
+			t.Fatalf("expected plugin detail tool %q to resolve from registry: %v", toolName, err)
+		}
+		metadata := tool.Metadata()
+		if item["display_name"] != metadata.DisplayName || item["description"] != metadata.Description || item["source"] != string(metadata.Source) || item["risk_hint"] != metadata.RiskHint || item["timeout_sec"] != metadata.TimeoutSec || item["supports_dry_run"] != metadata.SupportsDryRun {
+			t.Fatalf("expected plugin detail tool to mirror registry metadata for %q, got %+v", toolName, item)
+		}
+		inputContract := item["input_contract"].(map[string]any)
+		if inputContract["schema_ref"] != metadata.InputSchemaRef {
+			t.Fatalf("expected input contract schema ref to mirror registry metadata for %q, got %+v", toolName, inputContract)
+		}
+		outputContract := item["output_contract"].(map[string]any)
+		if outputContract["schema_ref"] != metadata.OutputSchemaRef {
+			t.Fatalf("expected output contract schema ref to mirror registry metadata for %q, got %+v", toolName, outputContract)
+		}
+		deliveryMapping := item["delivery_mapping"].(map[string]any)
+		if deliveryMapping["emits_tool_call"] != true {
+			t.Fatalf("expected delivery mapping to preserve tool call emission for %q, got %+v", toolName, deliveryMapping)
+		}
 	}
 }
 

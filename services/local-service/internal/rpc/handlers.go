@@ -5,7 +5,10 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/model"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/orchestrator"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
 )
 
 // registerHandlers binds stable agent.* JSON-RPC methods to orchestrator entry
@@ -43,6 +46,8 @@ func (s *Server) registerHandlers() {
 		"agent.settings.get":                   s.handleAgentSettingsGet,
 		"agent.settings.update":                s.handleAgentSettingsUpdate,
 		"agent.plugin.runtime.list":            s.handleAgentPluginRuntimeList,
+		"agent.plugin.list":                    s.handleAgentPluginList,
+		"agent.plugin.detail.get":              s.handleAgentPluginDetailGet,
 	}
 }
 
@@ -237,6 +242,18 @@ func (s *Server) handleAgentPluginRuntimeList(params map[string]any) (any, *rpcE
 	return wrapOrchestratorResult(data, err)
 }
 
+// handleAgentPluginList handles agent.plugin.list.
+func (s *Server) handleAgentPluginList(params map[string]any) (any, *rpcError) {
+	data, err := s.orchestrator.PluginList(params)
+	return wrapOrchestratorResult(data, err)
+}
+
+// handleAgentPluginDetailGet handles agent.plugin.detail.get.
+func (s *Server) handleAgentPluginDetailGet(params map[string]any) (any, *rpcError) {
+	data, err := s.orchestrator.PluginDetailGet(params)
+	return wrapOrchestratorResult(data, err)
+}
+
 // sanitizeTaskStartParams strips any client-supplied intent payload so
 // agent.task.start continues to flow through the authoritative suggestion path.
 func sanitizeTaskStartParams(params map[string]any) map[string]any {
@@ -303,7 +320,23 @@ func wrapOrchestratorResult(data any, err error) (any, *rpcError) {
 			TraceID: "trace_storage_query_failed",
 		}
 	}
+	if errors.Is(err, storage.ErrStructuredStoreUnavailable) || errors.Is(err, storage.ErrDatabasePathRequired) {
+		return nil, &rpcError{
+			Code:    1005001,
+			Message: "SQLITE_WRITE_FAILED",
+			Detail:  err.Error(),
+			TraceID: "trace_sqlite_write_failed",
+		}
+	}
 	if errors.Is(err, orchestrator.ErrStrongholdAccessFailed) {
+		return nil, &rpcError{
+			Code:    1005004,
+			Message: "STRONGHOLD_ACCESS_FAILED",
+			Detail:  err.Error(),
+			TraceID: "trace_stronghold_access_failed",
+		}
+	}
+	if errors.Is(err, storage.ErrStrongholdAccessFailed) || errors.Is(err, storage.ErrStrongholdUnavailable) || errors.Is(err, storage.ErrSecretStoreAccessFailed) || errors.Is(err, storage.ErrSecretNotFound) || errors.Is(err, model.ErrClientNotConfigured) || errors.Is(err, model.ErrOpenAIAPIKeyRequired) || errors.Is(err, model.ErrSecretSourceFailed) || errors.Is(err, model.ErrSecretNotFound) {
 		return nil, &rpcError{
 			Code:    1005004,
 			Message: "STRONGHOLD_ACCESS_FAILED",
@@ -317,6 +350,38 @@ func wrapOrchestratorResult(data any, err error) (any, *rpcError) {
 			Message: "RECOVERY_POINT_NOT_FOUND",
 			Detail:  err.Error(),
 			TraceID: "trace_recovery_point_not_found",
+		}
+	}
+	if errors.Is(err, model.ErrModelProviderRequired) || errors.Is(err, model.ErrModelProviderUnsupported) {
+		return nil, &rpcError{
+			Code:    1008001,
+			Message: "MODEL_PROVIDER_NOT_FOUND",
+			Detail:  err.Error(),
+			TraceID: "trace_model_provider_not_found",
+		}
+	}
+	if model.IsProviderRuntimeUnavailable(err) {
+		return nil, &rpcError{
+			Code:    1008007,
+			Message: "MODEL_RUNTIME_UNAVAILABLE",
+			Detail:  err.Error(),
+			TraceID: "trace_model_runtime_unavailable",
+		}
+	}
+	if errors.Is(err, model.ErrToolCallingNotSupported) || errors.Is(err, model.ErrOpenAIEndpointRequired) || errors.Is(err, model.ErrOpenAIModelIDRequired) || errors.Is(err, model.ErrOpenAIHTTPStatus) {
+		return nil, &rpcError{
+			Code:    1008002,
+			Message: "MODEL_NOT_ALLOWED",
+			Detail:  err.Error(),
+			TraceID: "trace_model_not_allowed",
+		}
+	}
+	if errors.Is(err, tools.ErrToolOutputInvalid) {
+		return nil, &rpcError{
+			Code:    1003004,
+			Message: "TOOL_OUTPUT_INVALID",
+			Detail:  err.Error(),
+			TraceID: "trace_tool_output_invalid",
 		}
 	}
 
