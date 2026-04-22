@@ -4122,6 +4122,98 @@ func TestServiceTaskListPrefersStructuredTaskStoreFallback(t *testing.T) {
 	}
 }
 
+func TestServiceTaskListKeepsLegacyTaskRunsAlongsideStructuredTasks(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "merged storage task list")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	if err := service.storage.TaskRunStore().SaveTaskRun(context.Background(), storage.TaskRunRecord{
+		TaskID:      "task_structured_merged",
+		SessionID:   "sess_structured_merged",
+		RunID:       "run_structured_merged",
+		Title:       "legacy structured snapshot title",
+		SourceType:  "hover_input",
+		Status:      "completed",
+		CurrentStep: "deliver_result",
+		RiskLevel:   "green",
+		StartedAt:   time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 16, 9, 4, 0, 0, time.UTC),
+		FinishedAt:  timePointer(time.Date(2026, 4, 16, 9, 6, 0, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("save structured compatibility task run failed: %v", err)
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              "task_structured_merged",
+		SessionID:           "sess_structured_merged",
+		RunID:               "run_structured_merged",
+		Title:               "structured finished task",
+		SourceType:          "hover_input",
+		Status:              "completed",
+		IntentName:          "summarize",
+		IntentArgumentsJSON: `{"style":"key_points"}`,
+		PreferredDelivery:   "workspace_document",
+		FallbackDelivery:    "bubble",
+		CurrentStep:         "deliver_result",
+		CurrentStepStatus:   "completed",
+		RiskLevel:           "green",
+		StartedAt:           time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:           time.Date(2026, 4, 16, 9, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		FinishedAt:          time.Date(2026, 4, 16, 9, 6, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write structured task failed: %v", err)
+	}
+	if err := service.storage.TaskRunStore().SaveTaskRun(context.Background(), storage.TaskRunRecord{
+		TaskID:      "task_legacy_only_001",
+		SessionID:   "sess_legacy_only",
+		RunID:       "run_legacy_only_001",
+		Title:       "legacy finished task",
+		SourceType:  "hover_input",
+		Status:      "completed",
+		CurrentStep: "deliver_result",
+		RiskLevel:   "green",
+		StartedAt:   time.Date(2026, 4, 15, 9, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 15, 9, 5, 0, 0, time.UTC),
+		FinishedAt:  timePointer(time.Date(2026, 4, 15, 9, 6, 0, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("save legacy-only task run failed: %v", err)
+	}
+	// Emulate an upgraded database where this older task still exists only in
+	// task_runs because it predates the first-class tasks table rollout.
+	if err := service.storage.TaskStore().DeleteTask(context.Background(), "task_legacy_only_001"); err != nil {
+		t.Fatalf("delete structured legacy-only task failed: %v", err)
+	}
+
+	listResult, err := service.TaskList(map[string]any{
+		"group":      "finished",
+		"limit":      float64(10),
+		"offset":     float64(0),
+		"sort_by":    "updated_at",
+		"sort_order": "desc",
+	})
+	if err != nil {
+		t.Fatalf("task list failed: %v", err)
+	}
+
+	items := listResult["items"].([]map[string]any)
+	if len(items) != 2 {
+		t.Fatalf("expected merged structured and legacy task list items, got %+v", items)
+	}
+	itemsByID := map[string]map[string]any{}
+	for _, item := range items {
+		itemsByID[item["task_id"].(string)] = item
+	}
+	if itemsByID["task_structured_merged"]["title"] != "structured finished task" {
+		t.Fatalf("expected structured task row to stay authoritative, got %+v", itemsByID["task_structured_merged"])
+	}
+	if itemsByID["task_legacy_only_001"]["title"] != "legacy finished task" {
+		t.Fatalf("expected legacy-only task run to remain visible, got %+v", itemsByID["task_legacy_only_001"])
+	}
+	page := listResult["page"].(map[string]any)
+	if page["total"] != 2 {
+		t.Fatalf("expected merged storage total 2, got %+v", page)
+	}
+}
+
 func TestServiceTaskListUsesStructuredStoreUnlimitedPaginationInMemoryFallback(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "structured task list unlimited in-memory")
 	if service.storage == nil {

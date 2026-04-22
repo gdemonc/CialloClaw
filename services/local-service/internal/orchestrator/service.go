@@ -2886,10 +2886,23 @@ func (s *Service) loadAllTasksFromStorage() []runengine.TaskRecord {
 	if s.storage == nil {
 		return nil
 	}
+	structuredTasks := []runengine.TaskRecord(nil)
 	if s.storage.TaskStore() != nil {
-		if tasks := s.loadAllTasksFromStructuredStorage(); len(tasks) > 0 {
-			return tasks
-		}
+		structuredTasks = s.loadAllTasksFromStructuredStorage()
+	}
+	taskRunTasks := s.loadAllTasksFromTaskRunStorage()
+	if len(structuredTasks) == 0 {
+		return taskRunTasks
+	}
+	if len(taskRunTasks) == 0 {
+		return structuredTasks
+	}
+	return mergeStructuredTaskListCompatibility(structuredTasks, taskRunTasks)
+}
+
+func (s *Service) loadAllTasksFromTaskRunStorage() []runengine.TaskRecord {
+	if s.storage == nil || s.storage.TaskRunStore() == nil {
+		return nil
 	}
 	records, err := s.storage.TaskRunStore().LoadTaskRuns(context.Background())
 	if err != nil || len(records) == 0 {
@@ -2900,6 +2913,38 @@ func (s *Service) loadAllTasksFromStorage() []runengine.TaskRecord {
 		tasks = append(tasks, taskRecordFromStorage(record))
 	}
 	return tasks
+}
+
+// mergeStructuredTaskListCompatibility keeps first-class task rows authoritative
+// while still appending legacy task_run-only entries so partially migrated
+// databases do not lose pre-structured history in task-centric overview queries.
+func mergeStructuredTaskListCompatibility(structuredTasks, taskRunTasks []runengine.TaskRecord) []runengine.TaskRecord {
+	if len(structuredTasks) == 0 {
+		return taskRunTasks
+	}
+	if len(taskRunTasks) == 0 {
+		return structuredTasks
+	}
+	taskRunByID := make(map[string]runengine.TaskRecord, len(taskRunTasks))
+	for _, task := range taskRunTasks {
+		taskRunByID[task.TaskID] = task
+	}
+	merged := make([]runengine.TaskRecord, 0, len(structuredTasks)+len(taskRunTasks))
+	seen := make(map[string]struct{}, len(structuredTasks)+len(taskRunTasks))
+	for _, task := range structuredTasks {
+		if taskRunTask, ok := taskRunByID[task.TaskID]; ok {
+			task = mergeStructuredTaskDetailCompatibility(task, taskRunTask)
+		}
+		merged = append(merged, task)
+		seen[task.TaskID] = struct{}{}
+	}
+	for _, task := range taskRunTasks {
+		if _, ok := seen[task.TaskID]; ok {
+			continue
+		}
+		merged = append(merged, task)
+	}
+	return merged
 }
 
 func (s *Service) loadAllTasksFromStructuredStorage() []runengine.TaskRecord {
