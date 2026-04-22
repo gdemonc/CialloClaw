@@ -8687,6 +8687,251 @@ func TestServiceTaskDetailGetStructuredFallbackRehydratesAuthorizationAndAudit(t
 	}
 }
 
+func TestServiceTaskDetailGetStructuredScreenFallbackPrefersFormalEvidenceObjects(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "structured screen detail formal precedence")
+	if service.storage == nil || service.storage.LoopRuntimeStore() == nil || service.storage.ArtifactStore() == nil {
+		t.Fatal("expected storage services to be wired")
+	}
+	taskID := "task_structured_screen_formal_precedence"
+	finishedAt := time.Date(2026, 4, 16, 10, 6, 0, 0, time.UTC)
+	snapshotJSONBytes, err := json.Marshal(storage.TaskRunRecord{
+		TaskID:            taskID,
+		SessionID:         "sess_structured_screen_formal_precedence",
+		RunID:             "run_structured_screen_formal_precedence",
+		Title:             "structured screen precedence task",
+		SourceType:        "screen_capture",
+		Status:            "completed",
+		Intent:            map[string]any{"name": "screen_analyze", "arguments": map[string]any{"language": "eng"}},
+		PreferredDelivery: "task_detail",
+		FallbackDelivery:  "bubble",
+		CurrentStep:       "deliver_result",
+		RiskLevel:         "yellow",
+		StartedAt:         time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC),
+		UpdatedAt:         time.Date(2026, 4, 16, 10, 5, 0, 0, time.UTC),
+		FinishedAt:        &finishedAt,
+		Artifacts: []map[string]any{{
+			"artifact_id":      "art_snapshot_screen_precedence",
+			"task_id":          taskID,
+			"artifact_type":    "screen_capture",
+			"title":            "snapshot screen artifact",
+			"path":             "workspace/snapshot-screen.png",
+			"mime_type":        "image/png",
+			"delivery_type":    "task_detail",
+			"delivery_payload": map[string]any{"task_id": taskID, "screen_session_id": "screen_snapshot_precedence", "evidence_role": "error_evidence"},
+		}},
+		Citations: []map[string]any{{
+			"citation_id":       "cit_snapshot_" + taskID,
+			"task_id":           taskID,
+			"run_id":            "run_structured_screen_formal_precedence",
+			"source_type":       "file",
+			"source_ref":        "art_snapshot_screen_precedence",
+			"label":             "snapshot evidence",
+			"artifact_id":       "art_snapshot_screen_precedence",
+			"artifact_type":     "screen_capture",
+			"evidence_role":     "error_evidence",
+			"excerpt_text":      "snapshot excerpt",
+			"screen_session_id": "screen_snapshot_precedence",
+		}},
+		Authorization: map[string]any{
+			"authorization_record_id": "auth_snapshot_screen_precedence",
+			"task_id":                 taskID,
+			"approval_id":             "appr_snapshot_screen_precedence",
+			"decision":                "deny_once",
+			"operator":                "user",
+			"created_at":              "2026-04-16T10:03:00Z",
+		},
+		AuditRecords: []map[string]any{{
+			"audit_id":   "audit_snapshot_delivery_precedence",
+			"task_id":    taskID,
+			"type":       "delivery",
+			"action":     "publish_result",
+			"summary":    "snapshot delivery audit",
+			"target":     "task_detail",
+			"result":     "success",
+			"created_at": "2026-04-16T10:07:00Z",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal snapshot json failed: %v", err)
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              taskID,
+		SessionID:           "sess_structured_screen_formal_precedence",
+		RunID:               "run_structured_screen_formal_precedence",
+		Title:               "structured screen precedence task",
+		SourceType:          "screen_capture",
+		Status:              "completed",
+		IntentName:          "screen_analyze",
+		IntentArgumentsJSON: `{"language":"eng"}`,
+		PreferredDelivery:   "task_detail",
+		FallbackDelivery:    "bubble",
+		CurrentStep:         "deliver_result",
+		CurrentStepStatus:   "completed",
+		RiskLevel:           "yellow",
+		StartedAt:           time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:           time.Date(2026, 4, 16, 10, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		FinishedAt:          finishedAt.Format(time.RFC3339Nano),
+		SnapshotJSON:        string(snapshotJSONBytes),
+	}); err != nil {
+		t.Fatalf("write structured task failed: %v", err)
+	}
+	if err := service.storage.ArtifactStore().SaveArtifacts(context.Background(), []storage.ArtifactRecord{{
+		ArtifactID:          "art_formal_screen_precedence",
+		TaskID:              taskID,
+		ArtifactType:        "screen_capture",
+		Title:               "formal screen artifact",
+		Path:                "artifacts/screen/structured/formal-screen.png",
+		MimeType:            "image/png",
+		DeliveryType:        "task_detail",
+		DeliveryPayloadJSON: `{"task_id":"` + taskID + `","screen_session_id":"screen_formal_precedence","evidence_role":"error_evidence"}`,
+		CreatedAt:           "2026-04-16T10:05:00Z",
+	}}); err != nil {
+		t.Fatalf("save formal artifact failed: %v", err)
+	}
+	if err := service.storage.LoopRuntimeStore().ReplaceTaskCitations(context.Background(), taskID, []storage.CitationRecord{{
+		CitationID:      "cit_formal_" + taskID,
+		TaskID:          taskID,
+		RunID:           "run_structured_screen_formal_precedence",
+		SourceType:      "file",
+		SourceRef:       "art_formal_screen_precedence",
+		Label:           "error_evidence | screen_capture | formal excerpt",
+		ArtifactID:      "art_formal_screen_precedence",
+		ArtifactType:    "screen_capture",
+		EvidenceRole:    "error_evidence",
+		ExcerptText:     "formal excerpt",
+		ScreenSessionID: "screen_formal_precedence",
+		OrderIndex:      0,
+	}}); err != nil {
+		t.Fatalf("save formal citations failed: %v", err)
+	}
+	if err := service.storage.AuthorizationRecordStore().WriteAuthorizationRecord(context.Background(), storage.AuthorizationRecordRecord{
+		AuthorizationRecordID: "auth_formal_screen_precedence",
+		TaskID:                taskID,
+		ApprovalID:            "appr_formal_screen_precedence",
+		Decision:              "allow_once",
+		Operator:              "user",
+		RememberRule:          false,
+		CreatedAt:             "2026-04-16T10:04:00Z",
+	}); err != nil {
+		t.Fatalf("write formal authorization record failed: %v", err)
+	}
+	if err := service.storage.AuditStore().WriteAuditRecord(context.Background(), audit.Record{
+		AuditID:   "audit_formal_screen_precedence",
+		TaskID:    taskID,
+		Type:      "screen_capture",
+		Action:    "screen.capture.screenshot_analyze",
+		Summary:   "formal screen evidence audit",
+		Target:    "artifacts/screen/structured/formal-screen.png",
+		Result:    "success",
+		CreatedAt: "2026-04-16T10:05:00Z",
+	}); err != nil {
+		t.Fatalf("write formal audit record failed: %v", err)
+	}
+	if err := service.runEngine.DeleteTask(taskID); err != nil && !errors.Is(err, runengine.ErrTaskNotFound) {
+		t.Fatalf("delete runtime task shadow failed: %v", err)
+	}
+
+	detailResult, err := service.TaskDetailGet(map[string]any{"task_id": taskID})
+	if err != nil {
+		t.Fatalf("task detail get failed: %v", err)
+	}
+	artifacts := detailResult["artifacts"].([]map[string]any)
+	if len(artifacts) != 1 || artifacts[0]["artifact_id"] != "art_formal_screen_precedence" {
+		t.Fatalf("expected formal artifact to override snapshot artifact, got %+v", artifacts)
+	}
+	citations := detailResult["citations"].([]map[string]any)
+	if len(citations) != 1 || citations[0]["artifact_id"] != "art_formal_screen_precedence" || citations[0]["screen_session_id"] != "screen_formal_precedence" {
+		t.Fatalf("expected formal citation to override snapshot citation, got %+v", citations)
+	}
+	authorizationRecord := detailResult["authorization_record"].(map[string]any)
+	if authorizationRecord["authorization_record_id"] != "auth_formal_screen_precedence" || authorizationRecord["decision"] != "allow_once" {
+		t.Fatalf("expected formal authorization record to override snapshot authorization, got %+v", authorizationRecord)
+	}
+	auditRecord := detailResult["audit_record"].(map[string]any)
+	if auditRecord["audit_id"] != "audit_formal_screen_precedence" || auditRecord["action"] != "screen.capture.screenshot_analyze" {
+		t.Fatalf("expected formal screen audit to override generic snapshot audit, got %+v", auditRecord)
+	}
+}
+
+func TestServiceTaskDetailGetStructuredScreenApprovalPrefersFormalApprovalRequest(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "structured screen detail approval precedence")
+	if service.storage == nil {
+		t.Fatal("expected storage service to be wired")
+	}
+	taskID := "task_structured_screen_waiting_auth_precedence"
+	snapshotJSONBytes, err := json.Marshal(storage.TaskRunRecord{
+		TaskID:            taskID,
+		SessionID:         "sess_structured_screen_waiting_auth_precedence",
+		RunID:             "run_structured_screen_waiting_auth_precedence",
+		Title:             "structured screen waiting auth precedence task",
+		SourceType:        "screen_capture",
+		Status:            "waiting_auth",
+		Intent:            map[string]any{"name": "screen_analyze", "arguments": map[string]any{"language": "eng"}},
+		PreferredDelivery: "task_detail",
+		FallbackDelivery:  "bubble",
+		CurrentStep:       "waiting_authorization",
+		RiskLevel:         "yellow",
+		StartedAt:         time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC),
+		UpdatedAt:         time.Date(2026, 4, 16, 11, 5, 0, 0, time.UTC),
+		ApprovalRequest: map[string]any{
+			"approval_id":    "appr_snapshot_screen_waiting_auth_precedence",
+			"task_id":        taskID,
+			"operation_name": "write_file",
+			"risk_level":     "yellow",
+			"target_object":  "workspace/stale.txt",
+			"reason":         "stale snapshot approval",
+			"status":         "pending",
+			"created_at":     "2026-04-16T11:04:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal snapshot approval json failed: %v", err)
+	}
+	if err := service.storage.TaskStore().WriteTask(context.Background(), storage.TaskRecord{
+		TaskID:              taskID,
+		SessionID:           "sess_structured_screen_waiting_auth_precedence",
+		RunID:               "run_structured_screen_waiting_auth_precedence",
+		Title:               "structured screen waiting auth precedence task",
+		SourceType:          "screen_capture",
+		Status:              "waiting_auth",
+		IntentName:          "screen_analyze",
+		IntentArgumentsJSON: `{"language":"eng"}`,
+		PreferredDelivery:   "task_detail",
+		FallbackDelivery:    "bubble",
+		CurrentStep:         "waiting_authorization",
+		CurrentStepStatus:   "pending",
+		RiskLevel:           "yellow",
+		StartedAt:           time.Date(2026, 4, 16, 11, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		UpdatedAt:           time.Date(2026, 4, 16, 11, 5, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		SnapshotJSON:        string(snapshotJSONBytes),
+	}); err != nil {
+		t.Fatalf("write structured screen waiting auth task failed: %v", err)
+	}
+	if err := service.storage.ApprovalRequestStore().WriteApprovalRequest(context.Background(), storage.ApprovalRequestRecord{
+		ApprovalID:      "appr_formal_screen_waiting_auth_precedence",
+		TaskID:          taskID,
+		OperationName:   "screen_capture",
+		RiskLevel:       "yellow",
+		TargetObject:    "current_screen",
+		Reason:          "formal screen approval should win",
+		Status:          "pending",
+		ImpactScopeJSON: `{"files":[]}`,
+		CreatedAt:       "2026-04-16T11:05:00Z",
+		UpdatedAt:       "2026-04-16T11:05:00Z",
+	}); err != nil {
+		t.Fatalf("write formal screen approval request failed: %v", err)
+	}
+
+	detailResult, err := service.TaskDetailGet(map[string]any{"task_id": taskID})
+	if err != nil {
+		t.Fatalf("task detail get failed: %v", err)
+	}
+	approvalRequest := detailResult["approval_request"].(map[string]any)
+	if approvalRequest["approval_id"] != "appr_formal_screen_waiting_auth_precedence" || approvalRequest["operation_name"] != "screen_capture" || approvalRequest["target_object"] != "current_screen" {
+		t.Fatalf("expected formal screen approval request to override snapshot approval, got %+v", approvalRequest)
+	}
+}
+
 func TestNormalizeTaskDetailAuthorizationRecordCoercesLegacyDecisions(t *testing.T) {
 	allowRecord := normalizeTaskDetailAuthorizationRecord("task_auth_detail", map[string]any{
 		"authorization_record_id": "auth_allow",

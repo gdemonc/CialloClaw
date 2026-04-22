@@ -1022,18 +1022,14 @@ func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 	if approvalRequest != nil {
 		approvalRequestValue = approvalRequest
 	}
-	authorizationRecord := normalizeTaskDetailAuthorizationRecord(task.TaskID, task.Authorization)
-	if authorizationRecord == nil {
-		authorizationRecord = s.latestAuthorizationRecordFromStorage(task.TaskID)
-	}
+	storageAuthorizationRecord := s.latestAuthorizationRecordFromStorage(task.TaskID)
+	authorizationRecord := selectTaskDetailAuthorizationRecord(task.TaskID, task.Authorization, storageAuthorizationRecord)
 	authorizationRecordValue := any(nil)
 	if authorizationRecord != nil {
 		authorizationRecordValue = authorizationRecord
 	}
-	auditRecord := latestFormalTaskAuditRecord(task.TaskID, task.AuditRecords)
-	if auditRecord == nil {
-		auditRecord = s.latestAuditRecordFromStorage(task.TaskID)
-	}
+	storageAuditRecords := s.loadAuditRecordsFromStorage(task.TaskID, 0, 0)
+	auditRecord := selectTaskDetailAuditRecord(task, task.AuditRecords, storageAuditRecords)
 	auditRecordValue := any(nil)
 	if auditRecord != nil {
 		auditRecordValue = auditRecord
@@ -3778,6 +3774,9 @@ func (s *Service) hydrateStructuredTaskGovernance(task *runengine.TaskRecord) {
 	if s == nil || s.storage == nil || task == nil {
 		return
 	}
+	if authorizationRecord := s.latestAuthorizationRecordFromStorage(task.TaskID); authorizationRecord != nil {
+		task.Authorization = authorizationRecord
+	}
 	if deliveryResult := s.latestDeliveryResultFromStorage(task.TaskID); len(deliveryResult) > 0 {
 		task.DeliveryResult = deliveryResult
 	}
@@ -3801,6 +3800,121 @@ func (s *Service) hydrateStructuredTaskGovernance(task *runengine.TaskRecord) {
 		securitySummary["latest_restore_point"] = latestRestorePoint
 	}
 	task.SecuritySummary = securitySummary
+}
+
+// selectTaskDetailAuthorizationRecord prefers the newest formal authorization
+// record so task detail does not regress to snapshot-era governance anchors once
+// first-class authorization storage is available.
+func selectTaskDetailAuthorizationRecord(taskID string, runtimeRecord map[string]any, storageRecord map[string]any) map[string]any {
+	normalizedRuntime := normalizeTaskDetailAuthorizationRecord(taskID, runtimeRecord)
+	normalizedStorage := normalizeTaskDetailAuthorizationRecord(taskID, storageRecord)
+	return preferNewerTaskDetailRecord(normalizedRuntime, normalizedStorage, "created_at")
+}
+
+// selectTaskDetailAuditRecord keeps screen tasks anchored to the screen-evidence
+// audit chain even when newer generic delivery/runtime audits exist later in the
+// same task. Non-screen tasks still use the latest normalized audit record.
+func selectTaskDetailAuditRecord(task runengine.TaskRecord, runtimeAuditRecords []map[string]any, storageAuditRecords []map[string]any) map[string]any {
+	if isScreenTaskDetail(task) {
+		if screenAudit := latestScreenTaskAuditRecord(task.TaskID, runtimeAuditRecords, storageAuditRecords); screenAudit != nil {
+			return screenAudit
+		}
+	}
+	return latestNormalizedTaskAuditRecord(task.TaskID, runtimeAuditRecords, storageAuditRecords)
+}
+
+func latestNormalizedTaskAuditRecord(taskID string, auditGroups ...[]map[string]any) map[string]any {
+	var latest map[string]any
+	for _, group := range auditGroups {
+		for _, auditRecord := range group {
+			normalized := normalizeTaskDetailAuditRecord(taskID, auditRecord)
+			if normalized == nil {
+				continue
+			}
+			latest = preferNewerTaskDetailRecord(latest, normalized, "created_at")
+		}
+	}
+	return latest
+}
+
+func latestScreenTaskAuditRecord(taskID string, auditGroups ...[]map[string]any) map[string]any {
+	var latest map[string]any
+	for _, group := range auditGroups {
+		for _, auditRecord := range group {
+			normalized := normalizeTaskDetailAuditRecord(taskID, auditRecord)
+			if normalized == nil || !isScreenTaskAuditRecord(normalized) {
+				continue
+			}
+			latest = preferNewerTaskDetailRecord(latest, normalized, "created_at")
+		}
+	}
+	return latest
+}
+
+func isScreenTaskAuditRecord(auditRecord map[string]any) bool {
+	if len(auditRecord) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringValue(auditRecord, "type", "")) == "screen_capture" {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(stringValue(auditRecord, "action", "")), "screen.capture.") {
+		return true
+	}
+	target := strings.ToLower(strings.TrimSpace(stringValue(auditRecord, "target", "")))
+	return strings.Contains(target, "screen")
+}
+
+func isScreenTaskDetail(task runengine.TaskRecord) bool {
+	if stringValue(task.Intent, "name", "") == "screen_analyze" || strings.TrimSpace(task.SourceType) == "screen_capture" {
+		return true
+	}
+	if strings.TrimSpace(stringValue(task.PendingExecution, "kind", "")) == "screen_analysis" {
+		return true
+	}
+	for _, artifact := range task.Artifacts {
+		if strings.TrimSpace(stringValue(artifact, "artifact_type", "")) == "screen_capture" {
+			return true
+		}
+	}
+	for _, citation := range task.Citations {
+		if strings.TrimSpace(stringValue(citation, "artifact_type", "")) == "screen_capture" || strings.TrimSpace(stringValue(citation, "screen_session_id", "")) != "" {
+			return true
+		}
+	}
+	if strings.TrimSpace(stringValue(task.ApprovalRequest, "operation_name", "")) == "screen_capture" {
+		return true
+	}
+	return false
+}
+
+func preferNewerTaskDetailRecord(left map[string]any, right map[string]any, timeKey string) map[string]any {
+	if len(left) == 0 {
+		return cloneMap(right)
+	}
+	if len(right) == 0 {
+		return cloneMap(left)
+	}
+	leftTime := parseTaskDetailRecordTime(stringValue(left, timeKey, ""))
+	rightTime := parseTaskDetailRecordTime(stringValue(right, timeKey, ""))
+	if rightTime.After(leftTime) {
+		return cloneMap(right)
+	}
+	return cloneMap(left)
+}
+
+func parseTaskDetailRecordTime(value string) time.Time {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
+		return parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		return parsed
+	}
+	return time.Time{}
 }
 
 func (s *Service) pendingApprovalRequestFromStorage(taskID, fallbackRiskLevel string) map[string]any {
