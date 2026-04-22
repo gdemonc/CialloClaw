@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/model"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/orchestrator"
 )
 
@@ -323,6 +324,30 @@ func wrapOrchestratorResult(data any, err error) (any, *rpcError) {
 			Message: "STRONGHOLD_ACCESS_FAILED",
 			Detail:  err.Error(),
 			TraceID: "trace_stronghold_access_failed",
+		}
+	}
+	if errors.Is(err, model.ErrSecretSourceFailed) || errors.Is(err, model.ErrSecretNotFound) {
+		return nil, &rpcError{
+			Code:    1005004,
+			Message: "STRONGHOLD_ACCESS_FAILED",
+			Detail:  err.Error(),
+			TraceID: "trace_model_secret_failed",
+		}
+	}
+	if errors.Is(err, model.ErrModelProviderUnsupported) {
+		return nil, &rpcError{
+			Code:    1008001,
+			Message: "MODEL_PROVIDER_NOT_FOUND",
+			Detail:  err.Error(),
+			TraceID: "trace_model_provider_not_found",
+		}
+	}
+	if errors.Is(err, model.ErrToolCallingNotSupported) {
+		return nil, &rpcError{
+			Code:    1008002,
+			Message: "MODEL_NOT_ALLOWED",
+			Detail:  err.Error(),
+			TraceID: "trace_model_not_allowed",
 		}
 	}
 	if errors.Is(err, orchestrator.ErrRecoveryPointNotFound) {

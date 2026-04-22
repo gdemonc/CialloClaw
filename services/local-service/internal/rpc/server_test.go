@@ -4,6 +4,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http/httptest"
@@ -1324,6 +1325,36 @@ func TestDispatchMapsStrongholdErrors(t *testing.T) {
 	}
 	if rpcErr.Code != 1005004 || rpcErr.Message != "STRONGHOLD_ACCESS_FAILED" {
 		t.Fatalf("expected STRONGHOLD_ACCESS_FAILED mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
+func TestDispatchMapsModelSecretErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, errors.Join(model.ErrSecretSourceFailed, model.ErrSecretNotFound))
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1005004 || rpcErr.Message != "STRONGHOLD_ACCESS_FAILED" {
+		t.Fatalf("expected STRONGHOLD_ACCESS_FAILED mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
+func TestDispatchMapsModelProviderErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, model.ErrModelProviderUnsupported)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1008001 || rpcErr.Message != "MODEL_PROVIDER_NOT_FOUND" {
+		t.Fatalf("expected MODEL_PROVIDER_NOT_FOUND mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
+func TestDispatchMapsModelCapabilityErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, model.ErrToolCallingNotSupported)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1008002 || rpcErr.Message != "MODEL_NOT_ALLOWED" {
+		t.Fatalf("expected MODEL_NOT_ALLOWED mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
 	}
 }
 
