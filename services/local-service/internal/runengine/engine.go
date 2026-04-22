@@ -110,6 +110,18 @@ type CreateTaskInput struct {
 	Snapshot          contextsvc.TaskContextSnapshot
 }
 
+// ContinuationUpdate captures the minimum runtime state changes required when a
+// later desktop input should stay on the same task instead of opening a new one.
+type ContinuationUpdate struct {
+	Snapshot        contextsvc.TaskContextSnapshot
+	Title           string
+	Intent          map[string]any
+	Status          string
+	CurrentStep     string
+	BubbleMessage   map[string]any
+	SteeringMessage string
+}
+
 // InspectorConfig stores the current task-inspector runtime settings.
 type InspectorConfig struct {
 	TaskSources          []string
@@ -749,6 +761,62 @@ func (e *Engine) AppendSteeringMessage(taskID, message string, bubbleMessage map
 		"task_id": record.TaskID,
 		"message": trimmed,
 	})
+	record.queueNotification("task.updated", map[string]any{
+		"task_id": record.TaskID,
+		"status":  record.Status,
+	})
+	e.persistTaskLocked(record)
+	return record.clone(), true
+}
+
+// ContinueTask merges a later desktop input into an existing non-terminal task.
+// It preserves task identity while allowing orchestrator to refresh snapshot,
+// title, intent, and optional steering data before execution resumes.
+func (e *Engine) ContinueTask(taskID string, update ContinuationUpdate) (TaskRecord, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	record, ok := e.tasks[taskID]
+	if !ok || record.isFinished() {
+		return TaskRecord{}, false
+	}
+
+	record.UpdatedAt = e.now()
+	record.Snapshot = mergeTaskSnapshot(record.Snapshot, update.Snapshot)
+	record.BubbleMessage = cloneMap(update.BubbleMessage)
+
+	if strings.TrimSpace(update.Title) != "" {
+		record.Title = strings.TrimSpace(update.Title)
+	}
+	if len(update.Intent) > 0 {
+		record.Intent = cloneMap(update.Intent)
+	}
+	if strings.TrimSpace(update.Status) != "" {
+		record.Status = strings.TrimSpace(update.Status)
+	}
+	if strings.TrimSpace(update.CurrentStep) != "" {
+		record.CurrentStep = strings.TrimSpace(update.CurrentStep)
+	}
+	trimmedSteering := strings.TrimSpace(update.SteeringMessage)
+	if nextStep := strings.TrimSpace(update.CurrentStep); nextStep != "" {
+		record.Timeline = advanceTimeline(record.Timeline, nextStep, timelineStatusForTaskStatus(record.Status), continuationOutputSummary(update.BubbleMessage, trimmedSteering))
+		record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
+	}
+
+	if trimmedSteering != "" {
+		record.SteeringMessages = append(record.SteeringMessages, trimmedSteering)
+		record.LatestEvent = e.buildEventWithPayload(record, "task.steered", map[string]any{
+			"status":  record.Status,
+			"message": trimmedSteering,
+		})
+		record.queueNotification("task.steered", map[string]any{
+			"task_id": record.TaskID,
+			"message": trimmedSteering,
+		})
+	} else {
+		record.LatestEvent = e.buildEvent(record, "task.updated")
+	}
+
 	record.queueNotification("task.updated", map[string]any{
 		"task_id": record.TaskID,
 		"status":  record.Status,
@@ -2134,6 +2202,111 @@ func cloneTimeline(timeline []TaskStepRecord) []TaskStepRecord {
 	result := make([]TaskStepRecord, len(timeline))
 	copy(result, timeline)
 	return result
+}
+
+func mergeTaskSnapshot(base, update contextsvc.TaskContextSnapshot) contextsvc.TaskContextSnapshot {
+	merged := base
+	merged.Source = pickLastNonEmpty(base.Source, update.Source)
+	merged.Trigger = pickLastNonEmpty(base.Trigger, update.Trigger)
+	merged.InputType = pickLastNonEmpty(base.InputType, update.InputType)
+	merged.InputMode = pickLastNonEmpty(base.InputMode, update.InputMode)
+	merged.Text = mergeSnapshotText(base.Text, update.Text)
+	merged.SelectionText = mergeSnapshotText(base.SelectionText, update.SelectionText)
+	merged.ErrorText = mergeSnapshotText(base.ErrorText, update.ErrorText)
+	merged.Files = dedupeAppendedStrings(base.Files, update.Files)
+	merged.PageTitle = pickLastNonEmpty(base.PageTitle, update.PageTitle)
+	merged.PageURL = pickLastNonEmpty(base.PageURL, update.PageURL)
+	merged.AppName = pickLastNonEmpty(base.AppName, update.AppName)
+	merged.WindowTitle = pickLastNonEmpty(base.WindowTitle, update.WindowTitle)
+	merged.VisibleText = mergeSnapshotText(base.VisibleText, update.VisibleText)
+	merged.ScreenSummary = mergeSnapshotText(base.ScreenSummary, update.ScreenSummary)
+	merged.ClipboardText = mergeSnapshotText(base.ClipboardText, update.ClipboardText)
+	merged.HoverTarget = pickLastNonEmpty(base.HoverTarget, update.HoverTarget)
+	merged.LastAction = pickLastNonEmpty(base.LastAction, update.LastAction)
+	if update.DwellMillis > 0 {
+		merged.DwellMillis = update.DwellMillis
+	}
+	if update.CopyCount > 0 {
+		merged.CopyCount = update.CopyCount
+	}
+	if update.WindowSwitches > 0 {
+		merged.WindowSwitches = update.WindowSwitches
+	}
+	if update.PageSwitches > 0 {
+		merged.PageSwitches = update.PageSwitches
+	}
+	return merged
+}
+
+func pickLastNonEmpty(base, update string) string {
+	if strings.TrimSpace(update) != "" {
+		return strings.TrimSpace(update)
+	}
+	return strings.TrimSpace(base)
+}
+
+func mergeSnapshotText(base, update string) string {
+	base = strings.TrimSpace(base)
+	update = strings.TrimSpace(update)
+	switch {
+	case update == "":
+		return base
+	case base == "":
+		return update
+	case base == update:
+		return base
+	default:
+		return base + "\n\n" + update
+	}
+}
+
+func dedupeAppendedStrings(base, update []string) []string {
+	if len(base) == 0 && len(update) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(base)+len(update))
+	result := make([]string, 0, len(base)+len(update))
+	for _, value := range append(append([]string{}, base...), update...) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func timelineStatusForTaskStatus(status string) string {
+	switch status {
+	case "waiting_input", "waiting_auth":
+		return "pending"
+	case "failed":
+		return "failed"
+	case "completed":
+		return "completed"
+	case "cancelled":
+		return "cancelled"
+	default:
+		return "running"
+	}
+}
+
+func continuationOutputSummary(bubbleMessage map[string]any, steeringMessage string) string {
+	if strings.TrimSpace(steeringMessage) != "" {
+		return "Follow-up continuation received"
+	}
+	if len(bubbleMessage) == 0 {
+		return "Task continuation updated"
+	}
+	text, _ := bubbleMessage["text"].(string)
+	if strings.TrimSpace(text) == "" {
+		return "Task continuation updated"
+	}
+	return strings.TrimSpace(text)
 }
 
 // cloneMap recursively copies a map[string]any payload.

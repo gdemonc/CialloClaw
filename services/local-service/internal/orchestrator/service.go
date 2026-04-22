@@ -290,6 +290,13 @@ func (s *Service) RunEngine() *runengine.Engine {
 // waits for more input, asks for confirmation, or runs immediately.
 func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 	snapshot := s.context.Capture(params)
+	if response, handled, resolvedSessionID, err := s.maybeContinueExistingTask(params, snapshot, nil); err != nil {
+		return nil, err
+	} else if handled {
+		return response, nil
+	} else if strings.TrimSpace(resolvedSessionID) != "" {
+		params = withResolvedSessionID(params, resolvedSessionID)
+	}
 	options := mapValue(params, "options")
 	confirmRequired := boolValue(options, "confirm_required", false)
 	suggestion := s.intent.Suggest(snapshot, nil, confirmRequired)
@@ -392,6 +399,13 @@ func (s *Service) SubmitInput(params map[string]any) (map[string]any, error) {
 func (s *Service) StartTask(params map[string]any) (map[string]any, error) {
 	snapshot := s.context.Capture(params)
 	explicitIntent := mapValue(params, "intent")
+	if response, handled, resolvedSessionID, err := s.maybeContinueExistingTask(params, snapshot, explicitIntent); err != nil {
+		return nil, err
+	} else if handled {
+		return response, nil
+	} else if strings.TrimSpace(resolvedSessionID) != "" {
+		params = withResolvedSessionID(params, resolvedSessionID)
+	}
 	if handledResponse, handled, err := s.handleScreenAnalyzeStart(params, snapshot, explicitIntent); err != nil {
 		return nil, err
 	} else if handled {
@@ -2693,6 +2707,7 @@ func (s *Service) executeScreenAnalysisAfterApproval(task runengine.TaskRecord, 
 func taskMap(record runengine.TaskRecord) map[string]any {
 	result := map[string]any{
 		"task_id":          record.TaskID,
+		"session_id":       record.SessionID,
 		"title":            record.Title,
 		"source_type":      record.SourceType,
 		"status":           record.Status,
