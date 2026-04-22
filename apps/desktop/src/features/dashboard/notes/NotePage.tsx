@@ -942,7 +942,7 @@ export function NotePage() {
 
               <div className="note-preview-page__board-layer" ref={boardLayerRef}>
                 {boardItems.length > 0 ? (
-                  {boardItems.map((entry) => renderBoardCard(entry.item, { x: entry.x, y: entry.y, zIndex: entry.zIndex }))}
+                  boardItems.map((entry) => renderBoardCard(entry.item, { x: entry.x, y: entry.y, zIndex: entry.zIndex }))
                 ) : (
                   <div className="note-preview-page__board-empty">
                     <NoteEmptyState />
