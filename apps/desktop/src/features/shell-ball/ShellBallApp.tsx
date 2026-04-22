@@ -952,7 +952,19 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     scheduleEdgeHoverCollapseCheck();
   }, [clearEdgeHoverCollapseTimeout, edgeDockState.revealed, edgeDockState.side, isPointerWithinEdgeHoverCorridor, scheduleEdgeHoverCollapseCheck]);
 
+  const handleEdgeDockWindowLeave = useCallback(() => {
+    if (edgeDockState.side === null || !edgeDockState.revealed) {
+      return;
+    }
+
+    scheduleEdgeHoverCollapseCheck();
+  }, [edgeDockState.revealed, edgeDockState.side, scheduleEdgeHoverCollapseCheck]);
+
   useEventListener("mousemove", handleEdgeDockMouseMove, {
+    target: shellBallWindowTarget,
+    enable: shellBallWindowTarget !== undefined && edgeDockState.side !== null && edgeDockState.revealed,
+  });
+  useEventListener("mouseleave", handleEdgeDockWindowLeave, {
     target: shellBallWindowTarget,
     enable: shellBallWindowTarget !== undefined && edgeDockState.side !== null && edgeDockState.revealed,
   });
