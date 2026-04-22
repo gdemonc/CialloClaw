@@ -3161,15 +3161,15 @@ func internalScreenAnalysisCapabilities(request Request) []string {
 	return capabilities
 }
 
-func (s *Service) finalizeExecutionResult(ctx context.Context, _ Request, startedAt time.Time, result Result, directCapabilities ...string) Result {
+func (s *Service) finalizeExecutionResult(ctx context.Context, request Request, startedAt time.Time, result Result, directCapabilities ...string) Result {
 	if result.DurationMS <= 0 {
 		result.DurationMS = time.Since(startedAt).Milliseconds()
 	}
-	s.attachExtensionAssets(ctx, &result, directCapabilities...)
+	s.attachExtensionAssets(ctx, &result, request, directCapabilities...)
 	return result
 }
 
-func (s *Service) attachExtensionAssets(ctx context.Context, result *Result, directCapabilities ...string) {
+func (s *Service) attachExtensionAssets(ctx context.Context, result *Result, request Request, directCapabilities ...string) {
 	if s == nil || result == nil || s.extensionAssets == nil {
 		return
 	}
@@ -3177,6 +3177,7 @@ func (s *Service) attachExtensionAssets(ctx context.Context, result *Result, dir
 	if currentRefs, err := s.extensionAssets.CurrentExecutionAssets(ctx); err == nil {
 		refs = append(refs, currentRefs...)
 	}
+	refs = append(refs, supplementalExecutionBoundaryAssets(request, *result, s.model)...)
 	capabilities := append(capabilityNamesFromToolCalls(result.ToolCalls), directCapabilities...)
 	if pluginRefs, err := s.extensionAssets.PluginAssetsForCapabilities(ctx, capabilities); err == nil {
 		refs = append(refs, pluginRefs...)
