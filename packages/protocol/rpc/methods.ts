@@ -740,7 +740,7 @@ export type AgentSecurityRespondResult =
 // AgentSettingsGetParams 定义当前模块的接口约束。
 export interface AgentSettingsGetParams {
   request_meta: RequestMeta;
-  scope: "all" | "general" | "floating_ball" | "memory" | "task_automation" | "data_log";
+  scope: "all" | "general" | "floating_ball" | "memory" | "task_automation" | "models";
 }
 
 // AgentSettingsGetResult 定义当前模块的接口约束。
@@ -755,16 +755,34 @@ export interface AgentSettingsUpdateParams {
   floating_ball?: Partial<SettingsSnapshot["settings"]["floating_ball"]>;
   memory?: Partial<SettingsSnapshot["settings"]["memory"]>;
   task_automation?: Partial<SettingsSnapshot["settings"]["task_automation"]>;
-  data_log?: Partial<SettingsSnapshot["settings"]["data_log"]> & {
+  models?: Partial<SettingsSnapshot["settings"]["models"]> & {
+    budget_auto_downgrade?: boolean;
+    base_url?: string;
+    model?: string;
     api_key?: string;
     delete_api_key?: boolean;
+  };
+}
+
+export interface AgentSettingsEffectiveSettings {
+  general?: Partial<SettingsSnapshot["settings"]["general"]>;
+  floating_ball?: Partial<SettingsSnapshot["settings"]["floating_ball"]>;
+  memory?: Partial<SettingsSnapshot["settings"]["memory"]>;
+  task_automation?: Partial<SettingsSnapshot["settings"]["task_automation"]>;
+  models?: {
+    provider?: string;
+    budget_auto_downgrade?: boolean;
+    provider_api_key_configured?: boolean;
+    base_url?: string;
+    model?: string;
+    stronghold?: SettingsSnapshot["settings"]["models"]["credentials"]["stronghold"];
   };
 }
 
 // AgentSettingsUpdateResult 定义当前模块的接口约束。
 export interface AgentSettingsUpdateResult {
   updated_keys: string[];
-  effective_settings: Partial<SettingsSnapshot["settings"]>;
+  effective_settings: AgentSettingsEffectiveSettings;
   apply_mode: ApplyMode;
   need_restart: boolean;
 }

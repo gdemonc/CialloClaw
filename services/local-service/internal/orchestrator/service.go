@@ -970,12 +970,15 @@ func (s *Service) TaskList(params map[string]any) (map[string]any, error) {
 	offset := clampListOffset(intValue(params, "offset", 0))
 	sortBy := stringValue(params, "sort_by", "updated_at")
 	sortOrder := stringValue(params, "sort_order", "desc")
-	tasks, total := s.runEngine.ListTasks(group, sortBy, sortOrder, limit, offset)
-	if total == 0 {
-		if persistedTasks, persistedTotal, ok := s.listTasksFromStorage(group, sortBy, sortOrder, limit, offset); ok {
-			tasks = persistedTasks
-			total = persistedTotal
+	allTasks := newTaskQueryViews(s).tasks(group, sortBy, sortOrder)
+	total := len(allTasks)
+	tasks := []runengine.TaskRecord{}
+	if offset < total {
+		end := offset + limit
+		if limit <= 0 || end > total {
+			end = total
 		}
+		tasks = allTasks[offset:end]
 	}
 
 	items := make([]map[string]any, 0, len(tasks))
@@ -994,9 +997,14 @@ func (s *Service) TaskList(params map[string]any) (map[string]any, error) {
 // the JSON-RPC boundary.
 func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 	taskID := stringValue(params, "task_id", "")
-	task, ok := s.runEngine.TaskDetail(taskID)
-	if !ok {
-		task, ok = s.taskDetailFromStorage(taskID)
+	task, ok := s.taskDetailFromStorage(taskID)
+	if runtimeTask, runtimeOK := s.runEngine.TaskDetail(taskID); runtimeOK {
+		if ok {
+			task = mergeRuntimeTaskDetail(task, runtimeTask)
+		} else {
+			task = runtimeTask
+			ok = true
+		}
 	}
 	if !ok {
 		return nil, ErrTaskNotFound
@@ -1059,6 +1067,55 @@ func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 		"security_summary":     securitySummary,
 		"runtime_summary":      runtimeSummary,
 	}, nil
+}
+
+// mergeRuntimeTaskDetail keeps first-class structured evidence authoritative but
+// lets the live runtime state win for task status fields when persistence is
+// temporarily stale.
+func mergeRuntimeTaskDetail(structuredTask, runtimeTask runengine.TaskRecord) runengine.TaskRecord {
+	merged := mergeStructuredTaskDetailCompatibility(structuredTask, runtimeTask)
+	if runtimeTask.Status != "" {
+		merged.Status = runtimeTask.Status
+	}
+	if runtimeTask.CurrentStep != "" {
+		merged.CurrentStep = runtimeTask.CurrentStep
+	}
+	if runtimeTask.CurrentStepStatus != "" {
+		merged.CurrentStepStatus = runtimeTask.CurrentStepStatus
+	}
+	if runtimeTask.UpdatedAt.After(merged.UpdatedAt) {
+		merged.UpdatedAt = runtimeTask.UpdatedAt
+	}
+	if runtimeTask.FinishedAt != nil {
+		if merged.FinishedAt == nil || runtimeTask.FinishedAt.After(*merged.FinishedAt) {
+			merged.FinishedAt = cloneTimePointer(runtimeTask.FinishedAt)
+		}
+	}
+	if runtimeTask.LoopStopReason != "" {
+		merged.LoopStopReason = runtimeTask.LoopStopReason
+	}
+	if len(runtimeTask.BubbleMessage) > 0 {
+		merged.BubbleMessage = cloneMap(runtimeTask.BubbleMessage)
+	}
+	if len(runtimeTask.PendingExecution) > 0 {
+		merged.PendingExecution = cloneMap(runtimeTask.PendingExecution)
+	}
+	if len(runtimeTask.TokenUsage) > 0 {
+		merged.TokenUsage = cloneMap(runtimeTask.TokenUsage)
+	}
+	if len(runtimeTask.LatestEvent) > 0 {
+		merged.LatestEvent = cloneMap(runtimeTask.LatestEvent)
+	}
+	if len(runtimeTask.LatestToolCall) > 0 {
+		merged.LatestToolCall = cloneMap(runtimeTask.LatestToolCall)
+	}
+	if len(runtimeTask.SteeringMessages) > 0 {
+		merged.SteeringMessages = append([]string(nil), runtimeTask.SteeringMessages...)
+	}
+	if !isEmptySnapshot(runtimeTask.Snapshot) {
+		merged.Snapshot = cloneTaskSnapshot(runtimeTask.Snapshot)
+	}
+	return merged
 }
 
 func (s *Service) buildTaskRuntimeSummary(task runengine.TaskRecord) map[string]any {
@@ -2016,7 +2073,7 @@ func (s *Service) SecuritySummaryGet() (map[string]any, error) {
 	finishedTasks := queryViews.tasks("finished", "finished_at", "desc")
 	pendingTotal := mergedPendingApprovalTotal(unfinishedTasks, runtimePendingTotal)
 	allTasks := append(append([]runengine.TaskRecord{}, unfinishedTasks...), finishedTasks...)
-	dataLogSettings := mapValue(s.runEngine.Settings(), "data_log")
+	modelCredentials := modelCredentialSettings(s.runEngine.Settings())
 	latestRestorePoint := latestRestorePointFromTasks(allTasks)
 	if latestRestorePoint == nil {
 		latestRestorePoint = s.latestRestorePointFromStorage("")
@@ -2026,7 +2083,7 @@ func (s *Service) SecuritySummaryGet() (map[string]any, error) {
 			"security_status":        aggregateSecurityStatus(allTasks, pendingTotal),
 			"pending_authorizations": pendingTotal,
 			"latest_restore_point":   latestRestorePoint,
-			"token_cost_summary":     aggregateTokenCostSummary(unfinishedTasks, finishedTasks, boolValue(dataLogSettings, "budget_auto_downgrade", true)),
+			"token_cost_summary":     aggregateTokenCostSummary(unfinishedTasks, finishedTasks, boolValue(modelCredentials, "budget_auto_downgrade", true)),
 		},
 	}, nil
 }
@@ -2063,7 +2120,7 @@ func (s *Service) pluginRuntimeSummary() map[string]any {
 func pluginRuntimeItems(items []plugin.RuntimeState) []map[string]any {
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		result = append(result, map[string]any{
+		entry := map[string]any{
 			"name":         item.Name,
 			"kind":         item.Kind,
 			"status":       item.Status,
@@ -2072,7 +2129,19 @@ func pluginRuntimeItems(items []plugin.RuntimeState) []map[string]any {
 			"last_seen_at": item.LastSeenAt,
 			"last_error":   item.LastError,
 			"capabilities": append([]string(nil), item.Capabilities...),
-		})
+		}
+		if item.Manifest != nil {
+			entry["manifest"] = map[string]any{
+				"plugin_id":    item.Manifest.PluginID,
+				"name":         item.Manifest.Name,
+				"version":      item.Manifest.Version,
+				"entry":        item.Manifest.Entry,
+				"source":       item.Manifest.Source,
+				"capabilities": append([]string(nil), item.Manifest.Capabilities...),
+				"permissions":  append([]string(nil), item.Manifest.Permissions...),
+			}
+		}
+		result = append(result, entry)
 	}
 	return result
 }
@@ -2493,9 +2562,9 @@ func (s *Service) SecurityRespond(params map[string]any) (map[string]any, error)
 
 // SettingsGet handles agent.settings.get.
 func (s *Service) SettingsGet(params map[string]any) (map[string]any, error) {
-	settings := s.runEngine.Settings()
-	scope := stringValue(params, "scope", "all")
-	if scope == "all" || scope == "data_log" {
+	settings := normalizeSettingsSnapshot(s.runEngine.Settings())
+	scope := normalizeSettingsScope(stringValue(params, "scope", "all"))
+	if scope == "all" || scope == "models" {
 		settingsWithSecrets, err := s.attachSensitiveSettingAvailability(settings)
 		if err != nil {
 			return nil, err
@@ -2517,32 +2586,49 @@ func (s *Service) SettingsGet(params map[string]any) (map[string]any, error) {
 // SettingsUpdate handles agent.settings.update and returns the effective
 // settings patch plus apply-mode metadata.
 func (s *Service) SettingsUpdate(params map[string]any) (map[string]any, error) {
-	if dataLog := mapValue(params, "data_log"); len(dataLog) > 0 {
-		if deleteAPIKey := boolValue(dataLog, "delete_api_key", false); deleteAPIKey {
-			provider := s.providerForSettingsUpdate(dataLog)
+	normalizedParams := normalizeSettingsUpdateParams(params)
+	modelSecretTouched := false
+	secretUpdatedKeys := make([]string, 0, 2)
+	if models := cloneMap(mapValue(normalizedParams, "models")); len(models) > 0 {
+		if deleteAPIKey := boolValue(models, "delete_api_key", false); deleteAPIKey {
+			provider := s.providerForSettingsUpdate(models)
 			if err := s.deleteModelSecret(provider); err != nil {
 				return nil, err
 			}
-			delete(dataLog, "delete_api_key")
-			params["data_log"] = dataLog
+			delete(models, "delete_api_key")
+			normalizedParams["models"] = models
+			modelSecretTouched = true
+			secretUpdatedKeys = append(secretUpdatedKeys, "models.delete_api_key")
 		}
-		if apiKey := stringValue(dataLog, "api_key", ""); apiKey != "" {
-			provider := s.providerForSettingsUpdate(dataLog)
+		if apiKey := stringValue(models, "api_key", ""); apiKey != "" {
+			provider := s.providerForSettingsUpdate(models)
 			if err := s.persistModelSecret(provider, apiKey); err != nil {
 				return nil, err
 			}
-			delete(dataLog, "api_key")
-			params["data_log"] = dataLog
+			delete(models, "api_key")
+			normalizedParams["models"] = models
+			modelSecretTouched = true
+			secretUpdatedKeys = append(secretUpdatedKeys, "models.api_key")
 		}
 	}
-	effectiveSettings, updatedKeys, applyMode, needRestart := s.runEngine.UpdateSettings(params)
-	if _, ok := effectiveSettings["data_log"]; ok {
+	effectiveSettings, updatedKeys, applyMode, needRestart, err := s.runEngine.UpdateSettings(normalizedParams)
+	if err != nil {
+		return nil, err
+	}
+	if modelSecretTouched {
+		if _, ok := effectiveSettings["models"]; !ok {
+			effectiveSettings["models"] = map[string]any{}
+		}
+	}
+	if _, ok := effectiveSettings["models"]; ok {
 		effectiveSettingsWithSecrets, err := s.attachSensitiveSettingAvailability(effectiveSettings)
 		if err != nil {
 			return nil, err
 		}
 		effectiveSettings = effectiveSettingsWithSecrets
 	}
+	effectiveSettings = outwardSettingsUpdatePatch(effectiveSettings)
+	updatedKeys = outwardSettingsUpdateKeys(updatedKeys, secretUpdatedKeys)
 	return map[string]any{
 		"updated_keys":       updatedKeys,
 		"effective_settings": effectiveSettings,
@@ -2800,10 +2886,23 @@ func (s *Service) loadAllTasksFromStorage() []runengine.TaskRecord {
 	if s.storage == nil {
 		return nil
 	}
+	structuredTasks := []runengine.TaskRecord(nil)
 	if s.storage.TaskStore() != nil {
-		if tasks := s.loadAllTasksFromStructuredStorage(); len(tasks) > 0 {
-			return tasks
-		}
+		structuredTasks = s.loadAllTasksFromStructuredStorage()
+	}
+	taskRunTasks := s.loadAllTasksFromTaskRunStorage()
+	if len(structuredTasks) == 0 {
+		return taskRunTasks
+	}
+	if len(taskRunTasks) == 0 {
+		return structuredTasks
+	}
+	return mergeStructuredTaskListCompatibility(structuredTasks, taskRunTasks)
+}
+
+func (s *Service) loadAllTasksFromTaskRunStorage() []runengine.TaskRecord {
+	if s.storage == nil || s.storage.TaskRunStore() == nil {
+		return nil
 	}
 	records, err := s.storage.TaskRunStore().LoadTaskRuns(context.Background())
 	if err != nil || len(records) == 0 {
@@ -2814,6 +2913,38 @@ func (s *Service) loadAllTasksFromStorage() []runengine.TaskRecord {
 		tasks = append(tasks, taskRecordFromStorage(record))
 	}
 	return tasks
+}
+
+// mergeStructuredTaskListCompatibility keeps first-class task rows authoritative
+// while still appending legacy task_run-only entries so partially migrated
+// databases do not lose pre-structured history in task-centric overview queries.
+func mergeStructuredTaskListCompatibility(structuredTasks, taskRunTasks []runengine.TaskRecord) []runengine.TaskRecord {
+	if len(structuredTasks) == 0 {
+		return taskRunTasks
+	}
+	if len(taskRunTasks) == 0 {
+		return structuredTasks
+	}
+	taskRunByID := make(map[string]runengine.TaskRecord, len(taskRunTasks))
+	for _, task := range taskRunTasks {
+		taskRunByID[task.TaskID] = task
+	}
+	merged := make([]runengine.TaskRecord, 0, len(structuredTasks)+len(taskRunTasks))
+	seen := make(map[string]struct{}, len(structuredTasks)+len(taskRunTasks))
+	for _, task := range structuredTasks {
+		if taskRunTask, ok := taskRunByID[task.TaskID]; ok {
+			task = mergeStructuredTaskDetailCompatibility(task, taskRunTask)
+		}
+		merged = append(merged, task)
+		seen[task.TaskID] = struct{}{}
+	}
+	for _, task := range taskRunTasks {
+		if _, ok := seen[task.TaskID]; ok {
+			continue
+		}
+		merged = append(merged, task)
+	}
+	return merged
 }
 
 func (s *Service) loadAllTasksFromStructuredStorage() []runengine.TaskRecord {
@@ -2916,20 +3047,44 @@ func mergeTaskLists(runtimeTasks, storageTasks []runengine.TaskRecord) []runengi
 	if len(storageTasks) == 0 {
 		return runtimeTasks
 	}
-	// Build map of runtime task IDs for deduplication
-	runtimeIDs := make(map[string]struct{}, len(runtimeTasks))
+	runtimeByID := make(map[string]runengine.TaskRecord, len(runtimeTasks))
 	for _, task := range runtimeTasks {
-		runtimeIDs[task.TaskID] = struct{}{}
+		runtimeByID[task.TaskID] = task
 	}
-	// Merge: runtime tasks take precedence, add storage tasks not in runtime
 	merged := make([]runengine.TaskRecord, 0, len(runtimeTasks)+len(storageTasks))
-	merged = append(merged, runtimeTasks...)
+	seen := make(map[string]struct{}, len(runtimeTasks)+len(storageTasks))
 	for _, task := range storageTasks {
-		if _, exists := runtimeIDs[task.TaskID]; !exists {
-			merged = append(merged, task)
+		if runtimeTask, ok := runtimeByID[task.TaskID]; ok {
+			merged = append(merged, fresherTaskRecord(runtimeTask, task))
+			seen[task.TaskID] = struct{}{}
+			continue
 		}
+		merged = append(merged, task)
+		seen[task.TaskID] = struct{}{}
+	}
+	for _, task := range runtimeTasks {
+		if _, ok := seen[task.TaskID]; ok {
+			continue
+		}
+		merged = append(merged, task)
 	}
 	return merged
+}
+
+func fresherTaskRecord(runtimeTask, storageTask runengine.TaskRecord) runengine.TaskRecord {
+	if runtimeTask.UpdatedAt.After(storageTask.UpdatedAt) {
+		return runtimeTask
+	}
+	if storageTask.UpdatedAt.After(runtimeTask.UpdatedAt) {
+		return storageTask
+	}
+	if runtimeTask.FinishedAt != nil && storageTask.FinishedAt == nil {
+		return runtimeTask
+	}
+	if storageTask.FinishedAt != nil && runtimeTask.FinishedAt == nil {
+		return storageTask
+	}
+	return storageTask
 }
 
 func (s *Service) taskDetailFromStorage(taskID string) (runengine.TaskRecord, bool) {
@@ -2975,6 +3130,12 @@ func mergeStructuredTaskDetailCompatibility(task, taskRunTask runengine.TaskReco
 	if task.FinishedAt == nil && taskRunTask.FinishedAt != nil {
 		task.FinishedAt = cloneTimePointer(taskRunTask.FinishedAt)
 	}
+	if len(task.Timeline) == 0 {
+		task.Timeline = append([]runengine.TaskStepRecord(nil), taskRunTask.Timeline...)
+	}
+	if isEmptySnapshot(task.Snapshot) {
+		task.Snapshot = cloneTaskSnapshot(taskRunTask.Snapshot)
+	}
 	if len(task.BubbleMessage) == 0 {
 		task.BubbleMessage = cloneMap(taskRunTask.BubbleMessage)
 	}
@@ -2992,6 +3153,15 @@ func mergeStructuredTaskDetailCompatibility(task, taskRunTask runengine.TaskReco
 	}
 	if len(task.MirrorReferences) == 0 {
 		task.MirrorReferences = cloneMapSlice(taskRunTask.MirrorReferences)
+	}
+	if len(task.SecuritySummary) == 0 {
+		task.SecuritySummary = cloneMap(taskRunTask.SecuritySummary)
+	} else {
+		for key, value := range taskRunTask.SecuritySummary {
+			if _, exists := task.SecuritySummary[key]; !exists {
+				task.SecuritySummary[key] = value
+			}
+		}
 	}
 	if len(task.ApprovalRequest) == 0 {
 		task.ApprovalRequest = cloneMap(taskRunTask.ApprovalRequest)
@@ -3103,26 +3273,31 @@ func (s *Service) taskDetailFromStructuredStorage(taskID string) (runengine.Task
 }
 
 func (s *Service) attachSensitiveSettingAvailability(settings map[string]any) (map[string]any, error) {
-	cloned := cloneMap(settings)
+	cloned := normalizeSettingsSnapshot(cloneMap(settings))
 	if cloned == nil {
 		cloned = map[string]any{}
 	}
-	dataLog := cloneMap(mapValue(cloned, "data_log"))
-	if dataLog == nil {
-		dataLog = map[string]any{}
+	models := cloneMap(mapValue(cloned, "models"))
+	if models == nil {
+		models = map[string]any{}
 	}
-	provider, configured, err := s.modelSecretConfigured(providerFromSettings(dataLog, s.defaultSettingsProvider()))
+	credentials := cloneMap(mapValue(models, "credentials"))
+	if credentials == nil {
+		credentials = map[string]any{}
+	}
+	provider, configured, err := s.modelSecretConfigured(providerFromSettings(models, s.defaultSettingsProvider()))
 	if err != nil {
 		return nil, err
 	}
-	if stringValue(dataLog, "provider", "") == "" && provider != "" {
-		dataLog["provider"] = provider
+	if stringValue(models, "provider", "") == "" && provider != "" {
+		models["provider"] = provider
 	}
-	dataLog["provider_api_key_configured"] = configured
+	credentials["provider_api_key_configured"] = configured
 	if stronghold := strongholdStatusFromStorage(s.storage); len(stronghold) > 0 {
-		dataLog["stronghold"] = stronghold
+		credentials["stronghold"] = stronghold
 	}
-	cloned["data_log"] = dataLog
+	models["credentials"] = credentials
+	cloned["models"] = models
 	return cloned, nil
 }
 
@@ -3202,8 +3377,161 @@ func strongholdStatusFromStorage(store *storage.Service) map[string]any {
 	}
 }
 
-func (s *Service) providerForSettingsUpdate(dataLog map[string]any) string {
-	return providerFromSettings(dataLog, s.defaultSettingsProvider())
+func normalizeSettingsScope(scope string) string {
+	switch strings.TrimSpace(scope) {
+	case "", "all":
+		return "all"
+	case "data_log":
+		return "models"
+	default:
+		return strings.TrimSpace(scope)
+	}
+}
+
+func normalizeSettingsSnapshot(settings map[string]any) map[string]any {
+	cloned := cloneMap(settings)
+	if cloned == nil {
+		return map[string]any{}
+	}
+	models := cloneMap(mapValue(cloned, "models"))
+	if models == nil {
+		models = map[string]any{}
+	}
+	if legacy := cloneMap(mapValue(cloned, "data_log")); len(legacy) > 0 {
+		for key, value := range legacy {
+			if key == "provider" {
+				models[key] = value
+				continue
+			}
+			credentials := cloneMap(mapValue(models, "credentials"))
+			if credentials == nil {
+				credentials = map[string]any{}
+			}
+			credentials[key] = value
+			models["credentials"] = credentials
+		}
+		delete(cloned, "data_log")
+	}
+	models = normalizeModelSettingsSection(models)
+	if len(models) > 0 {
+		cloned["models"] = models
+	}
+	return cloned
+}
+
+func normalizeSettingsUpdateParams(params map[string]any) map[string]any {
+	cloned := cloneMap(params)
+	if cloned == nil {
+		return map[string]any{}
+	}
+	models := cloneMap(mapValue(cloned, "models"))
+	if models == nil {
+		models = map[string]any{}
+	}
+	if legacy := cloneMap(mapValue(cloned, "data_log")); len(legacy) > 0 {
+		for key, value := range legacy {
+			if key == "provider_api_key_configured" || key == "stronghold" {
+				continue
+			}
+			models[key] = value
+		}
+		delete(cloned, "data_log")
+	}
+	if credentials := cloneMap(mapValue(models, "credentials")); len(credentials) > 0 {
+		for key, value := range credentials {
+			if key == "provider_api_key_configured" || key == "stronghold" {
+				continue
+			}
+			models[key] = value
+		}
+		delete(models, "credentials")
+	}
+	if len(models) > 0 {
+		cloned["models"] = models
+	}
+	return cloned
+}
+
+func normalizeModelSettingsSection(models map[string]any) map[string]any {
+	cloned := cloneMap(models)
+	if cloned == nil {
+		cloned = map[string]any{}
+	}
+	credentials := cloneMap(mapValue(cloned, "credentials"))
+	if credentials == nil {
+		credentials = map[string]any{}
+	}
+	for _, key := range []string{"budget_auto_downgrade", "base_url", "model", "budget_policy"} {
+		if value, ok := cloned[key]; ok {
+			credentials[key] = value
+			delete(cloned, key)
+		}
+	}
+	if len(credentials) > 0 {
+		cloned["credentials"] = credentials
+	}
+	return cloned
+}
+
+func modelSettingsSection(settings map[string]any) map[string]any {
+	return cloneMap(mapValue(normalizeSettingsSnapshot(settings), "models"))
+}
+
+func modelCredentialSettings(settings map[string]any) map[string]any {
+	return cloneMap(mapValue(modelSettingsSection(settings), "credentials"))
+}
+
+func outwardSettingsUpdatePatch(settings map[string]any) map[string]any {
+	cloned := normalizeSettingsSnapshot(settings)
+	models := cloneMap(mapValue(cloned, "models"))
+	if len(models) == 0 {
+		return cloned
+	}
+	credentials := cloneMap(mapValue(models, "credentials"))
+	delete(models, "credentials")
+	for _, key := range []string{"budget_auto_downgrade", "provider_api_key_configured", "base_url", "model", "stronghold"} {
+		if value, ok := credentials[key]; ok {
+			models[key] = value
+		}
+	}
+	cloned["models"] = models
+	return cloned
+}
+
+func outwardSettingsUpdateKeys(internalKeys, secretUpdatedKeys []string) []string {
+	seen := make(map[string]struct{}, len(internalKeys)+len(secretUpdatedKeys))
+	result := make([]string, 0, len(internalKeys)+len(secretUpdatedKeys))
+	for _, key := range internalKeys {
+		mapped := key
+		if strings.HasPrefix(mapped, "models.credentials.") {
+			mapped = "models." + strings.TrimPrefix(mapped, "models.credentials.")
+		}
+		if _, ok := seen[mapped]; ok {
+			continue
+		}
+		seen[mapped] = struct{}{}
+		result = append(result, mapped)
+	}
+	for _, key := range secretUpdatedKeys {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, key)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (s *Service) providerForSettingsUpdate(models map[string]any) string {
+	merged := modelSettingsSection(s.runEngine.Settings())
+	if merged == nil {
+		merged = map[string]any{}
+	}
+	for key, value := range normalizeModelSettingsSection(models) {
+		merged[key] = value
+	}
+	return providerFromSettings(merged, s.defaultSettingsProvider())
 }
 
 func (s *Service) defaultSettingsProvider() string {
@@ -3213,8 +3541,8 @@ func (s *Service) defaultSettingsProvider() string {
 	return strings.TrimSpace(s.model.Provider())
 }
 
-func providerFromSettings(dataLog map[string]any, fallback string) string {
-	provider := firstNonEmptyString(stringValue(dataLog, "provider", ""), fallback)
+func providerFromSettings(models map[string]any, fallback string) string {
+	provider := firstNonEmptyString(stringValue(models, "provider", ""), fallback)
 	if provider == "openai" {
 		return model.OpenAIResponsesProvider
 	}
@@ -3341,18 +3669,13 @@ func taskRecordFromStorage(record storage.TaskRunRecord) runengine.TaskRecord {
 // new first-class tasks/task_steps tables while still honoring snapshot_json as
 // the compatibility bridge during the migration away from task_runs-only reads.
 func (s *Service) structuredTaskRecordToRuntime(record storage.TaskRecord) (runengine.TaskRecord, bool) {
+	var snapshotCompatibility runengine.TaskRecord
+	var snapshotCompatibilityOK bool
 	if strings.TrimSpace(record.SnapshotJSON) != "" {
 		snapshot, err := storageTaskRunRecordFromSnapshotJSON(record.SnapshotJSON)
 		if err == nil {
-			runtime := taskRecordFromStorage(snapshot)
-			if len(runtime.Timeline) == 0 {
-				runtime.Timeline = s.taskTimelineFromStructuredStorage(record.TaskID)
-			}
-			// Keep the compatibility snapshot as the base read model, but always
-			// let first-class task detail fields override it when structured
-			// storage already has newer formal delivery or citation records.
-			s.hydrateStructuredTaskGovernance(&runtime)
-			return runtime, true
+			snapshotCompatibility = taskRecordFromStorage(snapshot)
+			snapshotCompatibilityOK = true
 		}
 	}
 	startedAt, err := time.Parse(time.RFC3339Nano, record.StartedAt)
@@ -3394,8 +3717,57 @@ func (s *Service) structuredTaskRecordToRuntime(record storage.TaskRecord) (rune
 		Timeline:          s.taskTimelineFromStructuredStorage(record.TaskID),
 		CurrentStepStatus: record.CurrentStepStatus,
 	}
+	s.hydrateStructuredTaskFormalArtifacts(&runtime)
+	s.hydrateStructuredTaskSessionAndRun(&runtime)
 	s.hydrateStructuredTaskGovernance(&runtime)
+	if snapshotCompatibilityOK {
+		runtime = mergeStructuredTaskDetailCompatibility(runtime, snapshotCompatibility)
+	}
 	return runtime, true
+}
+
+// hydrateStructuredTaskFormalArtifacts rebuilds task-facing evidence fields from
+// first-class stores before any task_run compatibility fallback is considered.
+func (s *Service) hydrateStructuredTaskFormalArtifacts(task *runengine.TaskRecord) {
+	if s == nil || s.storage == nil || task == nil {
+		return
+	}
+	task.Artifacts = s.loadArtifactsFromStorage(task.TaskID, 0, 0)
+	task.Citations = s.loadTaskCitationsFromStorage(task.TaskID)
+	task.AuditRecords = s.loadAuditRecordsFromStorage(task.TaskID, 0, 0)
+	task.LatestToolCall = s.latestToolCallFromStorage(task.TaskID, task.RunID)
+	if deliveryResult := s.latestDeliveryResultFromStorage(task.TaskID); deliveryResult != nil {
+		task.DeliveryResult = deliveryResult
+	}
+}
+
+// hydrateStructuredTaskSessionAndRun uses the first-class sessions/runs stores
+// to keep the formal `session -> task -> run` linkage queryable even when the
+// legacy task_run snapshot bridge is absent.
+func (s *Service) hydrateStructuredTaskSessionAndRun(task *runengine.TaskRecord) {
+	if s == nil || s.storage == nil || task == nil {
+		return
+	}
+	if s.storage.SessionStore() != nil && strings.TrimSpace(task.SessionID) != "" {
+		if session, err := s.storage.SessionStore().GetSession(context.Background(), task.SessionID); err == nil {
+			if strings.TrimSpace(task.Title) == "" {
+				task.Title = session.Title
+			}
+			if strings.TrimSpace(task.SessionID) == "" {
+				task.SessionID = session.SessionID
+			}
+		}
+	}
+	if s.storage.LoopRuntimeStore() != nil && strings.TrimSpace(task.RunID) != "" {
+		if runRecord, err := s.storage.LoopRuntimeStore().GetRun(context.Background(), task.RunID); err == nil {
+			if strings.TrimSpace(task.SessionID) == "" {
+				task.SessionID = runRecord.SessionID
+			}
+			if strings.TrimSpace(task.LoopStopReason) == "" {
+				task.LoopStopReason = runRecord.StopReason
+			}
+		}
+	}
 }
 
 // hydrateStructuredTaskGovernance rebuilds the task-facing governance fields
@@ -4081,6 +4453,44 @@ func (s *Service) latestAuditRecordFromStorage(taskID string) map[string]any {
 		return nil
 	}
 	return normalizeTaskDetailAuditRecord(taskID, items[0].Map())
+}
+
+func (s *Service) loadAuditRecordsFromStorage(taskID string, limit, offset int) []map[string]any {
+	if s == nil || s.storage == nil || s.storage.AuditStore() == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	items, _, err := s.storage.AuditStore().ListAuditRecords(context.Background(), taskID, limit, offset)
+	if err != nil {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.Map())
+	}
+	return result
+}
+
+func (s *Service) latestToolCallFromStorage(taskID, runID string) map[string]any {
+	if s == nil || s.storage == nil || s.storage.ToolCallSink() == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	items, _, err := s.storage.ToolCallStore().ListToolCalls(context.Background(), taskID, runID, 1, 0)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	item := items[0]
+	return map[string]any{
+		"tool_call_id": item.ToolCallID,
+		"run_id":       item.RunID,
+		"task_id":      item.TaskID,
+		"step_id":      item.StepID,
+		"tool_name":    item.ToolName,
+		"status":       item.Status,
+		"input":        cloneMap(item.Input),
+		"output":       cloneMap(item.Output),
+		"error_code":   item.ErrorCode,
+		"duration_ms":  item.DurationMS,
+	}
 }
 
 func aggregateTokenCostSummary(unfinishedTasks, finishedTasks []runengine.TaskRecord, budgetAutoDowngrade bool) map[string]any {
@@ -5502,16 +5912,17 @@ func previewTextForDeliveryType(deliveryType string) string {
 // The first P1 slice keeps the trigger set intentionally small and auditable:
 // provider/API-key unavailability and token/cost pressure on the current task.
 func (s *Service) evaluateBudgetAutoDowngrade(task runengine.TaskRecord, taskIntent map[string]any) budgetDowngradeDecision {
-	dataLogSettings := mapValue(s.runEngine.Settings(), "data_log")
-	if !boolValue(dataLogSettings, "budget_auto_downgrade", true) {
+	modelSettings := modelSettingsSection(s.runEngine.Settings())
+	modelCredentials := modelCredentialSettings(s.runEngine.Settings())
+	if !boolValue(modelCredentials, "budget_auto_downgrade", true) {
 		return budgetDowngradeDecision{}
 	}
-	policy := budgetPolicySettings(dataLogSettings)
+	policy := budgetPolicySettings(modelCredentials)
 	decision := budgetDowngradeDecision{
 		Enabled:      true,
 		TriggerStage: "execution_preflight",
 	}
-	provider := providerFromSettings(dataLogSettings, model.OpenAIResponsesProvider)
+	provider := providerFromSettings(modelSettings, model.OpenAIResponsesProvider)
 	if !supportsBudgetProvider(provider) {
 		decision.Applied = true
 		decision.TriggerReason = "provider_unavailable"
@@ -5599,8 +6010,8 @@ func supportsBudgetProvider(provider string) bool {
 	}
 }
 
-func budgetPolicySettings(dataLogSettings map[string]any) map[string]any {
-	policy := cloneMap(mapValue(dataLogSettings, "budget_policy"))
+func budgetPolicySettings(modelCredentials map[string]any) map[string]any {
+	policy := cloneMap(mapValue(modelCredentials, "budget_policy"))
 	if policy == nil {
 		policy = map[string]any{}
 	}
@@ -5774,6 +6185,28 @@ func cloneMapSlice(values []map[string]any) []map[string]any {
 		result = append(result, cloneMap(value))
 	}
 	return result
+}
+
+func extensionAssetReferencesFromMaps(values []map[string]any) []storage.ExtensionAssetReference {
+	if len(values) == 0 {
+		return nil
+	}
+	items := make([]storage.ExtensionAssetReference, 0, len(values))
+	for _, value := range values {
+		items = append(items, storage.ExtensionAssetReference{
+			AssetKind:    stringValue(value, "asset_kind", ""),
+			AssetID:      stringValue(value, "asset_id", ""),
+			Name:         stringValue(value, "name", ""),
+			Version:      stringValue(value, "version", ""),
+			Source:       stringValue(value, "source", ""),
+			Summary:      stringValue(value, "summary", ""),
+			Entry:        stringValue(value, "entry", ""),
+			Capabilities: stringSliceValue(value["capabilities"]),
+			Permissions:  stringSliceValue(value["permissions"]),
+			RuntimeNames: stringSliceValue(value["runtime_names"]),
+		})
+	}
+	return items
 }
 
 // mapValue safely reads a nested object field.
@@ -6174,6 +6607,7 @@ func (s *Service) captureExecutionTrace(task runengine.TaskRecord, snapshot cont
 		OutputText:      result.Content,
 		DeliveryResult:  cloneMap(result.DeliveryResult),
 		Artifacts:       cloneMapSlice(result.Artifacts),
+		ExtensionAssets: extensionAssetReferencesFromMaps(result.ExtensionAssets),
 		ModelInvocation: cloneMap(result.ModelInvocation),
 		ToolCalls:       append([]tools.ToolCallRecord(nil), result.ToolCalls...),
 		TokenUsage:      cloneMap(task.TokenUsage),

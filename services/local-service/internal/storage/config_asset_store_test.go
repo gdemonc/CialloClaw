@@ -12,6 +12,7 @@ func TestInMemoryConfigAssetStoresPersistRecords(t *testing.T) {
 	skillStore := newInMemorySkillManifestStore()
 	blueprintStore := newInMemoryBlueprintDefinitionStore()
 	promptStore := newInMemoryPromptTemplateVersionStore()
+	pluginStore := newInMemoryPluginManifestStore()
 
 	if err := skillStore.WriteSkillManifest(context.Background(), SkillManifestRecord{SkillManifestID: "skill_001", Name: "read_only_skill", Version: "v1", Source: "builtin", Summary: "summary", ManifestJSON: `{}`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
 		t.Fatalf("write skill manifest failed: %v", err)
@@ -21,6 +22,9 @@ func TestInMemoryConfigAssetStoresPersistRecords(t *testing.T) {
 	}
 	if err := promptStore.WritePromptTemplateVersion(context.Background(), PromptTemplateVersionRecord{PromptTemplateVersionID: "prompt_001", TemplateName: "default", Version: "v1", Source: "builtin", Summary: "summary", TemplateBody: "body", VariablesJSON: `[]`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
 		t.Fatalf("write prompt template version failed: %v", err)
+	}
+	if err := pluginStore.WritePluginManifest(context.Background(), PluginManifestRecord{PluginID: "plugin_001", Name: "ocr", Version: "v1", Entry: "builtin://plugin/ocr", Source: "builtin", Summary: "summary", CapabilitiesJSON: `["ocr_image"]`, PermissionsJSON: `["artifact_read"]`, RuntimeNamesJSON: `["ocr_worker"]`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
+		t.Fatalf("write plugin manifest failed: %v", err)
 	}
 	skillRecord, err := skillStore.GetSkillManifest(context.Background(), "skill_001")
 	if err != nil || skillRecord.Name != "read_only_skill" {
@@ -34,6 +38,10 @@ func TestInMemoryConfigAssetStoresPersistRecords(t *testing.T) {
 	if err != nil || promptRecord.TemplateName != "default" {
 		t.Fatalf("unexpected prompt template lookup: record=%+v err=%v", promptRecord, err)
 	}
+	pluginRecord, err := pluginStore.GetPluginManifest(context.Background(), "plugin_001")
+	if err != nil || pluginRecord.Name != "ocr" {
+		t.Fatalf("unexpected plugin manifest lookup: record=%+v err=%v", pluginRecord, err)
+	}
 	skillItems, skillTotal, err := skillStore.ListSkillManifests(context.Background(), 0, 0)
 	if err != nil || skillTotal != 1 || len(skillItems) != 1 {
 		t.Fatalf("unexpected skill manifest listing: total=%d items=%+v err=%v", skillTotal, skillItems, err)
@@ -46,6 +54,10 @@ func TestInMemoryConfigAssetStoresPersistRecords(t *testing.T) {
 	if err != nil || promptTotal != 1 || len(promptItems) != 1 {
 		t.Fatalf("unexpected prompt template listing: total=%d items=%+v err=%v", promptTotal, promptItems, err)
 	}
+	pluginItems, pluginTotal, err := pluginStore.ListPluginManifests(context.Background(), 0, 0)
+	if err != nil || pluginTotal != 1 || len(pluginItems) != 1 {
+		t.Fatalf("unexpected plugin manifest listing: total=%d items=%+v err=%v", pluginTotal, pluginItems, err)
+	}
 	if _, err := skillStore.GetSkillManifest(context.Background(), "missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected missing in-memory skill manifest to return sql.ErrNoRows, got %v", err)
 	}
@@ -54,6 +66,9 @@ func TestInMemoryConfigAssetStoresPersistRecords(t *testing.T) {
 	}
 	if _, err := promptStore.GetPromptTemplateVersion(context.Background(), "missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected missing in-memory prompt template version to return sql.ErrNoRows, got %v", err)
+	}
+	if _, err := pluginStore.GetPluginManifest(context.Background(), "missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected missing in-memory plugin manifest to return sql.ErrNoRows, got %v", err)
 	}
 }
 
@@ -74,6 +89,11 @@ func TestSQLiteConfigAssetStoresPersistRecords(t *testing.T) {
 		t.Fatalf("new sqlite prompt template store failed: %v", err)
 	}
 	defer func() { _ = promptStore.Close() }()
+	pluginStore, err := NewSQLitePluginManifestStore(path)
+	if err != nil {
+		t.Fatalf("new sqlite plugin manifest store failed: %v", err)
+	}
+	defer func() { _ = pluginStore.Close() }()
 
 	if err := skillStore.WriteSkillManifest(context.Background(), SkillManifestRecord{SkillManifestID: "skill_001", Name: "read_only_skill", Version: "v1", Source: "builtin", Summary: "summary", ManifestJSON: `{}`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
 		t.Fatalf("write skill manifest failed: %v", err)
@@ -83,6 +103,9 @@ func TestSQLiteConfigAssetStoresPersistRecords(t *testing.T) {
 	}
 	if err := promptStore.WritePromptTemplateVersion(context.Background(), PromptTemplateVersionRecord{PromptTemplateVersionID: "prompt_001", TemplateName: "default", Version: "v1", Source: "builtin", Summary: "summary", TemplateBody: "body", VariablesJSON: `[]`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
 		t.Fatalf("write prompt template version failed: %v", err)
+	}
+	if err := pluginStore.WritePluginManifest(context.Background(), PluginManifestRecord{PluginID: "plugin_001", Name: "ocr", Version: "v1", Entry: "builtin://plugin/ocr", Source: "builtin", Summary: "summary", CapabilitiesJSON: `["ocr_image"]`, PermissionsJSON: `["artifact_read"]`, RuntimeNamesJSON: `["ocr_worker"]`, CreatedAt: "2026-04-19T10:00:00Z", UpdatedAt: "2026-04-19T10:00:00Z"}); err != nil {
+		t.Fatalf("write plugin manifest failed: %v", err)
 	}
 	skillRecord, err := skillStore.GetSkillManifest(context.Background(), "skill_001")
 	if err != nil || skillRecord.Name != "read_only_skill" {
@@ -103,9 +126,18 @@ func TestSQLiteConfigAssetStoresPersistRecords(t *testing.T) {
 	if err != nil || promptTotal != 1 || len(promptItems) != 1 {
 		t.Fatalf("unexpected sqlite prompt listing: total=%d items=%+v err=%v", promptTotal, promptItems, err)
 	}
+	pluginItems, pluginTotal, err := pluginStore.ListPluginManifests(context.Background(), 0, 0)
+	if err != nil || pluginTotal != 1 || len(pluginItems) != 1 || pluginItems[0].PluginID != "plugin_001" {
+		t.Fatalf("unexpected sqlite plugin listing: total=%d items=%+v err=%v", pluginTotal, pluginItems, err)
+	}
+	pluginRecord, err := pluginStore.GetPluginManifest(context.Background(), "plugin_001")
+	if err != nil || pluginRecord.Name != "ocr" {
+		t.Fatalf("unexpected sqlite plugin manifest lookup: record=%+v err=%v", pluginRecord, err)
+	}
 	assertSQLiteConfigAssetPragmas(t, skillStore.db)
 	assertSQLiteConfigAssetPragmas(t, blueprintStore.db)
 	assertSQLiteConfigAssetPragmas(t, promptStore.db)
+	assertSQLiteConfigAssetPragmas(t, pluginStore.db)
 }
 
 func TestConfigureConfigAssetSQLiteDatabaseSetsBusyTimeoutAndWAL(t *testing.T) {
@@ -131,6 +163,9 @@ func TestSQLiteConfigAssetStoresHandleConstructorAndCloseEdgeCases(t *testing.T)
 	if _, err := NewSQLitePromptTemplateVersionStore("   "); err == nil {
 		t.Fatal("expected sqlite prompt constructor to reject empty path")
 	}
+	if _, err := NewSQLitePluginManifestStore("   "); err == nil {
+		t.Fatal("expected sqlite plugin manifest constructor to reject empty path")
+	}
 	var nilSkillStore SQLiteSkillManifestStore
 	if err := nilSkillStore.Close(); err != nil {
 		t.Fatalf("expected nil sqlite skill store close to succeed, got %v", err)
@@ -142,6 +177,10 @@ func TestSQLiteConfigAssetStoresHandleConstructorAndCloseEdgeCases(t *testing.T)
 	var nilPromptStore SQLitePromptTemplateVersionStore
 	if err := nilPromptStore.Close(); err != nil {
 		t.Fatalf("expected nil sqlite prompt store close to succeed, got %v", err)
+	}
+	var nilPluginStore SQLitePluginManifestStore
+	if err := nilPluginStore.Close(); err != nil {
+		t.Fatalf("expected nil sqlite plugin manifest store close to succeed, got %v", err)
 	}
 }
 

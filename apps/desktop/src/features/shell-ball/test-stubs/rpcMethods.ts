@@ -487,7 +487,20 @@ export async function updateSettings(_params?: unknown): Promise<AgentSettingsUp
 
   return {
     apply_mode: "immediate",
-    effective_settings: current.settings,
+    effective_settings: {
+      general: current.settings.general,
+      floating_ball: current.settings.floating_ball,
+      memory: current.settings.memory,
+      task_automation: current.settings.task_automation,
+      models: {
+        provider: current.settings.models.provider,
+        budget_auto_downgrade: current.settings.models.budget_auto_downgrade,
+        provider_api_key_configured: current.settings.models.provider_api_key_configured,
+        base_url: current.settings.models.base_url,
+        model: current.settings.models.model,
+        stronghold: current.settings.models.stronghold,
+      },
+    },
     need_restart: false,
     updated_keys: [],
   };

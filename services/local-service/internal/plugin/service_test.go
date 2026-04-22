@@ -29,6 +29,9 @@ func TestServiceRuntimeLifecycleAndSnapshots(t *testing.T) {
 	if !ok || runtime.Status != RuntimeStatusRunning || runtime.Health != RuntimeHealthHealthy {
 		t.Fatalf("expected runtime state to reflect healthy worker, got %+v ok=%v", runtime, ok)
 	}
+	if runtime.Manifest == nil || runtime.Manifest.PluginID != "ocr" || runtime.Manifest.Source != "builtin" {
+		t.Fatalf("expected runtime to expose manifest linkage, got %+v", runtime)
+	}
 	failedRuntime, ok := service.RuntimeState(RuntimeKindSidecar, "playwright_sidecar")
 	if !ok || failedRuntime.Health != RuntimeHealthFailed || failedRuntime.LastError == "" {
 		t.Fatalf("expected sidecar failure state, got %+v ok=%v", failedRuntime, ok)
@@ -44,6 +47,10 @@ func TestServiceRuntimeLifecycleAndSnapshots(t *testing.T) {
 	metrics := service.MetricSnapshots()
 	if len(metrics) == 0 {
 		t.Fatal("expected metric snapshots to be available")
+	}
+	manifests := service.Manifests()
+	if len(manifests) != 3 {
+		t.Fatalf("expected one manifest per declared plugin, got %+v", manifests)
 	}
 	if metrics[0].Name != "playwright_worker" || metrics[1].Name != "ocr_worker" || metrics[2].Name != "media_worker" {
 		t.Fatalf("expected metric snapshots to follow declaration order, got %+v", metrics)

@@ -125,7 +125,7 @@
     "request_meta": {
       "trace_id": "trace_xxx",
       "client_time": "2026-04-09T10:00:00+08:00"
-    }
+	      }
   }
 }
 ```
@@ -3601,7 +3601,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
           "provider_api_key_configured": true,
           "base_url": "https://api.openai.com/v1",
           "model": "gpt-3.5-turbo"
-      	}
+        }
       },
       "apply_mode": "immediate",
       "need_restart": false

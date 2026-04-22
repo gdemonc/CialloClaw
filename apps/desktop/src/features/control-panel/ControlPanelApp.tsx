@@ -1056,6 +1056,11 @@ export function ControlPanelApp() {
           <div className="control-panel-shell__action-bar">
             <div className="control-panel-shell__action-statuses">
               {saveStateValue}
+              {draft.warnings && draft.warnings.length > 0 ? (
+                <Text as="p" size="2" color="amber" className="control-panel-shell__action-feedback" aria-live="polite">
+                  {draft.warnings[0]}
+                </Text>
+              ) : null}
               {saveFeedback ? (
                 <Text as="p" size="2" className="control-panel-shell__action-feedback" aria-live="polite">
                   {saveFeedback}
