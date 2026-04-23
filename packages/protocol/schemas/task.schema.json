@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "task_id",
+    "session_id",
     "title",
     "source_type",
     "status",

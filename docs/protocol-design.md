@@ -767,7 +767,9 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - 这类视觉型任务的 `task.source_type` 应返回 `screen_capture`，表示正式任务围绕当前屏幕采样展开，而不是普通 `hover_input` 文本处理。
 - 若客户端已显式提供 `intent.name = screen_analyze`，后端应复用同一条主链路；若客户端未显式提供 intent，也不应要求前端额外发明平行入口。
 - 当客户端省略 `session_id` 时，后端应负责选择或创建隐藏协作 session，并把最终使用的 `session_id` 写回返回的 `task` 对象；若判断为同一任务的补充输入，则应续到原 task 而不是机械新开 task。
+- `task.session_id` 是正式协议字段，schema 和类型层必须始终返回该字段；若当前任务没有关联隐藏协作 session，可返回 `null`，但不得省略字段本身。
 - 若现有 task 已处于 `waiting_auth`、`blocked` 或 `paused`，后端不得通过隐式 follow-up 直接改写原 task 的后续执行语义；此时应新开 task 或等待显式恢复/授权链路处理。
+- 若客户端已显式提供 `intent.name = screen_analyze`，后端必须直接进入受控视觉任务主链路并建立新的授权边界，不得先经过 continuation classifier 再决定是否并回旧 task。
 - 若 `agent.task.start` 携带显式 `intent`，后端不得仅凭“当前只有一个 waiting task”就把该输入并回旧 task；只有存在共享页面 / 窗口 / App 锚点、共享选区 / 报错 / 附件血缘，或本次输入本身就是结构化补充证据时，才允许把显式 intent 视为旧 task 的 continuation。
 - continuation 分类发给模型的信号必须至少带上当前输入解析后的 `intent_name / delivery_type` 和候选 task 的 `intent_name / delivery_type`；仅靠 `explicit_intent_present=true` 之类布尔位不足以支撑正式路由判断。
 
