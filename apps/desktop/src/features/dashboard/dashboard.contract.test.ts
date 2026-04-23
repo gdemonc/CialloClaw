@@ -78,6 +78,23 @@ function loadDashboardSafetyNavigationModule() {
   );
 }
 
+function loadDashboardTaskDetailNavigationSource() {
+  return readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardTaskDetailNavigation.ts"), "utf8");
+}
+
+function loadConversationSessionServiceModule() {
+  return withDesktopAliasRuntime((requireFn) => {
+    const modulePath = resolve(desktopRoot, "src/services/conversationSessionService.ts");
+    delete requireFn.cache[modulePath];
+
+    return requireFn(modulePath) as {
+      getConversationSessionIdForTask: (taskId: string | null | undefined) => string | undefined;
+      getCurrentConversationSessionId: () => string | undefined;
+      rememberConversationSessionFromTask: (task: Task | null | undefined) => string | null;
+    };
+  });
+}
+
 function loadTaskPageQueryModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.query.js")) as {
@@ -139,6 +156,17 @@ function loadNotePageServiceModule(desktopLocalPath?: DashboardContractDesktopLo
         path: string | null;
         taskId: string | null;
         url: string | null;
+      }, options?: {
+        onOpenTaskDetail?: (input: {
+          plan: {
+            mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            feedback: string;
+            path: string | null;
+            taskId: string | null;
+            url: string | null;
+          };
+          taskId: string;
+        }) => Promise<string | void> | string | void;
       }) => Promise<string>;
     };
   }, undefined, desktopLocalPath);
@@ -168,6 +196,17 @@ function loadTaskOutputServiceModule(desktopLocalPath?: DashboardContractDesktop
         path: string | null;
         url: string | null;
         feedback: string;
+      }, options?: {
+        onOpenTaskDetail?: (input: {
+          plan: {
+            mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            taskId: string | null;
+            path: string | null;
+            url: string | null;
+            feedback: string;
+          };
+          taskId: string;
+        }) => Promise<string | void> | string | void;
       }) => Promise<string>;
     };
   }, undefined, desktopLocalPath);
@@ -430,6 +469,8 @@ function withDesktopAliasRuntime<T>(
 }
 
 function createTask(overrides: Partial<Task> = {}): Task {
+  const { session_id = null, ...rest } = overrides;
+
   return {
     task_id: "task_dashboard_001",
     session_id: null,
@@ -442,7 +483,7 @@ function createTask(overrides: Partial<Task> = {}): Task {
     intent: null,
     current_step: "Awaiting approval",
     risk_level: "yellow",
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -850,6 +891,17 @@ test("task page no longer exposes edit guidance and uses 安全总览 without an
   assert.doesNotMatch(taskPageSource, /action === "edit"/);
 });
 
+test("dashboard home entrance labels stay hidden until hover or focus", () => {
+  const dashboardHomeStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.css"), "utf8");
+  const entranceOrbSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/components/DashboardEntranceOrb.tsx"), "utf8");
+
+  assert.match(entranceOrbSource, /data-hovered=\{isHovered \? "true" : "false"\}/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance__label \{[\s\S]*opacity: 0;/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance:hover \.dashboard-orbit-entrance__label,/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance:focus-visible \.dashboard-orbit-entrance__label,/);
+  assert.match(dashboardHomeStyleSource, /\.dashboard-orbit-entrance\[data-hovered="true"\] \.dashboard-orbit-entrance__label \{/);
+});
+
 test("security board styles stay scoped to the safety feature stylesheet", () => {
   const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
   const securityBoardSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/securityBoard.css"), "utf8");
@@ -860,6 +912,36 @@ test("security board styles stay scoped to the safety feature stylesheet", () =>
   assert.match(securityBoardSource, /@media \(max-width: 980px\)[\s\S]*\.security-page__detail-grid\s*\{/);
   assert.doesNotMatch(globalsSource, /\.security-page__canvas\s*\{/);
   assert.doesNotMatch(globalsSource, /\.security-page__draggable\s*\{/);
+});
+
+test("security board cards keep CJK headlines and status badges readable", () => {
+  const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
+  const securityBoardSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/securityBoard.css"), "utf8");
+
+  assert.match(securityAppSource, /className="security-page__status-strip"/);
+  assert.match(securityAppSource, /className="security-page__status-badge"/);
+  assert.match(securityAppSource, /className="security-page__card-badge"/);
+  assert.match(securityBoardSource, /--security-font-display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun"/);
+  assert.match(securityBoardSource, /\.security-page__card-line \{[\s\S]*line-height: 1\.18;/);
+  assert.match(securityBoardSource, /\.security-page__card-line \{[\s\S]*overflow-wrap: anywhere;/);
+  assert.match(securityBoardSource, /\.security-page__status-badge,[\s\S]*white-space: normal;/);
+});
+
+test("security board cards reserve a larger readable footprint", () => {
+  const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
+
+  assert.match(securityAppSource, /const DEFAULT_CARD_SIZE: CardSize = \{ width: 316, height: 236 \};/);
+  assert.match(securityAppSource, /width: clampValue\(width, 228, DEFAULT_CARD_SIZE\.width\)/);
+  assert.match(securityAppSource, /height: clampValue\(height, 172, DEFAULT_CARD_SIZE\.height\)/);
+});
+
+test("security board dragging keeps the path free until drop settles collisions", () => {
+  const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
+
+  assert.match(securityAppSource, /const getClampedCardPosition = useCallback/);
+  assert.match(securityAppSource, /Keep the drag path free while the card is moving/);
+  assert.match(securityAppSource, /handleCardPointerMove[\s\S]*getClampedCardPosition\(/);
+  assert.match(securityAppSource, /handleCardPointerUp[\s\S]*getSettledCardPosition\(key, currentPositions\[key\] \?\? FALLBACK_POSITION, currentPositions\)/);
 });
 
 test("SecurityApp keeps task-detail navigation hooks above the module-data early return", () => {
@@ -899,6 +981,26 @@ test("security audit cards and mirror cards stay aligned with the v6 frontend pr
   assert.match(mirrorAppSource, /overview\.history_summary\[1\] \?\?[\s\S]*latestConversation\?\.agent_text/);
   assert.match(mirrorAppSource, /latestMemoryReference\?\.summary \|\| latestMemoryReference\?\.reason/);
   assert.match(mirrorDetailSource, /reference\.summary \|\| reference\.reason/);
+});
+
+test("mirror cards use CJK-friendly display typography without clipped line clamps", () => {
+  const mirrorStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/mirror.css"), "utf8");
+
+  assert.match(mirrorStyleSource, /--mirror-font-display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun"/);
+  assert.match(mirrorStyleSource, /\.mirror-page__card-line \{[\s\S]*line-height: 1\.28;/);
+  assert.match(mirrorStyleSource, /\.mirror-page__card-line \{[\s\S]*padding-bottom: 0\.12em;/);
+  assert.match(mirrorStyleSource, /\.mirror-page__card-line--memory \{[\s\S]*word-break: break-word;/);
+  assert.match(mirrorStyleSource, /\.mirror-page__card-detail \{[\s\S]*overflow-wrap: anywhere;/);
+});
+
+test("mirror floating cards reserve a slightly larger readable footprint", () => {
+  const mirrorAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/MirrorApp.tsx"), "utf8");
+
+  assert.match(mirrorAppSource, /const MIN_COMPACT_CARD_WIDTH = 132;/);
+  assert.match(mirrorAppSource, /const MIN_COMPACT_CARD_HEIGHT = 132;/);
+  assert.match(mirrorAppSource, /const DEFAULT_CARD_SIZE: ModuleSize = \{ width: 376, height: 252 \};/);
+  assert.match(mirrorAppSource, /width: clampValue\(width, 1, DEFAULT_CARD_SIZE\.width\)/);
+  assert.match(mirrorAppSource, /height: clampValue\(height, 1, DEFAULT_CARD_SIZE\.height\)/);
 });
 
 test("task context links back into mirror detail state instead of plain text dead ends", () => {
@@ -1712,15 +1814,59 @@ test("note resource execution uses desktop local open handlers and keeps copy-pa
   assert.match(fallbackMessage, /workspace\/drafts\/spec\.md/);
 });
 
+test("task output execution delegates task-detail routing through the shared callback", async () => {
+  const outputService = loadTaskOutputServiceModule();
+  const openedTaskIds: string[] = [];
+
+  const feedback = await outputService.performTaskOpenExecution({
+    mode: "task_detail",
+    taskId: "task_dashboard_001",
+    path: null,
+    url: null,
+    feedback: "宸插畾浣嶅埌浠诲姟璇︽儏銆?",
+  }, {
+    onOpenTaskDetail: ({ taskId }) => {
+      openedTaskIds.push(taskId);
+      return "宸插湪浠〃鐩樹腑鎵撳紑浠诲姟璇︽儏銆?";
+    },
+  });
+
+  assert.deepEqual(openedTaskIds, ["task_dashboard_001"]);
+  assert.equal(feedback, "宸插湪浠〃鐩樹腑鎵撳紑浠诲姟璇︽儏銆?");
+});
+
+test("note resource execution delegates task-detail routing through the shared callback", async () => {
+  const noteService = loadNotePageServiceModule();
+  const openedTaskIds: string[] = [];
+
+  const feedback = await noteService.performNoteResourceOpenExecution({
+    mode: "task_detail",
+    feedback: "宸插畾浣嶅埌浠诲姟 Task detail銆?",
+    path: null,
+    taskId: "task_dashboard_001",
+    url: null,
+  }, {
+    onOpenTaskDetail: ({ taskId }) => {
+      openedTaskIds.push(taskId);
+      return "宸插湪浠〃鐩樹腑鎵撳紑 Task detail銆?";
+    },
+  });
+
+  assert.deepEqual(openedTaskIds, ["task_dashboard_001"]);
+  assert.equal(feedback, "宸插湪浠〃鐩樹腑鎵撳紑 Task detail銆?");
+});
+
 test("task page adopts rpc output helpers directly in the task detail panel", () => {
   const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
   const taskDetailSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
   const taskOutputSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskOutput.service.ts"), "utf8");
+  const taskDetailNavigationSource = loadDashboardTaskDetailNavigationSource();
 
   assert.match(taskPageSource, /buildDashboardTaskArtifactQueryKey/);
   assert.match(taskPageSource, /loadTaskArtifactPage/);
   assert.match(taskPageSource, /openTaskArtifactForTask/);
   assert.match(taskPageSource, /openTaskDeliveryForTask/);
+  assert.match(taskPageSource, /readDashboardTaskDetailRouteState/);
   assert.match(taskPageSource, /subscribeDeliveryReady\(\(payload\) =>/);
   assert.match(taskPageSource, /payload\.task_id/);
   assert.doesNotMatch(taskPageSource, /\["dashboard", "tasks", "artifacts"/);
@@ -1735,6 +1881,78 @@ test("task page adopts rpc output helpers directly in the task detail panel", ()
   assert.doesNotMatch(taskOutputSource, /isRpcChannelUnavailable/);
   assert.doesNotMatch(taskOutputSource, /logRpcMockFallback/);
   assert.match(taskOutputSource, /isAllowedTaskOpenUrl/);
+  assert.match(taskOutputSource, /onOpenTaskDetail/);
+  assert.match(taskDetailNavigationSource, /requestDashboardTaskDetailOpen/);
+});
+
+test("dashboard task-detail routing deduplicates retry request ids and accepts tasks outside loaded buckets", () => {
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+
+  assert.match(dashboardRootSource, /handledTaskDetailRequestIdsRef = useRef<Map<string, number>>\(new Map\(\)\)/);
+  assert.match(dashboardRootSource, /function rememberHandledTaskDetailRequest\(requestId: string\)/);
+  assert.match(dashboardRootSource, /if \(!rememberHandledTaskDetailRequest\(payload\.request_id\)\) \{/);
+  assert.doesNotMatch(dashboardRootSource, /handledTaskDetailRequestIdRef\.current === payload\.request_id/);
+
+  assert.match(taskPageSource, /const detailRouteState = readDashboardTaskDetailRouteState\(location\.state\);[\s\S]*if \(detailRouteState\) \{[\s\S]*setSelectedTaskId\(detailRouteState\.focusTaskId\);[\s\S]*navigate\(location\.pathname, \{ replace: true, state: null \}\);[\s\S]*return;/);
+  assert.doesNotMatch(taskPageSource, /detailRouteState && allTasks\.some\(\(item\) => item\.task\.task_id === detailRouteState\.focusTaskId\)/);
+  assert.match(taskPageSource, /if \(selectedTaskId && detailOpen\) \{/);
+});
+
+test("conversation session reuse expires after the backend freshness window", () => {
+  const originalDate = globalThis.Date;
+
+  class FreshFakeDate extends Date {
+    constructor(...args: ConstructorParameters<typeof Date>) {
+      super(args.length === 0 ? FreshFakeDate.now() : args[0]);
+    }
+
+    static now() {
+      return originalDate.parse("2026-04-23T10:00:00.000Z");
+    }
+  }
+
+  Object.defineProperty(globalThis, "Date", {
+    configurable: true,
+    value: FreshFakeDate,
+  });
+
+  try {
+    const service = loadConversationSessionServiceModule();
+
+    assert.equal(
+      service.rememberConversationSessionFromTask(
+        createTask({
+          session_id: "sess_backend_fresh",
+          task_id: "task_dashboard_session",
+        }),
+      ),
+      "sess_backend_fresh",
+    );
+    assert.equal(service.getCurrentConversationSessionId(), "sess_backend_fresh");
+    assert.equal(service.getConversationSessionIdForTask("task_dashboard_session"), "sess_backend_fresh");
+
+    Object.defineProperty(globalThis, "Date", {
+      configurable: true,
+      value: class ExpiredFakeDate extends Date {
+        constructor(...args: ConstructorParameters<typeof Date>) {
+          super(args.length === 0 ? ExpiredFakeDate.now() : args[0]);
+        }
+
+        static now() {
+          return originalDate.parse("2026-04-23T10:15:00.001Z");
+        }
+      },
+    });
+
+    assert.equal(service.getCurrentConversationSessionId(), undefined);
+    assert.equal(service.getConversationSessionIdForTask("task_dashboard_session"), undefined);
+  } finally {
+    Object.defineProperty(globalThis, "Date", {
+      configurable: true,
+      value: originalDate,
+    });
+  }
 });
 
 test("note page consumes note query helpers instead of inlining note bucket contracts", () => {

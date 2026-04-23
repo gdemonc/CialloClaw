@@ -912,6 +912,7 @@ export interface AgentSettingsUpdateResult {
 
 export interface TaskUpdatedNotification {
   task_id: string;
+  session_id: Task["session_id"];
   status: Task["status"];
 }
 

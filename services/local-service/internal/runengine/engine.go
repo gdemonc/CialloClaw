@@ -33,6 +33,8 @@ type TaskRecord struct {
 	TaskID            string
 	SessionID         string
 	RunID             string
+	RequestSource     string
+	RequestTrigger    string
 	ExecutionAttempt  int
 	Title             string
 	SourceType        string
@@ -90,9 +92,26 @@ type NotificationRecord struct {
 	CreatedAt time.Time
 }
 
+func taskUpdatedNotificationParams(record *TaskRecord) map[string]any {
+	return map[string]any{
+		"task_id":    record.TaskID,
+		"session_id": taskSessionValue(record.SessionID),
+		"status":     record.Status,
+	}
+}
+
+func taskSessionValue(sessionID string) any {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	return strings.TrimSpace(sessionID)
+}
+
 // CreateTaskInput contains the runtime initialization payload for a new task.
 type CreateTaskInput struct {
 	SessionID         string
+	RequestSource     string
+	RequestTrigger    string
 	Title             string
 	SourceType        string
 	Status            string
@@ -108,6 +127,18 @@ type CreateTaskInput struct {
 	Citations         []map[string]any
 	MirrorReferences  []map[string]any
 	Snapshot          contextsvc.TaskContextSnapshot
+}
+
+// ContinuationUpdate captures the minimum runtime state changes required when a
+// later desktop input should stay on the same task instead of opening a new one.
+type ContinuationUpdate struct {
+	Snapshot        contextsvc.TaskContextSnapshot
+	Title           string
+	Intent          map[string]any
+	Status          string
+	CurrentStep     string
+	BubbleMessage   map[string]any
+	SteeringMessage string
 }
 
 // InspectorConfig stores the current task-inspector runtime settings.
@@ -279,6 +310,8 @@ func (e *Engine) CreateTask(input CreateTaskInput) TaskRecord {
 		TaskID:            taskID,
 		SessionID:         firstNonEmpty(input.SessionID, e.nextIdentifier("sess")),
 		RunID:             runID,
+		RequestSource:     strings.TrimSpace(input.RequestSource),
+		RequestTrigger:    strings.TrimSpace(input.RequestTrigger),
 		ExecutionAttempt:  1,
 		Title:             input.Title,
 		SourceType:        input.SourceType,
@@ -302,10 +335,7 @@ func (e *Engine) CreateTask(input CreateTaskInput) TaskRecord {
 	}
 
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": taskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 
 	e.tasks[taskID] = record
 	e.taskOrder = append([]string{taskID}, e.taskOrder...)
@@ -468,10 +498,7 @@ func (e *Engine) ConfirmTask(taskID, title string, intent map[string]any, bubble
 	record.Timeline = advanceTimeline(record.Timeline, "generate_output", "running", "生成输出开始")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -496,10 +523,7 @@ func (e *Engine) BeginExecution(taskID, stepName, outputSummary string) (TaskRec
 	record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "running", outputSummary)
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -520,10 +544,7 @@ func (e *Engine) UpdateIntent(taskID, title string, intent map[string]any) (Task
 	record.Intent = cloneMap(intent)
 	record.UpdatedAt = e.now()
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -567,10 +588,7 @@ func (e *Engine) ReopenIntentConfirmation(taskID, title string, intent map[strin
 	record.Timeline = advanceTimeline(record.Timeline, "confirming_intent", "pending", "等待人工复核后的新方案确认")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -598,10 +616,7 @@ func (e *Engine) SetPresentation(taskID string, bubbleMessage map[string]any, de
 		record.Artifacts = cloneMapSlice(artifacts)
 	}
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	if deliveryResult != nil {
 		record.queueNotification("delivery.ready", map[string]any{
 			"task_id":         record.TaskID,
@@ -661,10 +676,7 @@ func (e *Engine) RecordToolCallLifecycle(taskID, toolName, status string, input,
 		"tool_name":   toolName,
 		"tool_status": firstNonEmpty(status, "succeeded"),
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -690,11 +702,9 @@ func (e *Engine) RecordLoopLifecycle(taskID, eventType, stopReason string, paylo
 		"event":       cloneMap(record.LatestEvent),
 		"stop_reason": firstNonEmpty(stopReason, record.LoopStopReason),
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id":     record.TaskID,
-		"status":      record.Status,
-		"stop_reason": firstNonEmpty(stopReason, record.LoopStopReason),
-	})
+	params := taskUpdatedNotificationParams(record)
+	params["stop_reason"] = firstNonEmpty(stopReason, record.LoopStopReason)
+	record.queueNotification("task.updated", params)
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -749,10 +759,60 @@ func (e *Engine) AppendSteeringMessage(taskID, message string, bubbleMessage map
 		"task_id": record.TaskID,
 		"message": trimmed,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
+	e.persistTaskLocked(record)
+	return record.clone(), true
+}
+
+// ContinueTask merges a later desktop input into an existing non-terminal task.
+// It preserves task identity while allowing orchestrator to refresh snapshot,
+// title, intent, and optional steering data before execution resumes.
+func (e *Engine) ContinueTask(taskID string, update ContinuationUpdate) (TaskRecord, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	record, ok := e.tasks[taskID]
+	if !ok || record.isFinished() {
+		return TaskRecord{}, false
+	}
+
+	record.UpdatedAt = e.now()
+	record.Snapshot = mergeTaskSnapshot(record.Snapshot, update.Snapshot)
+	record.BubbleMessage = cloneMap(update.BubbleMessage)
+
+	if strings.TrimSpace(update.Title) != "" {
+		record.Title = strings.TrimSpace(update.Title)
+	}
+	if len(update.Intent) > 0 {
+		record.Intent = cloneMap(update.Intent)
+	}
+	if strings.TrimSpace(update.Status) != "" {
+		record.Status = strings.TrimSpace(update.Status)
+	}
+	if strings.TrimSpace(update.CurrentStep) != "" {
+		record.CurrentStep = strings.TrimSpace(update.CurrentStep)
+	}
+	trimmedSteering := strings.TrimSpace(update.SteeringMessage)
+	if nextStep := strings.TrimSpace(update.CurrentStep); nextStep != "" {
+		record.Timeline = advanceTimeline(record.Timeline, nextStep, timelineStatusForTaskStatus(record.Status), continuationOutputSummary(update.BubbleMessage, trimmedSteering))
+		record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
+	}
+
+	if trimmedSteering != "" {
+		record.SteeringMessages = append(record.SteeringMessages, trimmedSteering)
+		record.LatestEvent = e.buildEventWithPayload(record, "task.steered", map[string]any{
+			"status":  record.Status,
+			"message": trimmedSteering,
+		})
+		record.queueNotification("task.steered", map[string]any{
+			"task_id": record.TaskID,
+			"message": trimmedSteering,
+		})
+	} else {
+		record.LatestEvent = e.buildEvent(record, "task.updated")
+	}
+
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 	return record.clone(), true
 }
@@ -810,10 +870,7 @@ func (e *Engine) FailTaskExecution(taskID, stepName, securityStatus, outputSumma
 	record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "failed", firstNonEmpty(outputSummary, "执行失败"))
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -853,10 +910,7 @@ func (e *Engine) BlockTaskByPolicy(taskID, riskLevel, outputSummary string, impa
 	record.Timeline = advanceTimeline(record.Timeline, "risk_blocked", "cancelled", firstNonEmpty(outputSummary, "高风险操作已被策略拦截"))
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -897,10 +951,7 @@ func (e *Engine) CompleteTask(taskID string, deliveryResult map[string]any, bubb
 		record.SecuritySummary,
 	)
 	record.LatestEvent = e.buildEvent(record, "delivery.ready")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("delivery.ready", map[string]any{
 		"task_id":         record.TaskID,
 		"delivery_result": cloneMap(record.DeliveryResult),
@@ -952,10 +1003,7 @@ func (e *Engine) ApplyRecoveryOutcome(taskID, taskStatus, securityStatus string,
 		"security_status":   firstNonEmpty(securityStatus, "recovered"),
 		"recovery_point_id": stringValue(cloneMap(recoveryPoint), "recovery_point_id", ""),
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1053,10 +1101,7 @@ func (e *Engine) ControlTask(taskID, action string, bubbleMessage map[string]any
 	}
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), nil
@@ -1102,10 +1147,7 @@ func (e *Engine) MarkWaitingApprovalWithPlan(taskID string, approvalRequest map[
 	record.Timeline = advanceTimeline(record.Timeline, "waiting_authorization", "running", "等待用户授权")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "approval.pending")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("approval.pending", map[string]any{
 		"task_id":          record.TaskID,
 		"approval_request": cloneMap(record.ApprovalRequest),
@@ -1175,10 +1217,7 @@ func (e *Engine) ResumeAfterApproval(taskID string, authorization map[string]any
 	record.Timeline = advanceTimeline(record.Timeline, "authorized_execution", "running", "授权通过，继续执行")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1217,10 +1256,7 @@ func (e *Engine) DenyAfterApproval(taskID string, authorization map[string]any, 
 	record.Timeline = advanceTimeline(record.Timeline, "authorization_denied", "cancelled", "用户拒绝授权，任务已结束")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1264,10 +1300,7 @@ func (e *Engine) QueueTaskForSession(taskID, blockingTaskID string, bubbleMessag
 		"status":           record.Status,
 		"blocking_task_id": blockingTaskID,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("task.session_queued", map[string]any{
 		"task_id":          record.TaskID,
 		"blocking_task_id": blockingTaskID,
@@ -1304,10 +1337,7 @@ func (e *Engine) EscalateHumanLoop(taskID string, escalation map[string]any, bub
 		"status":       record.Status,
 		"current_step": record.CurrentStep,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1380,10 +1410,7 @@ func (e *Engine) ResumeQueuedTask(taskID, stepName string, bubbleMessage map[str
 	record.LatestEvent = e.buildEventWithPayload(record, "task.session_resumed", map[string]any{
 		"status": record.Status,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("task.session_resumed", map[string]any{
 		"task_id": record.TaskID,
 	})
@@ -2136,6 +2163,111 @@ func cloneTimeline(timeline []TaskStepRecord) []TaskStepRecord {
 	return result
 }
 
+func mergeTaskSnapshot(base, update contextsvc.TaskContextSnapshot) contextsvc.TaskContextSnapshot {
+	merged := base
+	merged.Source = pickLastNonEmpty(base.Source, update.Source)
+	merged.Trigger = pickLastNonEmpty(base.Trigger, update.Trigger)
+	merged.InputType = pickLastNonEmpty(base.InputType, update.InputType)
+	merged.InputMode = pickLastNonEmpty(base.InputMode, update.InputMode)
+	merged.Text = mergeSnapshotText(base.Text, update.Text)
+	merged.SelectionText = mergeSnapshotText(base.SelectionText, update.SelectionText)
+	merged.ErrorText = mergeSnapshotText(base.ErrorText, update.ErrorText)
+	merged.Files = dedupeAppendedStrings(base.Files, update.Files)
+	merged.PageTitle = pickLastNonEmpty(base.PageTitle, update.PageTitle)
+	merged.PageURL = pickLastNonEmpty(base.PageURL, update.PageURL)
+	merged.AppName = pickLastNonEmpty(base.AppName, update.AppName)
+	merged.WindowTitle = pickLastNonEmpty(base.WindowTitle, update.WindowTitle)
+	merged.VisibleText = mergeSnapshotText(base.VisibleText, update.VisibleText)
+	merged.ScreenSummary = mergeSnapshotText(base.ScreenSummary, update.ScreenSummary)
+	merged.ClipboardText = mergeSnapshotText(base.ClipboardText, update.ClipboardText)
+	merged.HoverTarget = pickLastNonEmpty(base.HoverTarget, update.HoverTarget)
+	merged.LastAction = pickLastNonEmpty(base.LastAction, update.LastAction)
+	if update.DwellMillis > 0 {
+		merged.DwellMillis = update.DwellMillis
+	}
+	if update.CopyCount > 0 {
+		merged.CopyCount = update.CopyCount
+	}
+	if update.WindowSwitches > 0 {
+		merged.WindowSwitches = update.WindowSwitches
+	}
+	if update.PageSwitches > 0 {
+		merged.PageSwitches = update.PageSwitches
+	}
+	return merged
+}
+
+func pickLastNonEmpty(base, update string) string {
+	if strings.TrimSpace(update) != "" {
+		return strings.TrimSpace(update)
+	}
+	return strings.TrimSpace(base)
+}
+
+func mergeSnapshotText(base, update string) string {
+	base = strings.TrimSpace(base)
+	update = strings.TrimSpace(update)
+	switch {
+	case update == "":
+		return base
+	case base == "":
+		return update
+	case base == update:
+		return base
+	default:
+		return base + "\n\n" + update
+	}
+}
+
+func dedupeAppendedStrings(base, update []string) []string {
+	if len(base) == 0 && len(update) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(base)+len(update))
+	result := make([]string, 0, len(base)+len(update))
+	for _, value := range append(append([]string{}, base...), update...) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func timelineStatusForTaskStatus(status string) string {
+	switch status {
+	case "waiting_input", "waiting_auth":
+		return "pending"
+	case "failed":
+		return "failed"
+	case "completed":
+		return "completed"
+	case "cancelled":
+		return "cancelled"
+	default:
+		return "running"
+	}
+}
+
+func continuationOutputSummary(bubbleMessage map[string]any, steeringMessage string) string {
+	if strings.TrimSpace(steeringMessage) != "" {
+		return "Follow-up continuation received"
+	}
+	if len(bubbleMessage) == 0 {
+		return "Task continuation updated"
+	}
+	text, _ := bubbleMessage["text"].(string)
+	if strings.TrimSpace(text) == "" {
+		return "Task continuation updated"
+	}
+	return strings.TrimSpace(text)
+}
+
 // cloneMap recursively copies a map[string]any payload.
 func cloneMap(values map[string]any) map[string]any {
 	if len(values) == 0 {
@@ -2878,6 +3010,8 @@ func taskRecordToStorage(record TaskRecord) storage.TaskRunRecord {
 		TaskID:            record.TaskID,
 		SessionID:         record.SessionID,
 		RunID:             record.RunID,
+		RequestSource:     record.RequestSource,
+		RequestTrigger:    record.RequestTrigger,
 		ExecutionAttempt:  record.ExecutionAttempt,
 		Title:             record.Title,
 		SourceType:        record.SourceType,
@@ -2922,6 +3056,8 @@ func taskRecordFromStorage(record storage.TaskRunRecord) TaskRecord {
 		TaskID:            record.TaskID,
 		SessionID:         record.SessionID,
 		RunID:             record.RunID,
+		RequestSource:     firstNonEmpty(record.RequestSource, record.Snapshot.Source),
+		RequestTrigger:    firstNonEmpty(record.RequestTrigger, record.Snapshot.Trigger),
 		ExecutionAttempt:  maxInt(record.ExecutionAttempt, 1),
 		Title:             record.Title,
 		SourceType:        record.SourceType,
