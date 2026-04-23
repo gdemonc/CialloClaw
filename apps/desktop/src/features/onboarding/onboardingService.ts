@@ -50,7 +50,7 @@ export type DesktopOnboardingPresentation = {
 
 export type DesktopOnboardingActionRequest = {
   targetWindow: "shell-ball" | "dashboard" | "control-panel";
-  type: "open_control_panel" | "open_dashboard";
+  type: "open_control_panel" | "open_dashboard" | "show_shell_ball" | "close_dashboard" | "close_control_panel";
 };
 
 const DESKTOP_ONBOARDING_STATUS_KEY = "cialloclaw.desktop.onboarding.status";
@@ -245,7 +245,10 @@ export async function setDesktopOnboardingPresentation(presentation: DesktopOnbo
   await broadcastPresentation(presentation);
 }
 
-export async function startDesktopOnboarding(source: DesktopOnboardingSource) {
+export async function startDesktopOnboarding(
+  source: DesktopOnboardingSource,
+  preferredWindowLabel?: DesktopOnboardingPresentation["windowLabel"],
+) {
   const now = new Date().toISOString();
   const status = loadDesktopOnboardingStatus();
 
@@ -264,7 +267,8 @@ export async function startDesktopOnboarding(source: DesktopOnboardingSource) {
   await setDesktopOnboardingSession(session);
   const currentWindowLabel = getCurrentWindow().label;
   const windowLabel: DesktopOnboardingPresentation["windowLabel"] =
-    currentWindowLabel === "dashboard" || currentWindowLabel === "control-panel" ? currentWindowLabel : "shell-ball";
+    preferredWindowLabel ??
+    (currentWindowLabel === "dashboard" || currentWindowLabel === "control-panel" ? currentWindowLabel : "shell-ball");
   const welcomePresentation = await buildDefaultWelcomePresentation(windowLabel);
   if (welcomePresentation !== null) {
     await setDesktopOnboardingPresentation(welcomePresentation);

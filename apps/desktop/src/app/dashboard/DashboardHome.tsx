@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CSSProperties } from "react";
 import { Keyboard, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -18,6 +19,7 @@ import { setDesktopOnboardingPresentation } from "@/features/onboarding/onboardi
 import { useDesktopOnboardingActions } from "@/features/onboarding/useDesktopOnboardingActions";
 import { useDesktopOnboardingSession } from "@/features/onboarding/useDesktopOnboardingSession";
 import { openControlPanelFromTray } from "@/platform/trayController";
+import { closeDesktopWindow, openOrFocusDesktopWindow } from "@/platform/windowController";
 import { cn } from "@/utils/cn";
 import "@/features/shell-ball/shellBall.css";
 import "@/features/dashboard/home/dashboardHome.css";
@@ -61,8 +63,6 @@ export function DashboardHome({
 }: DashboardHomeProps) {
   const onboardingSession = useDesktopOnboardingSession();
   const navigate = useNavigate();
-  const hudRef = useRef<HTMLElement | null>(null);
-  const canvasRef = useRef<HTMLDivElement | null>(null);
   const [orbDragOffset, setOrbDragOffset] = useState({ x: 0, y: 0 });
   const [hoveredEntranceKey, setHoveredEntranceKey] = useState<string | null>(null);
   const [activeStateKey, setActiveStateKey] = useState<DashboardHomeEventStateKey | null>(null);
@@ -161,7 +161,18 @@ export function DashboardHome({
     "dashboard",
     useCallback((action) => {
       if (action.type === "open_control_panel") {
-        void openControlPanelFromTray();
+        void (async () => {
+          await openControlPanelFromTray();
+          await closeDesktopWindow("dashboard");
+        })();
+      }
+
+      if (action.type === "open_dashboard") {
+        void openOrFocusDesktopWindow("dashboard");
+      }
+
+      if (action.type === "close_dashboard") {
+        void getCurrentWindow().close();
       }
     }, []),
   );
@@ -176,8 +187,8 @@ export function DashboardHome({
 
     void (async () => {
       const presentation = await buildDesktopOnboardingPresentation({
-        anchors: onboardingSession.step === "dashboard_overview" ? [canvasRef.current] : [hudRef.current],
-        placement: onboardingSession.step === "dashboard_overview" ? "top-right" : "top-right",
+        anchors: [],
+        placement: "top-right",
         step: onboardingSession.step,
         windowLabel: "dashboard",
       });
@@ -189,8 +200,8 @@ export function DashboardHome({
   }, [onboardingSession]);
 
   return (
-    <ClickSpark className="dashboard-orbit-home" duration={360} extraScale={1.12} sparkColor="#d9b980" sparkCount={10} sparkRadius={18} sparkSize={11} style={pageStyle}>
-      <header ref={hudRef} className="dashboard-orbit-home__hud">
+      <ClickSpark className="dashboard-orbit-home" duration={360} extraScale={1.12} sparkColor="#d9b980" sparkCount={10} sparkRadius={18} sparkSize={11} style={pageStyle}>
+      <header className="dashboard-orbit-home__hud">
         <div className="dashboard-orbit-home__badge-shell">
           <div className="dashboard-orbit-home__badge-dot" />
           <span>Dashboard Orbit</span>
@@ -202,7 +213,7 @@ export function DashboardHome({
         </div>
       </header>
 
-      <div ref={canvasRef} className="dashboard-orbit-home__canvas">
+      <div className="dashboard-orbit-home__canvas">
         <DashboardOrbitRings offset={orbDragOffset} />
 
         {dashboardDecorOrbs.map((config) => (

@@ -26,16 +26,6 @@ html[data-app-window="onboarding"] .radix-themes {
   position: absolute;
 }
 
-.desktop-onboarding-window__highlight {
-  border-radius: 28px;
-  box-shadow:
-    0 0 0 2px rgba(234, 154, 69, 0.78),
-    0 0 0 10px rgba(255, 240, 220, 0.38),
-    0 24px 44px -28px rgba(31, 21, 14, 0.42);
-  pointer-events: none;
-  position: absolute;
-}
-
 .desktop-onboarding-window__card {
   backdrop-filter: blur(18px);
   background: rgba(255, 250, 245, 0.94);

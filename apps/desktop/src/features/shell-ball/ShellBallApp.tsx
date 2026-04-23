@@ -468,6 +468,10 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       if (action.type === "open_dashboard") {
         void openOrFocusDesktopWindow("dashboard");
       }
+
+       if (action.type === "show_shell_ball") {
+         void showShellBallWindow("ball");
+       }
     }, []),
   );
 

@@ -28,7 +28,7 @@ function getOnboardingCopy(step: string) {
       return {
         body: "这是桌面主入口。大多数核心操作都会从悬浮球开始。",
         primaryLabel: "下一步",
-        secondaryLabel: "跳过本步",
+        secondaryLabel: "上一步",
         stepLabel: "第 1 步 / 6",
         title: "先认识悬浮球",
       };
@@ -36,7 +36,7 @@ function getOnboardingCopy(step: string) {
       return {
         body: "请长按悬浮球试试语音。松开后结束输入；如果现在不想试，也可以直接继续。",
         primaryLabel: "下一步",
-        secondaryLabel: "跳过本步",
+        secondaryLabel: "上一步",
         stepLabel: "第 2 步 / 6",
         title: "长按试试语音",
       };
@@ -44,7 +44,7 @@ function getOnboardingCopy(step: string) {
       return {
         body: "请双击悬浮球打开主界面。检测到双击后会自动进入下一步。",
         primaryLabel: "下一步",
-        secondaryLabel: "跳过本步",
+        secondaryLabel: "上一步",
         stepLabel: "第 3 步 / 6",
         title: "双击打开主界面",
       };
@@ -52,7 +52,7 @@ function getOnboardingCopy(step: string) {
       return {
         body: "主界面包含 4 个子页面，你可以从这里快速切换；当前也支持 Ctrl / Cmd + 1 2 3 4 快速跳页。",
         primaryLabel: "下一步",
-        secondaryLabel: "跳过本步",
+        secondaryLabel: "上一步",
         stepLabel: "第 4 步 / 6",
         title: "主界面可以快速切换",
       };
@@ -60,7 +60,7 @@ function getOnboardingCopy(step: string) {
       return {
         body: "更多设置在系统托盘里。右键托盘图标可以打开控制面板；你也可以直接从这里继续。",
         primaryLabel: "打开控制面板",
-        secondaryLabel: "跳过本步",
+        secondaryLabel: "上一步",
         stepLabel: "第 5 步 / 6",
         title: "更完整的设置入口在托盘",
       };
@@ -68,7 +68,7 @@ function getOnboardingCopy(step: string) {
       return {
         body: "首次使用建议先完成 API Key 配置。填写后点击“保存设置”，产品就会进入可用状态。",
         primaryLabel: "稍后配置",
-        secondaryLabel: "跳过本步",
+        secondaryLabel: "上一步",
         stepLabel: "第 6 步 / 6",
         title: "完成 API Key 配置",
       };
@@ -213,43 +213,53 @@ export function OnboardingWindow() {
         void skipDesktopOnboarding();
         return;
       case "shell_ball_intro":
-        void advanceDesktopOnboarding("shell_ball_hold_voice");
+        void advanceDesktopOnboarding("welcome");
         return;
       case "shell_ball_hold_voice":
-        void advanceDesktopOnboarding("shell_ball_double_click");
+        void advanceDesktopOnboarding("shell_ball_intro");
         return;
       case "shell_ball_double_click":
-        void advanceDesktopOnboarding("dashboard_overview");
+        void advanceDesktopOnboarding("shell_ball_hold_voice");
         return;
       case "dashboard_overview":
-        void advanceDesktopOnboarding("tray_hint");
+        void requestDesktopOnboardingAction({
+          targetWindow: "dashboard",
+          type: "close_dashboard",
+        });
+        void requestDesktopOnboardingAction({
+          targetWindow: "shell-ball",
+          type: "show_shell_ball",
+        });
+        void advanceDesktopOnboarding("shell_ball_double_click");
         return;
       case "tray_hint":
-        void advanceDesktopOnboarding("control_panel_api_key");
+        void advanceDesktopOnboarding("dashboard_overview");
         return;
       case "control_panel_api_key":
-        void advanceDesktopOnboarding("done");
+        void requestDesktopOnboardingAction({
+          targetWindow: "control-panel",
+          type: "close_control_panel",
+        });
+        void requestDesktopOnboardingAction({
+          targetWindow: "dashboard",
+          type: "open_dashboard",
+        });
+        void advanceDesktopOnboarding("tray_hint");
         return;
       default:
         return;
-    }
+      }
   };
+
+  const shouldShowVeil =
+    session.step === "welcome"
+    || session.step === "shell_ball_intro"
+    || session.step === "shell_ball_hold_voice"
+    || session.step === "shell_ball_double_click";
 
   return (
     <main className="desktop-onboarding-window">
-      <div className="desktop-onboarding-window__veil" aria-hidden="true" />
-      {activePresentation.highlights.map((highlight, index) => (
-        <div
-          key={`${highlight.x}-${highlight.y}-${index}`}
-          className="desktop-onboarding-window__highlight"
-          style={{
-            height: `${highlight.height}px`,
-            left: `${highlight.x}px`,
-            top: `${highlight.y}px`,
-            width: `${highlight.width}px`,
-          }}
-        />
-      ))}
+      {shouldShowVeil ? <div className="desktop-onboarding-window__veil" aria-hidden="true" /> : null}
 
       <section
         ref={cardRef}
