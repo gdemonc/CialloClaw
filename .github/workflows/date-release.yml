@@ -246,6 +246,33 @@ jobs:
       - name: Run local-service tests
         run: go test ./services/local-service/...
 
+      - name: Build the local-service sidecar
+        id: build_sidecar
+        shell: pwsh
+        run: |
+          $targetTriple = (& rustc --print host-tuple).Trim()
+          if ([string]::IsNullOrWhiteSpace($targetTriple)) {
+            throw "Failed to determine the Rust target triple for the local-service sidecar."
+          }
+
+          $sidecarDirectory = "apps/desktop/src-tauri/binaries"
+          New-Item -ItemType Directory -Force -Path $sidecarDirectory | Out-Null
+
+          $sidecarFileName = "local-service-$targetTriple.exe"
+          $sidecarPath = Join-Path $sidecarDirectory $sidecarFileName
+
+          go build -trimpath -o $sidecarPath ./services/local-service/cmd/server
+
+          if (-not (Test-Path -LiteralPath $sidecarPath)) {
+            throw "The local-service sidecar was not built at $sidecarPath."
+          }
+
+          "sidecar_file_name=$sidecarFileName" >> $env:GITHUB_OUTPUT
+          "sidecar_path=$sidecarPath" >> $env:GITHUB_OUTPUT
+
+          "## Bundled Sidecar" >> $env:GITHUB_STEP_SUMMARY
+          "- $sidecarPath" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Compose release metadata
         id: release_meta
         shell: bash
@@ -259,6 +286,7 @@ jobs:
             echo "- Release candidate SHA: \`${{ needs.detect.outputs.release_sha }}\`"
             echo "- Triggered by: \`${{ github.event_name }}\`"
             echo "- Commit count on \`main\` in the release window: \`${{ needs.detect.outputs.commit_count }}\`"
+            echo "- Bundled Go sidecar: \`${{ steps.build_sidecar.outputs.sidecar_file_name }}\`"
             echo "- Preferred Windows installer: NSIS \`.exe\`"
             echo "- Secondary Windows installer: \`.msi\`"
             echo "- Beijing release window: \`${{ needs.detect.outputs.window_start_beijing }}\` -> \`${{ needs.detect.outputs.window_end_beijing }}\`"
@@ -294,6 +322,7 @@ jobs:
             echo "- Release ID: \`${{ steps.publish.outputs.releaseId }}\`"
             echo "- App version: \`${{ steps.publish.outputs.appVersion }}\`"
             echo "- Target SHA: \`${{ needs.detect.outputs.release_sha }}\`"
+            echo "- Bundled Go sidecar: \`${{ steps.build_sidecar.outputs.sidecar_file_name }}\`"
             if [ -n "${{ steps.publish.outputs.artifactPaths }}" ]; then
               echo "- Uploaded assets:"
               while IFS= read -r asset; do

@@ -9,6 +9,11 @@
     "beforeDevCommand": "corepack pnpm dev",
     "beforeBuildCommand": "corepack pnpm build"
   },
+  "bundle": {
+    "externalBin": [
+      "binaries/local-service"
+    ]
+  },
   "app": {
     "windows": [
       {
