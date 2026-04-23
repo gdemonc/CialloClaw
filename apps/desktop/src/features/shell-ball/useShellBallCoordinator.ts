@@ -629,7 +629,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
       ]),
     );
     revealBubbleRegion();
-  }, [autoOpenShellBallDeliveryResult, revealBubbleRegion]);
+  }, [revealBubbleRegion]);
 
   /**
    * Shell-ball only resolves and executes the formal delivery-open flow after
