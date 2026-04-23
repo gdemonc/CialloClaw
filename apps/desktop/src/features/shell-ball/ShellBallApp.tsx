@@ -35,14 +35,18 @@ import {
 } from "../../platform/shellBallWindowController";
 import { setShellBallInteractiveRegions, setShellBallPressLock } from "../../platform/shellBallWindow";
 import { openOrFocusDesktopWindow } from "../../platform/windowController";
-import { OnboardingOverlay } from "@/features/onboarding/OnboardingOverlay";
 import {
   advanceDesktopOnboarding,
+  clearDesktopOnboardingSession,
   shouldAutoStartDesktopOnboarding,
-  skipDesktopOnboarding,
   startDesktopOnboarding,
 } from "@/features/onboarding/onboardingService";
 import { useDesktopOnboardingSession } from "@/features/onboarding/useDesktopOnboardingSession";
+import {
+  hideShellBallOnboardingWindow,
+  positionShellBallOnboardingWindow,
+  showShellBallOnboardingWindow,
+} from "@/platform/onboardingWindowController";
 
 type ShellBallAppProps = {
   isDev?: boolean;
@@ -452,16 +456,41 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       return;
     }
 
-    if (!shouldAutoStartDesktopOnboarding()) {
+    let disposed = false;
+
+    void (async () => {
+      await clearDesktopOnboardingSession();
+      if (disposed) {
+        return;
+      }
+
+      if (!shouldAutoStartDesktopOnboarding()) {
+        return;
+      }
+
+      await startDesktopOnboarding("first_launch");
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (getCurrentWindow().label !== shellBallWindowLabels.ball) {
       return;
     }
 
-    if (onboardingSession !== null) {
+    if (!isShellBallOnboardingVisible) {
+      void hideShellBallOnboardingWindow();
       return;
     }
 
-    void startDesktopOnboarding("first_launch");
-  }, [onboardingSession]);
+    void (async () => {
+      await positionShellBallOnboardingWindow();
+      await showShellBallOnboardingWindow();
+    })();
+  }, [isShellBallOnboardingVisible, windowFrame]);
 
   useEffect(() => {
     const wasVoiceActive =
@@ -673,111 +702,6 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
     void openOrFocusDesktopWindow("dashboard");
   }
-
-  const handleOnboardingStart = useCallback(() => {
-    void advanceDesktopOnboarding("shell_ball_intro");
-  }, []);
-
-  const handleOnboardingAdvanceIntro = useCallback(() => {
-    void advanceDesktopOnboarding("shell_ball_hold_voice");
-  }, []);
-
-  const handleOnboardingAdvanceToDashboard = useCallback(() => {
-    void advanceDesktopOnboarding("dashboard_overview");
-    void openOrFocusDesktopWindow("dashboard");
-  }, []);
-
-  const handleOnboardingSkipStep = useCallback(() => {
-    if (onboardingSession === null) {
-      return;
-    }
-
-    switch (onboardingSession.step) {
-      case "shell_ball_intro":
-        void advanceDesktopOnboarding("shell_ball_hold_voice");
-        return;
-      case "shell_ball_hold_voice":
-        void advanceDesktopOnboarding("shell_ball_double_click");
-        return;
-      case "shell_ball_double_click":
-        void advanceDesktopOnboarding("dashboard_overview");
-        void openOrFocusDesktopWindow("dashboard");
-        return;
-      default:
-        return;
-    }
-  }, [onboardingSession]);
-
-  const handleOnboardingEnd = useCallback(() => {
-    void skipDesktopOnboarding();
-  }, []);
-
-  const shellBallOnboardingOverlay = (() => {
-    if (!isShellBallOnboardingVisible || onboardingSession === null) {
-      return null;
-    }
-
-    switch (onboardingSession.step) {
-      case "welcome":
-        return (
-          <OnboardingOverlay
-            body="这是一段约 2 分钟的轻量引导。你可以随时跳过，之后也能在控制面板重新查看。"
-            onPrimary={handleOnboardingStart}
-            onSecondary={handleOnboardingEnd}
-            placement="modal"
-            primaryLabel="开始引导"
-            secondaryLabel="跳过"
-            title="欢迎来到 CialloClaw"
-          />
-        );
-      case "shell_ball_intro":
-        return (
-          <OnboardingOverlay
-            body="这是桌面主入口。大多数核心操作都会从悬浮球开始。"
-            endLabel="结束引导"
-            onEnd={handleOnboardingEnd}
-            onPrimary={handleOnboardingAdvanceIntro}
-            onSecondary={handleOnboardingSkipStep}
-            primaryLabel="下一步"
-            secondaryLabel="跳过本步"
-            stepLabel="第 1 步 / 6"
-            title="先认识悬浮球"
-          />
-        );
-      case "shell_ball_hold_voice":
-        return (
-          <OnboardingOverlay
-            body="长按悬浮球可以快速发起语音，松开后结束输入。你可以现在试一下。"
-            endLabel="结束引导"
-            footer="检测到长按后会自动进入下一步；如果现在不想试，也可以直接继续。"
-            onEnd={handleOnboardingEnd}
-            onPrimary={handleOnboardingSkipStep}
-            onSecondary={handleOnboardingSkipStep}
-            primaryLabel="下一步"
-            secondaryLabel="跳过本步"
-            stepLabel="第 2 步 / 6"
-            title="长按试试语音"
-          />
-        );
-      case "shell_ball_double_click":
-        return (
-          <OnboardingOverlay
-            body="双击悬浮球可以打开主界面。你可以自己双击，也可以直接继续。"
-            endLabel="结束引导"
-            footer="检测到双击后会自动打开主界面并进入下一步。"
-            onEnd={handleOnboardingEnd}
-            onPrimary={handleOnboardingAdvanceToDashboard}
-            onSecondary={handleOnboardingSkipStep}
-            primaryLabel="下一步"
-            secondaryLabel="跳过本步"
-            stepLabel="第 3 步 / 6"
-            title="双击打开主界面"
-          />
-        );
-      default:
-        return null;
-    }
-  })();
 
   const handleSurfaceTextDrop = useCallback((text: string) => {
     handleDroppedText(text);
@@ -996,8 +920,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   }, [handleCoordinatorRegionLeave, setEdgeDockRevealed]);
 
   return (
-    <>
-      <ShellBallSurface
+    <ShellBallSurface
       containerRef={rootRef}
       dashboardTransitionPhase={dashboardTransitionPhase}
       edgeDockRevealed={edgeDockState.revealed}
@@ -1113,8 +1036,6 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       onPressMove={handlePressMove}
       onPressEnd={handleLockedPressEnd}
       onPressCancel={handleLockedPressCancel}
-      />
-      {shellBallOnboardingOverlay}
-    </>
+    />
   );
 }

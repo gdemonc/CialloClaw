@@ -96,6 +96,10 @@ export function loadDesktopOnboardingSession() {
   return loadStoredValue<DesktopOnboardingSession>(DESKTOP_ONBOARDING_SESSION_KEY);
 }
 
+export async function clearDesktopOnboardingSession() {
+  await setDesktopOnboardingSession(null);
+}
+
 export function shouldAutoStartDesktopOnboarding() {
   const status = loadDesktopOnboardingStatus();
   return !status.completed && !status.skipped;
