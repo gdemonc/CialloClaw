@@ -17,7 +17,9 @@ use std::sync::{mpsc, Arc, Mutex};
 use tauri::ipc::Channel;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 
 #[cfg(windows)]
 use once_cell::sync::Lazy;
@@ -231,6 +233,120 @@ impl NamedPipeBridgeState {
         });
         self.dispatch_notification("bridge.disconnected", &message);
     }
+}
+
+struct LocalServiceSidecarState {
+    child: Mutex<Option<CommandChild>>,
+}
+
+impl Default for LocalServiceSidecarState {
+    fn default() -> Self {
+        Self {
+            child: Mutex::new(None),
+        }
+    }
+}
+
+impl LocalServiceSidecarState {
+    fn is_running(&self) -> Result<bool, String> {
+        self.child
+            .lock()
+            .map(|child| child.is_some())
+            .map_err(|_| "local service sidecar lock poisoned".to_string())
+    }
+
+    fn store(&self, child: CommandChild) -> Result<(), String> {
+        let mut guard = self
+            .child
+            .lock()
+            .map_err(|_| "local service sidecar lock poisoned".to_string())?;
+        *guard = Some(child);
+        Ok(())
+    }
+
+    fn clear(&self) {
+        if let Ok(mut guard) = self.child.lock() {
+            *guard = None;
+        }
+    }
+
+    fn stop(&self) -> Result<(), String> {
+        let mut guard = self
+            .child
+            .lock()
+            .map_err(|_| "local service sidecar lock poisoned".to_string())?;
+
+        if let Some(child) = guard.take() {
+            child
+                .kill()
+                .map_err(|error| format!("failed to stop local service sidecar: {error}"))?;
+        }
+
+        Ok(())
+    }
+}
+
+/// resolve_required_path normalizes a host-side filesystem path before it is
+/// forwarded to the bundled Go service as a CLI argument.
+fn resolve_required_path(path: PathBuf, label: &str) -> Result<String, String> {
+    let resolved = path.to_string_lossy().trim().to_string();
+    if resolved.is_empty() {
+        return Err(format!("failed to resolve {label}"));
+    }
+    Ok(resolved)
+}
+
+/// start_local_service_sidecar boots the packaged Go service before the desktop
+/// renderer starts issuing JSON-RPC requests against the local transport.
+fn start_local_service_sidecar(
+    app: &tauri::AppHandle,
+    sidecar_state: &Arc<LocalServiceSidecarState>,
+) -> Result<(), String> {
+    if sidecar_state.is_running()? {
+        return Ok(());
+    }
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("failed to create app data dir: {error}"))?;
+    let data_dir_arg = resolve_required_path(data_dir, "app data dir")?;
+
+    let sidecar_command = match app.shell().sidecar("cialloclaw-service") {
+        Ok(command) => command,
+        Err(error) => {
+            if cfg!(debug_assertions) {
+                eprintln!(
+                    "local service sidecar is unavailable in this debug session: {error}"
+                );
+                return Ok(());
+            }
+
+            return Err(format!("failed to resolve local service sidecar: {error}"));
+        }
+    };
+
+    let (mut rx, child) = sidecar_command
+        .args(["--data-dir", data_dir_arg.as_str()])
+        .spawn()
+        .map_err(|error| format!("failed to start local service sidecar: {error}"))?;
+    sidecar_state.store(child)?;
+
+    let tracked_state = Arc::clone(sidecar_state);
+    tauri::async_runtime::spawn(async move {
+        // Drain sidecar events so the service process cannot block on an
+        // unread stdout/stderr pipe, and clear the tracked child once it exits.
+        while let Some(event) = rx.recv().await {
+            if matches!(event, CommandEvent::Terminated(_)) {
+                tracked_state.clear();
+                break;
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1255,10 +1371,15 @@ async fn shell_ball_read_selection_snapshot(
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(Arc::new(NamedPipeBridgeState::default()))
+        .manage(Arc::new(LocalServiceSidecarState::default()))
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            let sidecar_state = app.state::<Arc<LocalServiceSidecarState>>();
+            start_local_service_sidecar(app.handle(), sidecar_state.inner())
+                .map_err(std::io::Error::other)?;
             // activity::install_mouse_activity_listener()
             //     .map_err(|error| std::io::Error::other(error))?;
             install_shell_ball_clipboard_hooks(app.handle())
@@ -1287,6 +1408,13 @@ fn main() {
             shell_ball_apply_window_frame,
             shell_ball_read_selection_snapshot
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
+            let sidecar_state = app_handle.state::<Arc<LocalServiceSidecarState>>();
+            let _ = sidecar_state.stop();
+        }
+    });
 }
