@@ -33,7 +33,11 @@ import {
   shellBallWindowLabels,
   showShellBallWindow,
 } from "../../platform/shellBallWindowController";
-import { setShellBallInteractiveRegions, setShellBallPressLock } from "../../platform/shellBallWindow";
+import {
+  setShellBallAlwaysOnTop,
+  setShellBallInteractiveRegions,
+  setShellBallPressLock,
+} from "../../platform/shellBallWindow";
 import { openOrFocusDesktopWindow } from "../../platform/windowController";
 import { buildDesktopOnboardingPresentation } from "@/features/onboarding/onboardingGeometry";
 import {
@@ -466,6 +470,17 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       }
     }, []),
   );
+
+  useEffect(() => {
+    const shouldRaiseShellBall =
+      onboardingSession?.isOpen === true &&
+      (onboardingSession.step === "welcome" ||
+        onboardingSession.step === "shell_ball_intro" ||
+        onboardingSession.step === "shell_ball_hold_voice" ||
+        onboardingSession.step === "shell_ball_double_click");
+
+    void setShellBallAlwaysOnTop(shouldRaiseShellBall);
+  }, [onboardingSession]);
 
   useEffect(() => {
     const wasVoiceActive =

@@ -211,7 +211,9 @@ export async function setDesktopOnboardingPresentation(presentation: DesktopOnbo
     await hideOnboardingWindow();
   } else {
     saveStoredValue(DESKTOP_ONBOARDING_PRESENTATION_KEY, presentation);
-    await syncOnboardingWindowFrame(presentation.monitorFrame);
+    await syncOnboardingWindowFrame(presentation.monitorFrame, {
+      alwaysOnTop: presentation.windowLabel !== "shell-ball",
+    });
   }
 
   await broadcastPresentation(presentation);

@@ -9,6 +9,10 @@ export type OnboardingWindowFrame = {
   y: number;
 };
 
+type SyncOnboardingWindowFrameOptions = {
+  alwaysOnTop?: boolean;
+};
+
 async function getOrCreateOnboardingWindow() {
   const existingWindow = await Window.getByLabel(ONBOARDING_WINDOW_LABEL);
 
@@ -39,12 +43,17 @@ async function getOrCreateOnboardingWindow() {
  * stays visible above the active workflow window.
  *
  * @param frame The target logical monitor frame.
+ * @param options Window ordering overrides for the current onboarding step.
  */
-export async function syncOnboardingWindowFrame(frame: OnboardingWindowFrame) {
+export async function syncOnboardingWindowFrame(
+  frame: OnboardingWindowFrame,
+  options: SyncOnboardingWindowFrameOptions = {},
+) {
   const onboardingWindow = await getOrCreateOnboardingWindow();
   await onboardingWindow.setPosition(new LogicalPosition(frame.x, frame.y));
   await onboardingWindow.setSize(new LogicalSize(frame.width, frame.height));
-  await onboardingWindow.setAlwaysOnTop(true);
+  await onboardingWindow.setFocusable(true);
+  await onboardingWindow.setAlwaysOnTop(options.alwaysOnTop ?? true);
   await onboardingWindow.show();
 }
 
