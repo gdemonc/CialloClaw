@@ -82,40 +82,74 @@ func TestDefaultStrongholdBootstrapConfigReturnsProviderFactories(t *testing.T) 
 
 func TestNewServiceWithStrongholdBootstrapFillsMissingFactories(t *testing.T) {
 	t.Run("fills missing formal provider", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "bootstrap-missing-formal.db")
 		fallbackCalls := 0
 		fallbackProvider := &stubStrongholdProvider{backend: "fallback_only", fallback: true, store: newInMemorySecretStore()}
-		service := newServiceWithStrongholdBootstrap(nil, strongholdBootstrapConfig{
+		service := newServiceWithStrongholdBootstrap(stubAdapter{databasePath: path}, strongholdBootstrapConfig{
 			fallbackProvider: func(string) StrongholdProvider {
 				fallbackCalls++
 				return fallbackProvider
 			},
 		})
 		defer func() { _ = service.Close() }()
-		if service == nil || fallbackCalls != 0 {
-			t.Fatalf("expected missing formal provider bootstrap to stay local without invoking fallback, service=%v fallbackCalls=%d", service, fallbackCalls)
+		if service == nil {
+			t.Fatal("expected missing formal provider bootstrap to create a storage service")
+		}
+		if runtime.GOOS == "windows" {
+			if service.Stronghold() == nil || service.Stronghold().Descriptor().Backend != "stronghold" {
+				t.Fatalf("expected default formal provider to back Stronghold on supported platforms, got %+v", service.Stronghold())
+			}
+			if fallbackCalls != 0 {
+				t.Fatalf("expected fallback provider to remain unused when default formal Stronghold succeeds, got %d calls", fallbackCalls)
+			}
+			return
+		}
+		if service.Stronghold() == nil || service.Stronghold().Descriptor().Backend != "fallback_only" || fallbackCalls != 1 {
+			t.Fatalf("expected default formal provider failure to activate injected fallback on unsupported platforms, provider=%+v fallbackCalls=%d", service.Stronghold(), fallbackCalls)
 		}
 	})
 
 	t.Run("fills missing fallback provider", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "bootstrap-missing-fallback.db")
 		formalCalls := 0
-		formalProvider := &stubStrongholdProvider{backend: "formal_only", store: newInMemorySecretStore()}
-		service := newServiceWithStrongholdBootstrap(nil, strongholdBootstrapConfig{
+		formalProvider := &stubStrongholdProvider{backend: "formal_only", openErr: ErrStrongholdUnavailable}
+		service := newServiceWithStrongholdBootstrap(stubAdapter{databasePath: path}, strongholdBootstrapConfig{
 			formalProvider: func(string) StrongholdProvider {
 				formalCalls++
 				return formalProvider
 			},
 		})
 		defer func() { _ = service.Close() }()
-		if service == nil || formalCalls != 0 {
-			t.Fatalf("expected missing fallback provider bootstrap to stay local without invoking formal, service=%v formalCalls=%d", service, formalCalls)
+		if service == nil {
+			t.Fatal("expected missing fallback provider bootstrap to create a storage service")
+		}
+		if formalCalls != 1 {
+			t.Fatalf("expected injected formal provider to be attempted once, got %d calls", formalCalls)
+		}
+		if service.Stronghold() == nil || service.Stronghold().Descriptor().Backend != "stronghold_sqlite_fallback" || !service.Stronghold().Descriptor().Fallback {
+			t.Fatalf("expected missing fallback provider to use default fallback Stronghold, got %+v", service.Stronghold())
 		}
 	})
 
 	t.Run("fills both providers from defaults", func(t *testing.T) {
-		service := newServiceWithStrongholdBootstrap(nil, strongholdBootstrapConfig{})
+		path := filepath.Join(t.TempDir(), "bootstrap-defaults.db")
+		service := newServiceWithStrongholdBootstrap(stubAdapter{databasePath: path}, strongholdBootstrapConfig{})
 		defer func() { _ = service.Close() }()
 		if service == nil {
 			t.Fatal("expected default bootstrap to create a storage service")
+		}
+		if service.Stronghold() == nil {
+			t.Fatal("expected default bootstrap to wire a Stronghold provider")
+		}
+		descriptor := service.Stronghold().Descriptor()
+		if runtime.GOOS == "windows" {
+			if descriptor.Backend != "stronghold" || descriptor.Fallback {
+				t.Fatalf("expected supported platforms to use formal Stronghold defaults, got %+v", descriptor)
+			}
+			return
+		}
+		if descriptor.Backend != "stronghold_sqlite_fallback" || !descriptor.Fallback {
+			t.Fatalf("expected unsupported platforms to fall back with default providers, got %+v", descriptor)
 		}
 	})
 }
