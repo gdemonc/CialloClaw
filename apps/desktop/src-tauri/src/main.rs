@@ -61,6 +61,7 @@ const SHELL_BALL_CLIPBOARD_SNAPSHOT_EVENT: &str = "desktop-shell-ball:clipboard-
 const TRAY_ICON_ID: &str = "main-tray";
 const LOCAL_SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const LOCAL_SERVICE_READY_RETRY_DELAY: Duration = Duration::from_millis(100);
+const NAMED_PIPE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 const TRAY_MENU_SHOW_SHELL_BALL_ID: &str = "show-shell-ball";
 const TRAY_MENU_HIDE_SHELL_BALL_ID: &str = "hide-shell-ball";
 const TRAY_MENU_OPEN_CONTROL_PANEL_ID: &str = "open-control-panel";
@@ -121,9 +122,21 @@ impl NamedPipeBridgeState {
             return Err(format!("failed to queue named pipe request: {error}"));
         }
 
-        response_rx
-            .recv()
-            .map_err(|error| format!("named pipe response wait failed: {error}"))?
+        match response_rx.recv_timeout(NAMED_PIPE_RESPONSE_TIMEOUT) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Ok(mut pending) = self.pending.lock() {
+                    pending.remove(&request_id);
+                }
+                Err(format!(
+                    "named pipe response wait timed out after {}ms",
+                    NAMED_PIPE_RESPONSE_TIMEOUT.as_millis()
+                ))
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(
+                "named pipe response wait failed: response channel disconnected".to_string(),
+            ),
+        }
     }
 
     fn subscribe(self: &Arc<Self>, topic: String, channel: JsonChannel) -> Result<u32, String> {
