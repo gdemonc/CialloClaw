@@ -46,6 +46,7 @@ type JsonChannel = Channel<Value>;
 const NAMED_PIPE_PATH: &str = r"\\.\pipe\cialloclaw-rpc";
 const CONTROL_PANEL_WINDOW_LABEL: &str = "control-panel";
 const DASHBOARD_WINDOW_LABEL: &str = "dashboard";
+const ONBOARDING_WINDOW_LABEL: &str = "onboarding";
 const SHELL_BALL_WINDOW_LABEL: &str = "shell-ball";
 const SHELL_BALL_BUBBLE_WINDOW_LABEL: &str = "shell-ball-bubble";
 const SHELL_BALL_INPUT_WINDOW_LABEL: &str = "shell-ball-input";
@@ -864,6 +865,18 @@ struct ShellBallInteractiveState {
 static SHELL_BALL_INTERACTIVE_STATE: Lazy<Mutex<ShellBallInteractiveState>> =
     Lazy::new(|| Mutex::new(ShellBallInteractiveState::default()));
 
+#[cfg(windows)]
+#[derive(Clone, Default)]
+struct OnboardingInteractiveState {
+    hwnd: Option<isize>,
+    regions: Vec<ShellBallInteractiveRect>,
+    current_ignore: Option<bool>,
+}
+
+#[cfg(windows)]
+static ONBOARDING_INTERACTIVE_STATE: Lazy<Mutex<OnboardingInteractiveState>> =
+    Lazy::new(|| Mutex::new(OnboardingInteractiveState::default()));
+
 fn open_or_focus_dashboard_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(DASHBOARD_WINDOW_LABEL) {
         if let Err(error) = window.unminimize() {
@@ -1050,6 +1063,69 @@ unsafe fn update_shell_ball_native_tracking() {
 }
 
 #[cfg(windows)]
+unsafe fn sync_onboarding_native_hit_testing(screen_point: POINT) {
+    let snapshot = match ONBOARDING_INTERACTIVE_STATE.lock() {
+        Ok(state) => state.clone(),
+        Err(_) => return,
+    };
+
+    let Some(hwnd_value) = snapshot.hwnd else {
+        return;
+    };
+
+    let hwnd = HWND(hwnd_value as _);
+    let mut client_point = screen_point;
+    if !ScreenToClient(hwnd, &mut client_point).as_bool() {
+        return;
+    }
+
+    let hit_interactive_region = snapshot.regions.iter().any(|region| {
+        client_point.x >= region.x
+            && client_point.x <= region.x + region.width
+            && client_point.y >= region.y
+            && client_point.y <= region.y + region.height
+    });
+    let next_ignore = !hit_interactive_region;
+
+    if snapshot.current_ignore == Some(next_ignore) {
+        return;
+    }
+
+    set_window_ignore_cursor_events(hwnd, next_ignore);
+
+    if let Ok(mut state) = ONBOARDING_INTERACTIVE_STATE.lock() {
+        if state.hwnd == Some(hwnd_value) {
+            state.current_ignore = Some(next_ignore);
+        }
+    }
+}
+
+#[cfg(windows)]
+unsafe fn update_onboarding_native_tracking() {
+    let snapshot = match ONBOARDING_INTERACTIVE_STATE.lock() {
+        Ok(state) => state.clone(),
+        Err(_) => return,
+    };
+
+    let Some(hwnd_value) = snapshot.hwnd else {
+        return;
+    };
+
+    let hwnd = HWND(hwnd_value as _);
+    let should_track = !snapshot.regions.is_empty();
+    set_forward_mouse_messages(hwnd, should_track);
+
+    if !should_track {
+        set_window_ignore_cursor_events(hwnd, false);
+        if let Ok(mut state) = ONBOARDING_INTERACTIVE_STATE.lock() {
+            if state.hwnd == Some(hwnd_value) {
+                state.current_ignore = Some(false);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
 unsafe extern "system" fn mousemove_forward(
     n_code: i32,
     w_param: WPARAM,
@@ -1063,6 +1139,7 @@ unsafe extern "system" fn mousemove_forward(
         let point = (*(l_param.0 as *const MSLLHOOKSTRUCT)).pt;
 
         sync_shell_ball_native_hit_testing(point);
+        sync_onboarding_native_hit_testing(point);
 
         let forwarding_windows = match FORWARDING_WINDOWS.lock() {
             Ok(guard) => guard,
@@ -1096,6 +1173,49 @@ unsafe extern "system" fn mousemove_forward(
     }
 
     CallNextHookEx(None, n_code, w_param, l_param)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn onboarding_set_interactive_regions(
+    window: tauri::Window,
+    regions: Vec<ShellBallInteractiveRect>,
+) -> Result<(), String> {
+    if window.label() != ONBOARDING_WINDOW_LABEL {
+        return Err("onboarding_set_interactive_regions is only available to the onboarding window".into());
+    }
+
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("failed to get onboarding hwnd: {error}"))?;
+
+    {
+        let mut state = ONBOARDING_INTERACTIVE_STATE
+            .lock()
+            .map_err(|_| "onboarding interactive state lock poisoned".to_string())?;
+        state.hwnd = Some(hwnd.0 as isize);
+        state.regions = regions;
+        state.current_ignore = None;
+    }
+
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        update_onboarding_native_tracking();
+        if GetCursorPos(&mut point).is_ok() {
+            sync_onboarding_native_hit_testing(point);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn onboarding_set_interactive_regions(
+    _window: tauri::Window,
+    _regions: Vec<ShellBallInteractiveRect>,
+) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -1290,6 +1410,7 @@ fn main() {
             shell_ball_set_ignore_cursor_events,
             shell_ball_get_mouse_position,
             shell_ball_set_interactive_regions,
+            onboarding_set_interactive_regions,
             shell_ball_set_press_lock,
             desktop_get_mouse_activity_snapshot,
             desktop_capture_screenshot,

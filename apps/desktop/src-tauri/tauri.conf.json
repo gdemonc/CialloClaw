@@ -67,10 +67,19 @@
         "url": "shell-ball-voice.html"
       },
       {
-        "label": "shell-ball-onboarding",
+        "label": "dashboard",
+        "title": "CialloClaw Dashboard",
+        "width": 1280,
+        "height": 860,
+        "decorations": false,
+        "visible": false,
+        "url": "dashboard.html"
+      },
+      {
+        "label": "onboarding",
         "title": "CialloClaw Onboarding",
-        "width": 320,
-        "height": 220,
+        "width": 1280,
+        "height": 860,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
@@ -79,16 +88,7 @@
         "shadow": false,
         "visible": false,
         "focus": false,
-        "url": "shell-ball-onboarding.html"
-      },
-      {
-        "label": "dashboard",
-        "title": "CialloClaw Dashboard",
-        "width": 1280,
-        "height": 860,
-        "decorations": false,
-        "visible": false,
-        "url": "dashboard.html"
+        "url": "onboarding.html"
       }
     ]
   }

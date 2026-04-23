@@ -1,57 +1,62 @@
-import { LogicalPosition, Window, getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalPosition, LogicalSize, Window } from "@tauri-apps/api/window";
 
-export const shellBallOnboardingWindowLabel = "shell-ball-onboarding";
+export const ONBOARDING_WINDOW_LABEL = "onboarding";
 
-const shellBallOnboardingWindowOptions = {
-  title: "CialloClaw Onboarding",
-  url: "shell-ball-onboarding.html",
-  width: 320,
-  height: 220,
-  visible: false,
-  decorations: false,
-  transparent: true,
-  alwaysOnTop: true,
-  resizable: false,
-  skipTaskbar: true,
-  shadow: false,
-  focus: false,
-} as const;
+export type OnboardingWindowFrame = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+};
 
-async function getOrCreateShellBallOnboardingWindow() {
-  const existingWindow = await Window.getByLabel(shellBallOnboardingWindowLabel);
+async function getOrCreateOnboardingWindow() {
+  const existingWindow = await Window.getByLabel(ONBOARDING_WINDOW_LABEL);
+
   if (existingWindow !== null) {
     return existingWindow;
   }
 
-  return new Window(shellBallOnboardingWindowLabel, shellBallOnboardingWindowOptions);
+  const onboardingWindowOptions = {
+    title: "CialloClaw Onboarding",
+    url: "onboarding.html",
+    decorations: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    shadow: false,
+    visible: false,
+    focus: false,
+    width: 1280,
+    height: 720,
+  } as const;
+
+  return new Window(ONBOARDING_WINDOW_LABEL, onboardingWindowOptions);
 }
 
-export async function showShellBallOnboardingWindow() {
-  const windowHandle = await getOrCreateShellBallOnboardingWindow();
-  await windowHandle.show();
-  return windowHandle;
+/**
+ * Ensures the onboarding overlay window matches the current monitor frame and
+ * stays visible above the active workflow window.
+ *
+ * @param frame The target logical monitor frame.
+ */
+export async function syncOnboardingWindowFrame(frame: OnboardingWindowFrame) {
+  const onboardingWindow = await getOrCreateOnboardingWindow();
+  await onboardingWindow.setPosition(new LogicalPosition(frame.x, frame.y));
+  await onboardingWindow.setSize(new LogicalSize(frame.width, frame.height));
+  await onboardingWindow.setAlwaysOnTop(true);
+  await onboardingWindow.show();
 }
 
-export async function hideShellBallOnboardingWindow() {
-  const windowHandle = await Window.getByLabel(shellBallOnboardingWindowLabel);
-  if (windowHandle === null) {
+/**
+ * Hides the onboarding overlay window when the guide is idle.
+ */
+export async function hideOnboardingWindow() {
+  const onboardingWindow = await Window.getByLabel(ONBOARDING_WINDOW_LABEL);
+
+  if (onboardingWindow === null) {
     return;
   }
 
-  await windowHandle.hide();
-}
-
-export async function positionShellBallOnboardingWindow(offsetX = 18, offsetY = -24) {
-  const ballWindow = getCurrentWindow();
-  const onboardingWindow = await getOrCreateShellBallOnboardingWindow();
-  const scaleFactor = await ballWindow.scaleFactor();
-  const ballPosition = (await ballWindow.outerPosition()).toLogical(scaleFactor);
-  const ballSize = (await ballWindow.outerSize()).toLogical(scaleFactor);
-
-  await onboardingWindow.setPosition(
-    new LogicalPosition(
-      Math.round(ballPosition.x + ballSize.width + offsetX),
-      Math.round(ballPosition.y + offsetY),
-    ),
-  );
+  await onboardingWindow.hide();
 }
