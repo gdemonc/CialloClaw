@@ -506,6 +506,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - `agent.task.detail.get`
 - `agent.task.control`
 - `agent.task.events.list`
+- `agent.task.tool_calls.list`
 - `agent.task.steer`
 - `agent.task.artifact.list`
 - `agent.task.artifact.open`
@@ -566,6 +567,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - 一键中断：复用 `agent.task.control`
 - **运行中补充 follow-up 指令** 统一使用 `agent.task.steer`，用于向当前任务追加 steering 信息。
 - **运行时事件查看与调试观察** 统一使用 `agent.task.events.list`，用于补充查看正式事件流，不替代 `task` 主对象查询。
+- **任务工具调用查看与排障观察** 统一使用 `agent.task.tool_calls.list`，用于补充查看正式 `tool_call` 记录，不替代 `task` 主对象查询。
 - **插件扩展列表、插件详情与运行态展示** 统一使用 `agent.plugin.list`、`agent.plugin.detail.get`、`agent.plugin.runtime.list`；插件启停、安装以及多模型、技能安装当前阶段仍优先通过 `agent.settings.get / update` 与仪表盘模块承接，待对象、权限与来源字段完全冻结后再升级为独立正式接口。
 - **任务巡检、事项转任务** 统一使用 `agent.task_inspector.*` 与 `agent.notepad.*`。
 - **仪表盘首页、镜子、安全卫士** 统一使用 `agent.dashboard.*`、`agent.mirror.*`、`agent.security.*`。
@@ -621,7 +623,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - 当输入文本和 `context.page / context.screen / context.behavior` 同时表明用户想“查看当前页面/屏幕”时，后端可直接推断为受控视觉型任务，并继续走既有 `task -> approval_request -> event -> artifact / delivery_result` 链路。
 - 这类视觉型任务的 `task.source_type` 应返回 `screen_capture`，表示正式任务围绕当前屏幕采样展开，而不是普通 `hover_input` 文本处理。
-- 若客户端后续改为通过 `agent.task.start` 显式提交 `intent.name = screen_analyze`，后端应复用同一条主链路；`agent.input.submit` 不需要新增平行入口。
+- `agent.task.start` 不接受显式 `intent` 入参；若客户端误传该字段，协议层应忽略，并继续走后端统一的意图建议主链路。
 - 当客户端省略 `session_id` 时，后端应负责选择或创建隐藏协作 session，并把最终使用的 `session_id` 写回返回的 `task` 对象，而不是要求前端自行猜测生命周期。
 - 若现有 task 已处于 `waiting_auth`、`blocked` 或 `paused`，后端不得通过隐式 follow-up 直接改写原 task 的后续执行语义；此时应新开 task 或等待显式恢复/授权链路处理。
 
@@ -765,12 +767,11 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - 当输入文本和 `page_context / screen / behavior` 同时表明用户想“查看当前页面/屏幕”时，后端可直接推断为受控视觉型任务，并继续走既有 `task -> approval_request -> event -> artifact / delivery_result` 链路。
 - 这类视觉型任务的 `task.source_type` 应返回 `screen_capture`，表示正式任务围绕当前屏幕采样展开，而不是普通 `hover_input` 文本处理。
-- 若客户端已显式提供 `intent.name = screen_analyze`，后端应复用同一条主链路；若客户端未显式提供 intent，也不应要求前端额外发明平行入口。
+- `agent.task.start` 不接受显式 `intent` 入参；视觉型任务仍由后端根据 `input / context / delivery` 统一推断，不要求前端发明平行入口。
 - 当客户端省略 `session_id` 时，后端应负责选择或创建隐藏协作 session，并把最终使用的 `session_id` 写回返回的 `task` 对象；若判断为同一任务的补充输入，则应续到原 task 而不是机械新开 task。
 - `task.session_id` 是正式协议字段，schema、类型层和 `task.updated` 通知都必须返回该字段；若当前任务没有关联隐藏协作 session，应返回 `null`，而不是省略字段。
 - 若现有 task 已处于 `waiting_auth`、`blocked` 或 `paused`，后端不得通过隐式 follow-up 直接改写原 task 的后续执行语义；此时应新开 task 或等待显式恢复/授权链路处理。
-- 若客户端已显式提供 `intent.name = screen_analyze`，后端必须直接进入受控视觉任务主链路并建立新的授权边界，不得先经过 continuation classifier 再决定是否并回旧 task。
-- 若 `agent.task.start` 携带显式 `intent`，后端不得仅凭“当前只有一个 waiting task”就把该输入并回旧 task；只有存在共享页面 / 窗口 / App 锚点、共享选区 / 报错 / 附件血缘，或本次输入本身就是结构化补充证据时，才允许把显式 intent 视为旧 task 的 continuation。
+- 当后端在正式主链路中已经解析出结构化意图或视觉任务信号时，不得仅凭“当前只有一个 waiting task”就把新输入并回旧 task；只有存在共享页面 / 窗口 / App 锚点、共享选区 / 报错 / 附件血缘，或本次输入本身就是结构化补充证据时，才允许视为旧 task 的 continuation。
 - continuation 分类发给模型的信号必须至少带上当前输入解析后的 `intent_name / delivery_type` 和候选 task 的 `intent_name / delivery_type`；仅靠 `explicit_intent_present=true` 之类布尔位不足以支撑正式路由判断。
 
 ### agent.task.start 入参示例
@@ -1893,7 +1894,110 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
-### 8.2.5 `agent.task.steer`
+### 8.2.5 `agent.task.tool_calls.list`
+
+- **请求方式**：JSON-RPC 2.0
+- **接口调用时机**：任务详情页、巡检页或排障入口需要查看正式 `tool_call` 记录时
+- **系统处理**：按 `task_id` 返回结构化 `tool_call` 列表，补充查看工具输入、输出摘要、状态与耗时
+- **入参**：任务 ID、可选 run ID、分页参数
+- **出参**：工具调用列表、分页信息
+
+### agent.task.tool_calls.list 入参说明
+
+| 字段      | 中文说明         |
+| --------- | ---------------- |
+| `task_id` | 目标任务 ID      |
+| `run_id`  | 可选的 run 过滤  |
+| `limit`   | 每页条数         |
+| `offset`  | 偏移量           |
+
+### agent.task.tool_calls.list 入参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_task_tool_calls_001",
+  "method": "agent.task.tool_calls.list",
+  "params": {
+    "request_meta": {
+      "trace_id": "trace_task_tool_calls_001",
+      "client_time": "2026-04-18T10:45:00+08:00"
+    },
+    "task_id": "task_201",
+    "run_id": "run_201",
+    "limit": 20,
+    "offset": 0
+  }
+}
+```
+
+### agent.task.tool_calls.list 出参说明
+
+| 字段                         | 中文说明 |
+| ---------------------------- | -------- |
+| `data.items`                 | 工具调用列表 |
+| `data.items[].tool_call_id`  | 工具调用 ID |
+| `data.items[].run_id`        | 关联 run |
+| `data.items[].task_id`       | 关联 task |
+| `data.items[].step_id`       | 关联 step |
+| `data.items[].created_at`    | 创建时间 |
+| `data.items[].tool_name`     | 工具名 |
+| `data.items[].status`        | 调用状态 |
+| `data.items[].input`         | 输入摘要 |
+| `data.items[].output`        | 输出摘要 |
+| `data.items[].error_code`    | 错误码 |
+| `data.items[].duration_ms`   | 耗时 |
+| `data.page`                  | 分页信息 |
+
+### agent.task.tool_calls.list 出参示例
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_task_tool_calls_001",
+  "result": {
+    "data": {
+      "items": [
+        {
+          "tool_call_id": "tool_call_001",
+          "run_id": "run_201",
+          "task_id": "task_201",
+          "step_id": null,
+          "created_at": "2026-04-18T10:45:00+08:00",
+          "tool_name": "read_file",
+          "status": "succeeded",
+          "input": {
+            "path": "notes/source.txt"
+          },
+          "output": {
+            "path": "notes/source.txt",
+            "summary_output": {
+              "path": "notes/source.txt",
+              "excerpt": "hello from file"
+            }
+          },
+          "error_code": null,
+          "duration_ms": 12
+        }
+      ],
+      "page": {
+        "limit": 20,
+        "offset": 0,
+        "total": 1,
+        "has_more": false
+      }
+    },
+    "meta": {
+      "server_time": "2026-04-18T10:45:01+08:00"
+    },
+    "warnings": []
+  }
+}
+```
+
+---
+
+### 8.2.6 `agent.task.steer`
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户在任务运行中补充新的 follow-up 指令时
@@ -1961,7 +2065,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 }
 ```
 
-### 8.2.6 Agent Loop 运行时通知
+### 8.2.7 Agent Loop 运行时通知
 
 当前阶段，以下通知方法已进入正式调试/流式通道，可用于前端或调试观察运行时进展：
 
@@ -1981,7 +2085,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
-### 8.2.7 `agent.task_inspector.config.get`
+### 8.2.8 `agent.task_inspector.config.get`
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户进入巡检配置页时
@@ -2044,7 +2148,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
-### 8.2.8 `agent.task_inspector.config.update`
+### 8.2.9 `agent.task_inspector.config.update`
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户修改巡检配置并保存时
@@ -2126,7 +2230,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
-### 8.2.9 `agent.task_inspector.run`
+### 8.2.10 `agent.task_inspector.run`
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户手动点击“立即巡检”时
@@ -2198,7 +2302,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
-### 8.2.10 `agent.notepad.list`
+### 8.2.11 `agent.notepad.list`
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户查看近期要做、后续安排、重复事项、已结束时
@@ -2316,7 +2420,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
-### 8.2.11 `agent.notepad.update`
+### 8.2.12 `agent.notepad.update`
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户在 notes 详情页对事项执行状态变更动作时
@@ -2394,7 +2498,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ---
 
-### 8.2.12 `agent.notepad.convert_to_task`
+### 8.2.13 `agent.notepad.convert_to_task`
 
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户点击“交给 Agent 处理”时

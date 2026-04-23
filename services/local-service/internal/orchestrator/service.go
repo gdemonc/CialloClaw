@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/audit"
@@ -42,6 +43,7 @@ var (
 	ErrStorageQueryFailed     = errors.New("storage query failed")
 	ErrStrongholdAccessFailed = errors.New("stronghold access failed")
 	ErrRecoveryPointNotFound  = errors.New("recovery point not found")
+	persistedToolCallEventSeq atomic.Uint64
 )
 
 const (
@@ -1071,18 +1073,14 @@ func (s *Service) TaskDetailGet(params map[string]any) (map[string]any, error) {
 	if approvalRequest != nil {
 		approvalRequestValue = approvalRequest
 	}
-	authorizationRecord := normalizeTaskDetailAuthorizationRecord(task.TaskID, task.Authorization)
-	if authorizationRecord == nil {
-		authorizationRecord = s.latestAuthorizationRecordFromStorage(task.TaskID)
-	}
+	storageAuthorizationRecord := s.latestAuthorizationRecordFromStorage(task.TaskID)
+	authorizationRecord := selectTaskDetailAuthorizationRecord(task.TaskID, task.Authorization, storageAuthorizationRecord)
 	authorizationRecordValue := any(nil)
 	if authorizationRecord != nil {
 		authorizationRecordValue = authorizationRecord
 	}
-	auditRecord := latestFormalTaskAuditRecord(task.TaskID, task.AuditRecords)
-	if auditRecord == nil {
-		auditRecord = s.latestAuditRecordFromStorage(task.TaskID)
-	}
+	storageAuditRecords := s.loadAuditRecordsFromStorage(task.TaskID, 0, 0)
+	auditRecord := selectTaskDetailAuditRecord(task, task.AuditRecords, storageAuditRecords)
 	auditRecordValue := any(nil)
 	if auditRecord != nil {
 		auditRecordValue = auditRecord
@@ -1308,6 +1306,149 @@ func (s *Service) TaskEventsList(params map[string]any) (map[string]any, error) 
 		"items": items,
 		"page":  pageMap(limit, offset, total),
 	}, nil
+}
+
+// TaskToolCallsList handles agent.task.tool_calls.list and exposes persisted
+// tool_call records through one task-centric query surface.
+func (s *Service) TaskToolCallsList(params map[string]any) (map[string]any, error) {
+	limit := clampListLimit(intValue(params, "limit", 20))
+	offset := clampListOffset(intValue(params, "offset", 0))
+	taskID := stringValue(params, "task_id", "")
+	runID := stringValue(params, "run_id", "")
+	if strings.TrimSpace(taskID) == "" {
+		return nil, errors.New("task_id is required")
+	}
+	if s.storage == nil || s.storage.ToolCallStore() == nil {
+		compatibilityItems := compatibilityTaskToolCalls(s, taskID, runID)
+		return map[string]any{
+			"items": paginateTaskToolCallItems(compatibilityItems, limit, offset),
+			"page":  pageMap(limit, offset, len(compatibilityItems)),
+		}, nil
+	}
+	items, total, err := s.storage.ToolCallStore().ListToolCalls(context.Background(), taskID, runID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrStorageQueryFailed, err)
+	}
+	if total == 0 {
+		compatibilityItems := compatibilityTaskToolCalls(s, taskID, runID)
+		return map[string]any{
+			"items": paginateTaskToolCallItems(compatibilityItems, limit, offset),
+			"page":  pageMap(limit, offset, len(compatibilityItems)),
+		}, nil
+	}
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		result = append(result, taskToolCallMap(item))
+	}
+	return map[string]any{
+		"items": result,
+		"page":  pageMap(limit, offset, total),
+	}, nil
+}
+
+func compatibilityTaskToolCalls(s *Service, taskID, runID string) []map[string]any {
+	if s == nil {
+		return nil
+	}
+	task, ok := s.taskDetailFromStorage(taskID)
+	if runtimeTask, runtimeOK := s.runEngine.TaskDetail(taskID); runtimeOK {
+		if ok {
+			task = mergeRuntimeTaskDetail(task, runtimeTask)
+		} else {
+			task = runtimeTask
+			ok = true
+		}
+	}
+	if !ok || len(task.LatestToolCall) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(runID) != "" && stringValue(task.LatestToolCall, "run_id", "") != runID {
+		return nil
+	}
+	return []map[string]any{normalizeTaskToolCallMap(task.LatestToolCall)}
+}
+
+func paginateTaskToolCallItems(items []map[string]any, limit, offset int) []map[string]any {
+	if len(items) == 0 || offset >= len(items) {
+		return []map[string]any{}
+	}
+	end := len(items)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return cloneMapSlice(items[offset:end])
+}
+
+func normalizeTaskToolCallMap(value map[string]any) map[string]any {
+	if len(value) == 0 {
+		return nil
+	}
+	stepID := any(nil)
+	if candidate := stringValue(value, "step_id", ""); strings.TrimSpace(candidate) != "" {
+		stepID = candidate
+	}
+	createdAt := any(nil)
+	if candidate := stringValue(value, "created_at", ""); strings.TrimSpace(candidate) != "" {
+		createdAt = candidate
+	}
+	errorCode := value["error_code"]
+	return map[string]any{
+		"tool_call_id": stringValue(value, "tool_call_id", ""),
+		"run_id":       stringValue(value, "run_id", ""),
+		"task_id":      stringValue(value, "task_id", ""),
+		"step_id":      stepID,
+		"created_at":   createdAt,
+		"tool_name":    stringValue(value, "tool_name", ""),
+		"status":       outwardToolCallStatus(stringValue(value, "status", "pending")),
+		"input":        cloneMapOrEmpty(mapValue(value, "input")),
+		"output":       cloneMapOrEmpty(mapValue(value, "output")),
+		"error_code":   errorCode,
+		"duration_ms":  intValue(value, "duration_ms", 0),
+	}
+}
+
+func taskToolCallMap(record tools.ToolCallRecord) map[string]any {
+	stepID := any(nil)
+	if strings.TrimSpace(record.StepID) != "" {
+		stepID = record.StepID
+	}
+	errorCode := any(nil)
+	if record.ErrorCode != nil {
+		errorCode = *record.ErrorCode
+	}
+	return map[string]any{
+		"tool_call_id": record.ToolCallID,
+		"run_id":       record.RunID,
+		"task_id":      record.TaskID,
+		"step_id":      stepID,
+		"created_at":   nil,
+		"tool_name":    record.ToolName,
+		"status":       outwardToolCallStatus(string(record.Status)),
+		"input":        cloneMapOrEmpty(record.Input),
+		"output":       cloneMapOrEmpty(record.Output),
+		"error_code":   errorCode,
+		"duration_ms":  record.DurationMS,
+	}
+}
+
+func cloneMapOrEmpty(values map[string]any) map[string]any {
+	if cloned := cloneMap(values); cloned != nil {
+		return cloned
+	}
+	return map[string]any{}
+}
+
+func outwardToolCallStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case "started":
+		return "running"
+	case "succeeded":
+		return "succeeded"
+	case "failed", "timeout":
+		return "failed"
+	default:
+		return "pending"
+	}
 }
 
 func normalizeEventTimeFilter(value string) (string, error) {
@@ -3858,6 +3999,9 @@ func (s *Service) hydrateStructuredTaskGovernance(task *runengine.TaskRecord) {
 	if s == nil || s.storage == nil || task == nil {
 		return
 	}
+	if authorizationRecord := s.latestAuthorizationRecordFromStorage(task.TaskID); authorizationRecord != nil {
+		task.Authorization = authorizationRecord
+	}
 	if deliveryResult := s.latestDeliveryResultFromStorage(task.TaskID); len(deliveryResult) > 0 {
 		task.DeliveryResult = deliveryResult
 	}
@@ -3881,6 +4025,161 @@ func (s *Service) hydrateStructuredTaskGovernance(task *runengine.TaskRecord) {
 		securitySummary["latest_restore_point"] = latestRestorePoint
 	}
 	task.SecuritySummary = securitySummary
+}
+
+// selectTaskDetailAuthorizationRecord prefers the newest formal authorization
+// record so task detail does not regress to snapshot-era governance anchors once
+// first-class authorization storage is available.
+func selectTaskDetailAuthorizationRecord(taskID string, runtimeRecord map[string]any, storageRecord map[string]any) map[string]any {
+	normalizedRuntime := normalizeTaskDetailAuthorizationRecord(taskID, runtimeRecord)
+	normalizedStorage := normalizeTaskDetailAuthorizationRecord(taskID, storageRecord)
+	return preferNewerTaskDetailRecord(normalizedRuntime, normalizedStorage, "created_at")
+}
+
+// selectTaskDetailAuditRecord keeps screen tasks anchored to the screen-evidence
+// audit chain even when newer generic delivery/runtime audits exist later in the
+// same task. Non-screen tasks still use the latest normalized audit record.
+func selectTaskDetailAuditRecord(task runengine.TaskRecord, runtimeAuditRecords []map[string]any, storageAuditRecords []map[string]any) map[string]any {
+	latestOverall := latestNormalizedTaskAuditRecord(task.TaskID, runtimeAuditRecords, storageAuditRecords)
+	if !isScreenTaskDetail(task) {
+		return latestOverall
+	}
+	latestScreen := latestScreenTaskAuditRecord(task.TaskID, runtimeAuditRecords, storageAuditRecords)
+	if latestScreen == nil {
+		return latestOverall
+	}
+	if shouldPreferLatestTaskAuditOverScreenAudit(latestOverall, latestScreen) {
+		return latestOverall
+	}
+	return latestScreen
+}
+
+// shouldPreferLatestTaskAuditOverScreenAudit keeps screen tasks anchored to
+// screen evidence by default, but lets newer terminal governance records such as
+// failures or restore_apply outcomes override stale screen-capture success logs.
+func shouldPreferLatestTaskAuditOverScreenAudit(latestOverall map[string]any, latestScreen map[string]any) bool {
+	if len(latestOverall) == 0 {
+		return false
+	}
+	if len(latestScreen) == 0 {
+		return true
+	}
+	if !parseTaskDetailRecordTime(stringValue(latestOverall, "created_at", "")).After(parseTaskDetailRecordTime(stringValue(latestScreen, "created_at", ""))) {
+		return false
+	}
+	if isScreenTaskAuditRecord(latestOverall) {
+		return true
+	}
+	return isTerminalGovernanceAuditRecord(latestOverall)
+}
+
+func latestNormalizedTaskAuditRecord(taskID string, auditGroups ...[]map[string]any) map[string]any {
+	var latest map[string]any
+	for _, group := range auditGroups {
+		for _, auditRecord := range group {
+			normalized := normalizeTaskDetailAuditRecord(taskID, auditRecord)
+			if normalized == nil {
+				continue
+			}
+			latest = preferNewerTaskDetailRecord(latest, normalized, "created_at")
+		}
+	}
+	return latest
+}
+
+func latestScreenTaskAuditRecord(taskID string, auditGroups ...[]map[string]any) map[string]any {
+	var latest map[string]any
+	for _, group := range auditGroups {
+		for _, auditRecord := range group {
+			normalized := normalizeTaskDetailAuditRecord(taskID, auditRecord)
+			if normalized == nil || !isScreenTaskAuditRecord(normalized) {
+				continue
+			}
+			latest = preferNewerTaskDetailRecord(latest, normalized, "created_at")
+		}
+	}
+	return latest
+}
+
+func isScreenTaskAuditRecord(auditRecord map[string]any) bool {
+	if len(auditRecord) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringValue(auditRecord, "type", "")) == "screen_capture" {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(stringValue(auditRecord, "action", "")), "screen.capture.") {
+		return true
+	}
+	target := strings.ToLower(strings.TrimSpace(stringValue(auditRecord, "target", "")))
+	return strings.Contains(target, "screen")
+}
+
+func isTerminalGovernanceAuditRecord(auditRecord map[string]any) bool {
+	if len(auditRecord) == 0 {
+		return false
+	}
+	result := strings.TrimSpace(stringValue(auditRecord, "result", ""))
+	if result != "" && result != "success" {
+		return true
+	}
+	action := strings.TrimSpace(stringValue(auditRecord, "action", ""))
+	if strings.HasPrefix(action, "restore_") || strings.HasPrefix(action, "authorization_") {
+		return true
+	}
+	return strings.TrimSpace(stringValue(auditRecord, "type", "")) == "recovery"
+}
+
+func isScreenTaskDetail(task runengine.TaskRecord) bool {
+	if stringValue(task.Intent, "name", "") == "screen_analyze" || strings.TrimSpace(task.SourceType) == "screen_capture" {
+		return true
+	}
+	if strings.TrimSpace(stringValue(task.PendingExecution, "kind", "")) == "screen_analysis" {
+		return true
+	}
+	for _, artifact := range task.Artifacts {
+		if strings.TrimSpace(stringValue(artifact, "artifact_type", "")) == "screen_capture" {
+			return true
+		}
+	}
+	for _, citation := range task.Citations {
+		if strings.TrimSpace(stringValue(citation, "artifact_type", "")) == "screen_capture" || strings.TrimSpace(stringValue(citation, "screen_session_id", "")) != "" {
+			return true
+		}
+	}
+	if strings.TrimSpace(stringValue(task.ApprovalRequest, "operation_name", "")) == "screen_capture" {
+		return true
+	}
+	return false
+}
+
+func preferNewerTaskDetailRecord(left map[string]any, right map[string]any, timeKey string) map[string]any {
+	if len(left) == 0 {
+		return cloneMap(right)
+	}
+	if len(right) == 0 {
+		return cloneMap(left)
+	}
+	leftTime := parseTaskDetailRecordTime(stringValue(left, timeKey, ""))
+	rightTime := parseTaskDetailRecordTime(stringValue(right, timeKey, ""))
+	if rightTime.After(leftTime) {
+		return cloneMap(right)
+	}
+	return cloneMap(left)
+}
+
+func parseTaskDetailRecordTime(value string) time.Time {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
+		return parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		return parsed
+	}
+	return time.Time{}
 }
 
 func (s *Service) pendingApprovalRequestFromStorage(taskID, fallbackRiskLevel string) map[string]any {
@@ -6864,6 +7163,92 @@ func (s *Service) recordExecutionToolCalls(task runengine.TaskRecord, toolCalls 
 		}
 	}
 	return task
+}
+
+func (s *Service) persistExecutionToolCallEvents(task runengine.TaskRecord, taskIntent map[string]any, toolCalls []tools.ToolCallRecord) {
+	if s == nil || s.storage == nil || s.storage.LoopRuntimeStore() == nil || isAgentLoopTaskIntent(taskIntent) || len(toolCalls) == 0 {
+		return
+	}
+	startedAt := time.Now().UTC()
+	records := make([]storage.EventRecord, 0, len(toolCalls))
+	for index, toolCall := range toolCalls {
+		if strings.TrimSpace(toolCall.ToolName) == "" {
+			continue
+		}
+		createdAt := startedAt.Add(time.Duration(index) * time.Millisecond)
+		records = append(records, storage.EventRecord{
+			EventID:     executionToolCallEventID(task.TaskID, toolCall, index, createdAt),
+			RunID:       task.RunID,
+			TaskID:      task.TaskID,
+			StepID:      toolCall.StepID,
+			Type:        "tool_call.completed",
+			Level:       executionToolCallEventLevel(toolCall),
+			PayloadJSON: marshalOrchestratorEventPayload(executionToolCallEventPayload(task.TaskID, toolCall)),
+			CreatedAt:   createdAt.Format(time.RFC3339Nano),
+		})
+	}
+	if len(records) == 0 {
+		return
+	}
+	_ = s.storage.LoopRuntimeStore().SaveEvents(context.Background(), records)
+}
+
+func executionToolCallEventID(taskID string, toolCall tools.ToolCallRecord, index int, createdAt time.Time) string {
+	if sanitizedToolCallID := strings.TrimSpace(strings.ReplaceAll(toolCall.ToolCallID, ".", "_")); sanitizedToolCallID != "" {
+		return fmt.Sprintf("evt_%s_%s_%d", taskID, sanitizedToolCallID, index)
+	}
+	sanitizedToolName := strings.TrimSpace(strings.ReplaceAll(toolCall.ToolName, ".", "_"))
+	if sanitizedToolName == "" {
+		sanitizedToolName = "tool_call"
+	}
+	sanitizedStepID := strings.TrimSpace(strings.ReplaceAll(toolCall.StepID, ".", "_"))
+	if sanitizedStepID == "" {
+		sanitizedStepID = "task_scope"
+	}
+	return fmt.Sprintf("evt_%s_%s_%s_%d_%d_%d", taskID, sanitizedToolName, sanitizedStepID, index, createdAt.UnixNano(), persistedToolCallEventSeq.Add(1))
+}
+
+func executionToolCallEventLevel(toolCall tools.ToolCallRecord) string {
+	switch toolCall.Status {
+	case tools.ToolCallStatusFailed, tools.ToolCallStatusTimeout:
+		return "error"
+	default:
+		return "info"
+	}
+}
+
+func executionToolCallEventPayload(taskID string, toolCall tools.ToolCallRecord) map[string]any {
+	payload := map[string]any{
+		"task_id":      taskID,
+		"tool_call_id": toolCall.ToolCallID,
+		"tool_name":    toolCall.ToolName,
+		"status":       string(toolCall.Status),
+		"input":        cloneMapOrEmpty(toolCall.Input),
+		"output":       cloneMapOrEmpty(toolCall.Output),
+		"duration_ms":  toolCall.DurationMS,
+	}
+	if strings.TrimSpace(toolCall.StepID) != "" {
+		payload["step_id"] = toolCall.StepID
+	}
+	if toolCall.ErrorCode != nil {
+		payload["error_code"] = *toolCall.ErrorCode
+	}
+	return payload
+}
+
+func marshalOrchestratorEventPayload(payload map[string]any) string {
+	if len(payload) == 0 {
+		return "{}"
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
+}
+
+func isAgentLoopTaskIntent(taskIntent map[string]any) bool {
+	return stringValue(taskIntent, "name", "") == "agent_loop"
 }
 
 func executionStepName(taskIntent map[string]any) string {
