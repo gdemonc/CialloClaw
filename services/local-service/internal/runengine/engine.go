@@ -92,6 +92,21 @@ type NotificationRecord struct {
 	CreatedAt time.Time
 }
 
+func taskUpdatedNotificationParams(record *TaskRecord) map[string]any {
+	return map[string]any{
+		"task_id":    record.TaskID,
+		"session_id": taskSessionValue(record.SessionID),
+		"status":     record.Status,
+	}
+}
+
+func taskSessionValue(sessionID string) any {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	return strings.TrimSpace(sessionID)
+}
+
 // CreateTaskInput contains the runtime initialization payload for a new task.
 type CreateTaskInput struct {
 	SessionID         string
@@ -320,10 +335,7 @@ func (e *Engine) CreateTask(input CreateTaskInput) TaskRecord {
 	}
 
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": taskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 
 	e.tasks[taskID] = record
 	e.taskOrder = append([]string{taskID}, e.taskOrder...)
@@ -486,10 +498,7 @@ func (e *Engine) ConfirmTask(taskID, title string, intent map[string]any, bubble
 	record.Timeline = advanceTimeline(record.Timeline, "generate_output", "running", "生成输出开始")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -514,10 +523,7 @@ func (e *Engine) BeginExecution(taskID, stepName, outputSummary string) (TaskRec
 	record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "running", outputSummary)
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -538,10 +544,7 @@ func (e *Engine) UpdateIntent(taskID, title string, intent map[string]any) (Task
 	record.Intent = cloneMap(intent)
 	record.UpdatedAt = e.now()
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -585,10 +588,7 @@ func (e *Engine) ReopenIntentConfirmation(taskID, title string, intent map[strin
 	record.Timeline = advanceTimeline(record.Timeline, "confirming_intent", "pending", "等待人工复核后的新方案确认")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -616,10 +616,7 @@ func (e *Engine) SetPresentation(taskID string, bubbleMessage map[string]any, de
 		record.Artifacts = cloneMapSlice(artifacts)
 	}
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	if deliveryResult != nil {
 		record.queueNotification("delivery.ready", map[string]any{
 			"task_id":         record.TaskID,
@@ -679,10 +676,7 @@ func (e *Engine) RecordToolCallLifecycle(taskID, toolName, status string, input,
 		"tool_name":   toolName,
 		"tool_status": firstNonEmpty(status, "succeeded"),
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -708,11 +702,9 @@ func (e *Engine) RecordLoopLifecycle(taskID, eventType, stopReason string, paylo
 		"event":       cloneMap(record.LatestEvent),
 		"stop_reason": firstNonEmpty(stopReason, record.LoopStopReason),
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id":     record.TaskID,
-		"status":      record.Status,
-		"stop_reason": firstNonEmpty(stopReason, record.LoopStopReason),
-	})
+	params := taskUpdatedNotificationParams(record)
+	params["stop_reason"] = firstNonEmpty(stopReason, record.LoopStopReason)
+	record.queueNotification("task.updated", params)
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -767,10 +759,7 @@ func (e *Engine) AppendSteeringMessage(taskID, message string, bubbleMessage map
 		"task_id": record.TaskID,
 		"message": trimmed,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 	return record.clone(), true
 }
@@ -823,10 +812,7 @@ func (e *Engine) ContinueTask(taskID string, update ContinuationUpdate) (TaskRec
 		record.LatestEvent = e.buildEvent(record, "task.updated")
 	}
 
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 	return record.clone(), true
 }
@@ -884,10 +870,7 @@ func (e *Engine) FailTaskExecution(taskID, stepName, securityStatus, outputSumma
 	record.Timeline = advanceTimeline(record.Timeline, record.CurrentStep, "failed", firstNonEmpty(outputSummary, "执行失败"))
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -927,10 +910,7 @@ func (e *Engine) BlockTaskByPolicy(taskID, riskLevel, outputSummary string, impa
 	record.Timeline = advanceTimeline(record.Timeline, "risk_blocked", "cancelled", firstNonEmpty(outputSummary, "高风险操作已被策略拦截"))
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -971,10 +951,7 @@ func (e *Engine) CompleteTask(taskID string, deliveryResult map[string]any, bubb
 		record.SecuritySummary,
 	)
 	record.LatestEvent = e.buildEvent(record, "delivery.ready")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("delivery.ready", map[string]any{
 		"task_id":         record.TaskID,
 		"delivery_result": cloneMap(record.DeliveryResult),
@@ -1026,10 +1003,7 @@ func (e *Engine) ApplyRecoveryOutcome(taskID, taskStatus, securityStatus string,
 		"security_status":   firstNonEmpty(securityStatus, "recovered"),
 		"recovery_point_id": stringValue(cloneMap(recoveryPoint), "recovery_point_id", ""),
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1127,10 +1101,7 @@ func (e *Engine) ControlTask(taskID, action string, bubbleMessage map[string]any
 	}
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), nil
@@ -1176,10 +1147,7 @@ func (e *Engine) MarkWaitingApprovalWithPlan(taskID string, approvalRequest map[
 	record.Timeline = advanceTimeline(record.Timeline, "waiting_authorization", "running", "等待用户授权")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "approval.pending")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("approval.pending", map[string]any{
 		"task_id":          record.TaskID,
 		"approval_request": cloneMap(record.ApprovalRequest),
@@ -1249,10 +1217,7 @@ func (e *Engine) ResumeAfterApproval(taskID string, authorization map[string]any
 	record.Timeline = advanceTimeline(record.Timeline, "authorized_execution", "running", "授权通过，继续执行")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1291,10 +1256,7 @@ func (e *Engine) DenyAfterApproval(taskID string, authorization map[string]any, 
 	record.Timeline = advanceTimeline(record.Timeline, "authorization_denied", "cancelled", "用户拒绝授权，任务已结束")
 	record.CurrentStepStatus = currentTimelineStatus(record.Timeline)
 	record.LatestEvent = e.buildEvent(record, "task.updated")
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1338,10 +1300,7 @@ func (e *Engine) QueueTaskForSession(taskID, blockingTaskID string, bubbleMessag
 		"status":           record.Status,
 		"blocking_task_id": blockingTaskID,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("task.session_queued", map[string]any{
 		"task_id":          record.TaskID,
 		"blocking_task_id": blockingTaskID,
@@ -1378,10 +1337,7 @@ func (e *Engine) EscalateHumanLoop(taskID string, escalation map[string]any, bub
 		"status":       record.Status,
 		"current_step": record.CurrentStep,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	e.persistTaskLocked(record)
 
 	return record.clone(), true
@@ -1454,10 +1410,7 @@ func (e *Engine) ResumeQueuedTask(taskID, stepName string, bubbleMessage map[str
 	record.LatestEvent = e.buildEventWithPayload(record, "task.session_resumed", map[string]any{
 		"status": record.Status,
 	})
-	record.queueNotification("task.updated", map[string]any{
-		"task_id": record.TaskID,
-		"status":  record.Status,
-	})
+	record.queueNotification("task.updated", taskUpdatedNotificationParams(record))
 	record.queueNotification("task.session_resumed", map[string]any{
 		"task_id": record.TaskID,
 	})

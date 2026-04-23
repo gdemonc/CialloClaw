@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "task_id",
+    "session_id",
     "title",
     "source_type",
     "status",
@@ -19,7 +20,7 @@
     "session_id": { "type": ["string", "null"] },
     "title": { "type": "string" },
     "source_type": {
-      "enum": ["voice", "hover_input", "selected_text", "dragged_file", "todo", "error_signal"]
+      "enum": ["voice", "hover_input", "selected_text", "dragged_file", "todo", "error_signal", "screen_capture"]
     },
     "status": {
       "enum": [

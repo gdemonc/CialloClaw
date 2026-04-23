@@ -524,7 +524,7 @@ func newTestServiceWithModelClient(t *testing.T, client model.Client) (*Service,
 	if err := sidecarclient.RegisterMediaTools(toolRegistry); err != nil {
 		t.Fatalf("register media tools: %v", err)
 	}
-	toolExecutor := tools.NewToolExecutor(toolRegistry)
+	toolExecutor := tools.NewToolExecutor(toolRegistry, tools.WithToolCallRecorder(tools.NewToolCallRecorder(storageService.ToolCallSink())))
 	pluginService := plugin.NewService()
 	seedTestExtensionAssets(t, storageService, pluginService)
 	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
@@ -6211,6 +6211,91 @@ func TestServiceStartTaskInfersScreenAnalyzeFromVisualErrorRequest(t *testing.T)
 	}
 	if stringValue(record.PendingExecution, "target_object", "") != "Build Dashboard" {
 		t.Fatalf("expected inferred screen target to use page context, got %+v", record.PendingExecution)
+	}
+}
+
+func TestServiceStartTaskExplicitScreenAnalyzeKeepsFreshAuthorizationBoundary(t *testing.T) {
+	ocrStub := stubOCRWorkerClient{result: tools.OCRTextResult{Path: "temp/screen_local_0001/frame_0001.png", Text: "fatal build error", Language: "eng", Source: "ocr_worker_text"}}
+	service, workspaceRoot := newTestServiceWithExecutionWorkers(t, "unused", platform.LocalExecutionBackend{}, nil, sidecarclient.NewNoopPlaywrightSidecarClient(), ocrStub, sidecarclient.NewNoopMediaWorkerClient())
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "inputs"), 0o755); err != nil {
+		t.Fatalf("mkdir inputs failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "inputs", "screen.png"), []byte("fake screen capture"), 0o644); err != nil {
+		t.Fatalf("write screen input failed: %v", err)
+	}
+
+	activeTask := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_screen_follow_up",
+		Title:       "Analyze the current failure",
+		SourceType:  "hover_input",
+		Status:      "waiting_input",
+		CurrentStep: "collect_input",
+		RiskLevel:   "green",
+		Snapshot: contextsvc.TaskContextSnapshot{
+			PageURL:     "https://example.com/build/1",
+			AppName:     "Chrome",
+			WindowTitle: "Build 1",
+		},
+	})
+
+	modelCalled := false
+	service.model = model.NewService(modelConfig(), stubModelClient{
+		generateText: func(request model.GenerateTextRequest) (model.GenerateTextResponse, error) {
+			modelCalled = true
+			return model.GenerateTextResponse{
+				TaskID:     request.TaskID,
+				RunID:      request.RunID,
+				RequestID:  "req_continue_screen",
+				Provider:   "openai_responses",
+				ModelID:    "gpt-5.4",
+				OutputText: fmt.Sprintf(`{"decision":"continue","task_id":"%s","reason":"same session and anchors"}`, activeTask.TaskID),
+			}, nil
+		},
+	})
+
+	result, err := service.StartTask(map[string]any{
+		"session_id": activeTask.SessionID,
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "请分析当前屏幕里的错误",
+		},
+		"context": map[string]any{
+			"page": map[string]any{
+				"url":          "https://example.com/build/1",
+				"app_name":     "Chrome",
+				"window_title": "Build 1",
+			},
+		},
+		"intent": map[string]any{
+			"name": "screen_analyze",
+			"arguments": map[string]any{
+				"path": "inputs/screen.png",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start explicit screen analyze task failed: %v", err)
+	}
+	if modelCalled {
+		t.Fatal("expected explicit screen_analyze to bypass continuation classification")
+	}
+
+	task := result["task"].(map[string]any)
+	if task["task_id"] == activeTask.TaskID {
+		t.Fatalf("expected explicit screen_analyze to open a fresh task, got %+v", task)
+	}
+	if task["status"] != "waiting_auth" {
+		t.Fatalf("expected explicit screen_analyze to establish waiting_auth, got %+v", task)
+	}
+
+	approvalRequests, total := service.runEngine.PendingApprovalRequests(20, 0)
+	if total != 1 || len(approvalRequests) != 1 {
+		t.Fatalf("expected one pending approval request, got total=%d items=%+v", total, approvalRequests)
+	}
+	if approvalRequests[0]["task_id"] != task["task_id"] {
+		t.Fatalf("expected approval to target new screen task, got %+v", approvalRequests[0])
 	}
 }
 
@@ -11986,6 +12071,38 @@ func TestServiceSubmitInputRoutesFollowUpIntoExistingTask(t *testing.T) {
 	}
 }
 
+func TestServiceStartTaskNotificationIncludesSessionID(t *testing.T) {
+	service := newTestService()
+
+	startResult, err := service.StartTask(map[string]any{
+		"session_id": "sess_notification_contract",
+		"source":     "floating_ball",
+		"trigger":    "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "Summarize this update",
+		},
+	})
+	if err != nil {
+		t.Fatalf("start task failed: %v", err)
+	}
+
+	taskID := startResult["task"].(map[string]any)["task_id"].(string)
+	notifications, ok := service.runEngine.PendingNotifications(taskID)
+	if !ok {
+		t.Fatal("expected notifications to be available for task")
+	}
+	if len(notifications) == 0 {
+		t.Fatal("expected at least one task.updated notification")
+	}
+	if notifications[0].Method != "task.updated" {
+		t.Fatalf("expected first notification to be task.updated, got %+v", notifications[0])
+	}
+	if notifications[0].Params["session_id"] != "sess_notification_contract" {
+		t.Fatalf("expected task.updated notification to carry session_id, got %+v", notifications[0].Params)
+	}
+}
+
 func TestServiceStartTaskRoutesFileAttachmentIntoExistingTask(t *testing.T) {
 	var activeTaskID string
 	service, _ := newTestServiceWithModelClient(t, stubModelClient{
@@ -12112,6 +12229,45 @@ func TestServiceSubmitInputDoesNotContinuePausedTask(t *testing.T) {
 	secondTask := followUpResult["task"].(map[string]any)
 	if secondTask["task_id"] == activeTask.TaskID {
 		t.Fatalf("expected paused task to reject implicit continuation, got %+v", secondTask)
+	}
+}
+
+func TestServiceStartTaskWithExplicitIntentDoesNotReuseWaitingTaskWithoutAnchors(t *testing.T) {
+	service := newTestService()
+
+	waitingTask := service.runEngine.CreateTask(runengine.CreateTaskInput{
+		SessionID:   "sess_waiting_explicit_intent",
+		Title:       "确认处理方式：当前内容",
+		SourceType:  "hover_input",
+		Status:      "waiting_input",
+		CurrentStep: "collect_input",
+		RiskLevel:   "green",
+	})
+
+	result, err := service.StartTask(map[string]any{
+		"source":  "floating_ball",
+		"trigger": "hover_text_input",
+		"input": map[string]any{
+			"type": "text",
+			"text": "顺便帮我写一份周报",
+		},
+		"intent": map[string]any{
+			"name": "write_file",
+			"arguments": map[string]any{
+				"target_path": "workspace/reports/weekly.md",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start explicit new task failed: %v", err)
+	}
+
+	task := result["task"].(map[string]any)
+	if task["task_id"] == waitingTask.TaskID {
+		t.Fatalf("expected explicit start intent without anchors to open a new task, got %+v", task)
+	}
+	if task["session_id"] == waitingTask.SessionID {
+		t.Fatalf("expected explicit start intent without anchors to use a fresh hidden session, got waiting=%+v new=%+v", waitingTask, task)
 	}
 }
 
