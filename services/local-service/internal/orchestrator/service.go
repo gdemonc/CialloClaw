@@ -1351,6 +1351,10 @@ func normalizeTaskToolCallMap(value map[string]any) map[string]any {
 	if candidate := stringValue(value, "step_id", ""); strings.TrimSpace(candidate) != "" {
 		stepID = candidate
 	}
+	createdAt := any(nil)
+	if candidate := stringValue(value, "created_at", ""); strings.TrimSpace(candidate) != "" {
+		createdAt = candidate
+	}
 	errorCode := value["error_code"]
 	if errorCode == nil {
 		errorCode = nil
@@ -1360,6 +1364,7 @@ func normalizeTaskToolCallMap(value map[string]any) map[string]any {
 		"run_id":       stringValue(value, "run_id", ""),
 		"task_id":      stringValue(value, "task_id", ""),
 		"step_id":      stepID,
+		"created_at":   createdAt,
 		"tool_name":    stringValue(value, "tool_name", ""),
 		"status":       outwardToolCallStatus(stringValue(value, "status", "pending")),
 		"input":        cloneMap(mapValue(value, "input")),
@@ -1374,6 +1379,10 @@ func taskToolCallMap(record tools.ToolCallRecord) map[string]any {
 	if strings.TrimSpace(record.StepID) != "" {
 		stepID = record.StepID
 	}
+	createdAt := any(nil)
+	if strings.TrimSpace(record.CreatedAt) != "" {
+		createdAt = record.CreatedAt
+	}
 	errorCode := any(nil)
 	if record.ErrorCode != nil {
 		errorCode = *record.ErrorCode
@@ -1383,6 +1392,7 @@ func taskToolCallMap(record tools.ToolCallRecord) map[string]any {
 		"run_id":       record.RunID,
 		"task_id":      record.TaskID,
 		"step_id":      stepID,
+		"created_at":   createdAt,
 		"tool_name":    record.ToolName,
 		"status":       outwardToolCallStatus(string(record.Status)),
 		"input":        cloneMap(record.Input),

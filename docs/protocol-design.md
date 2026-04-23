@@ -1925,6 +1925,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 | `data.items[].run_id`        | 关联 run |
 | `data.items[].task_id`       | 关联 task |
 | `data.items[].step_id`       | 关联 step |
+| `data.items[].created_at`    | 创建时间 |
 | `data.items[].tool_name`     | 工具名 |
 | `data.items[].status`        | 调用状态 |
 | `data.items[].input`         | 输入摘要 |
@@ -1947,6 +1948,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
           "run_id": "run_201",
           "task_id": "task_201",
           "step_id": null,
+          "created_at": "2026-04-18T10:45:00+08:00",
           "tool_name": "read_file",
           "status": "succeeded",
           "input": {

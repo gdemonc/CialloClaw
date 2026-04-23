@@ -3000,6 +3000,9 @@ func TestServiceStartTaskPersistsFormalReadFileSampleChain(t *testing.T) {
 	if len(toolCalls) != 1 || toolCalls[0]["tool_name"] != "read_file" {
 		t.Fatalf("expected one persisted read_file tool call, got %+v", toolCalls)
 	}
+	if _, ok := toolCalls[0]["created_at"].(string); !ok {
+		t.Fatalf("expected persisted read_file tool call to expose created_at, got %+v", toolCalls[0])
+	}
 	if mapValue(toolCalls[0], "input")["path"] != "notes/source.txt" {
 		t.Fatalf("expected persisted read_file path, got %+v", toolCalls[0])
 	}

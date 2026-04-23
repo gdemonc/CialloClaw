@@ -17,6 +17,7 @@ func TestToolCallStoresListAndDecodeRecords(t *testing.T) {
 		RunID:      "run_001",
 		TaskID:     "task_001",
 		StepID:     "step_001",
+		CreatedAt:  "2026-04-18T10:45:00Z",
 		ToolName:   "read_file",
 		Status:     tools.ToolCallStatusSucceeded,
 		Input:      map[string]any{"path": "README.md"},
@@ -39,6 +40,9 @@ func TestToolCallStoresListAndDecodeRecords(t *testing.T) {
 	if err != nil || total != 1 || len(items) != 1 || items[0].ToolName != "read_file" {
 		t.Fatalf("in-memory ListToolCalls returned total=%d items=%+v err=%v", total, items, err)
 	}
+	if items[0].CreatedAt == "" {
+		t.Fatalf("expected in-memory tool call to retain created_at, got %+v", items[0])
+	}
 	summaryOutput, ok := items[0].Output["summary_output"].(map[string]any)
 	if items[0].DurationMS != 84 || items[0].Status != tools.ToolCallStatusFailed || !ok || summaryOutput["path"] != "README.md" {
 		t.Fatalf("expected in-memory tool call store to upsert latest record, got %+v", items[0])
@@ -58,6 +62,9 @@ func TestToolCallStoresListAndDecodeRecords(t *testing.T) {
 	}
 	if items[0].Status != tools.ToolCallStatusSucceeded || items[0].Input["path"] != "README.md" {
 		t.Fatalf("expected decoded tool call record, got %+v", items[0])
+	}
+	if items[0].CreatedAt == "" {
+		t.Fatalf("expected sqlite tool call to retain created_at, got %+v", items[0])
 	}
 	if normalizeToolCallStatus(tools.ToolCallStatusTimeout) != "failed" {
 		t.Fatalf("expected timeout status to normalize as failed")
@@ -115,7 +122,7 @@ func TestSQLiteToolCallStoreConstructorAndDecodeFailurePaths(t *testing.T) {
 		t.Fatalf("NewSQLiteToolCallStore returned error: %v", err)
 	}
 	defer func() { _ = store.Close() }()
-	if _, err := store.db.Exec(`INSERT INTO tool_calls (tool_call_id, run_id, task_id, step_id, tool_name, status, input_json, output_json, error_code, duration_ms) VALUES ('tool_bad_input', 'run_decode', 'task_bad_input', 'step_001', 'read_file', 'running', '{bad-json', '{}', NULL, 1)`); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO tool_calls (tool_call_id, run_id, task_id, step_id, tool_name, status, input_json, output_json, error_code, duration_ms, created_at) VALUES ('tool_bad_input', 'run_decode', 'task_bad_input', 'step_001', 'read_file', 'running', '{bad-json', '{}', NULL, 1, '2026-04-18T10:45:00Z')`); err != nil {
 		t.Fatalf("insert invalid input row failed: %v", err)
 	}
 	if _, _, err := store.ListToolCalls(context.Background(), "task_bad_input", "", 10, 0); err == nil || !strings.Contains(err.Error(), "decode tool call input") {
@@ -124,7 +131,7 @@ func TestSQLiteToolCallStoreConstructorAndDecodeFailurePaths(t *testing.T) {
 	if _, err := store.db.Exec(`DELETE FROM tool_calls WHERE task_id = 'task_bad_input'`); err != nil {
 		t.Fatalf("delete invalid input row failed: %v", err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO tool_calls (tool_call_id, run_id, task_id, step_id, tool_name, status, input_json, output_json, error_code, duration_ms) VALUES ('tool_bad_output', 'run_decode', 'task_bad_output', 'step_001', 'read_file', 'failed', '{}', '{bad-json', 17, 1)`); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO tool_calls (tool_call_id, run_id, task_id, step_id, tool_name, status, input_json, output_json, error_code, duration_ms, created_at) VALUES ('tool_bad_output', 'run_decode', 'task_bad_output', 'step_001', 'read_file', 'failed', '{}', '{bad-json', 17, 1, '2026-04-18T10:45:01Z')`); err != nil {
 		t.Fatalf("insert invalid output row failed: %v", err)
 	}
 	if _, _, err := store.ListToolCalls(context.Background(), "task_bad_output", "", 10, 0); err == nil || !strings.Contains(err.Error(), "decode tool call output") {

@@ -436,6 +436,7 @@ export async function listTaskToolCalls(_params?: unknown): Promise<AgentTaskToo
         run_id: "run_stub",
         task_id: "task_stub",
         step_id: null,
+        created_at: new Date().toISOString(),
         tool_name: "read_file",
         status: "succeeded",
         input: {
