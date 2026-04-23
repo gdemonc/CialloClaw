@@ -2,6 +2,7 @@ package sidecarclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -135,6 +136,10 @@ func (c *localScreenCaptureClient) CleanupSessionArtifacts(_ context.Context, in
 		removedPaths, err := removeLocalScreenCleanupPath(c.fileSystem, tempPath)
 		if err == nil {
 			deleted = append(deleted, removedPaths...)
+			continue
+		}
+		if len(input.Paths) > 0 && errors.Is(err, fs.ErrNotExist) {
+			deleted = append(deleted, tempPath)
 		} else {
 			skipped = append(skipped, tempPath)
 		}

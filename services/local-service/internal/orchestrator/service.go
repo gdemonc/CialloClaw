@@ -2918,6 +2918,7 @@ func (s *Service) executeScreenAnalysisAfterApproval(task runengine.TaskRecord, 
 	// no durable artifact handoff completed for that branch.
 	if updatedTask.Status == "completed" {
 		stopScreenSession(screenClient, screenSession.ScreenSessionID, "analysis_completed")
+		cleanupSuccessfulScreenSession(screenClient, screenSession.ScreenSessionID, candidate.Path)
 	} else if taskIsTerminal(updatedTask.Status) {
 		expireAndCleanupScreenSession(screenClient, screenSession.ScreenSessionID, "analysis_failed")
 	}
@@ -2953,6 +2954,21 @@ func stopScreenSession(screenClient tools.ScreenCaptureClient, screenSessionID, 
 		return
 	}
 	_, _ = screenClient.StopSession(context.Background(), screenSessionID, reason)
+}
+
+// cleanupSuccessfulScreenSession only clears the tracked capture file that the
+// screen client still owns after execution has already promoted durable
+// artifacts. Deferred execution cleanup plans keep managing any extra temp clip
+// derivatives, so this path must not recursively wipe the whole session dir.
+func cleanupSuccessfulScreenSession(screenClient tools.ScreenCaptureClient, screenSessionID, capturePath string) {
+	if screenClient == nil || strings.TrimSpace(screenSessionID) == "" || strings.TrimSpace(capturePath) == "" {
+		return
+	}
+	_, _ = screenClient.CleanupSessionArtifacts(context.Background(), tools.ScreenCleanupInput{
+		ScreenSessionID: screenSessionID,
+		Reason:          "analysis_completed",
+		Paths:           []string{capturePath},
+	})
 }
 
 // expireAndCleanupScreenSession keeps failed screen-analysis attempts from
@@ -3427,17 +3443,14 @@ func (s *Service) taskDetailFromTaskRunStorage(taskID string) (runengine.TaskRec
 	return taskRecordFromStorage(record), true
 }
 
-// structuredTaskNeedsTaskRunFallback keeps task-run reads as a narrow recovery
-// path for malformed or missing snapshot_json rows while first-class stores are
-// still being phased in for legacy detail-only fields.
-func structuredTaskNeedsTaskRunFallback(record storage.TaskRecord, task runengine.TaskRecord) bool {
+// structuredTaskNeedsTaskRunFallback keeps task-run reads as a recovery path
+// whenever snapshot_json is missing or malformed because several legacy detail
+// fields still only exist in compatibility snapshots today.
+func structuredTaskNeedsTaskRunFallback(record storage.TaskRecord, _ runengine.TaskRecord) bool {
 	if strings.TrimSpace(record.SnapshotJSON) != "" {
 		if _, err := storageTaskRunRecordFromSnapshotJSON(record.SnapshotJSON); err == nil {
 			return false
 		}
-	}
-	if len(task.BubbleMessage) > 0 || len(task.DeliveryResult) > 0 || len(task.Artifacts) > 0 || len(task.Citations) > 0 || len(task.AuditRecords) > 0 || len(task.MirrorReferences) > 0 || len(task.PendingExecution) > 0 || len(task.Authorization) > 0 || len(task.ImpactScope) > 0 || len(task.MemoryReadPlans) > 0 || len(task.MemoryWritePlans) > 0 || len(task.StorageWritePlan) > 0 || len(task.ArtifactPlans) > 0 || len(task.LatestEvent) > 0 || len(task.LatestToolCall) > 0 || len(task.SteeringMessages) > 0 || !isEmptySnapshot(task.Snapshot) {
-		return false
 	}
 	return true
 }
@@ -4025,7 +4038,7 @@ func (s *Service) structuredTaskRecordToRuntime(record storage.TaskRecord, inclu
 	runtime := runengine.TaskRecord{
 		TaskID:            record.TaskID,
 		SessionID:         record.SessionID,
-		RunID:             firstNonEmptyString(strings.TrimSpace(record.PrimaryRunID), strings.TrimSpace(record.RunID)),
+		RunID:             strings.TrimSpace(record.RunID),
 		RequestSource:     record.RequestSource,
 		RequestTrigger:    record.RequestTrigger,
 		Title:             record.Title,
