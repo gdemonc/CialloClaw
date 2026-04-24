@@ -4,6 +4,7 @@ package intent
 import (
 	"path/filepath"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	contextsvc "github.com/cialloclaw/cialloclaw/services/local-service/internal/context"
@@ -235,6 +236,9 @@ func shouldConfirmTextGoal(snapshot contextsvc.TaskContextSnapshot) bool {
 	if trimmed == "" {
 		return false
 	}
+	if hasIntentContextAnchor(snapshot) {
+		return false
+	}
 	if isLongContent(trimmed) || isQuestionText(trimmed) {
 		return false
 	}
@@ -242,26 +246,63 @@ func shouldConfirmTextGoal(snapshot contextsvc.TaskContextSnapshot) bool {
 		return false
 	}
 
-	// Short text should only pause for intent confirmation when it does not
-	// contain any execution signal. This avoids hard-gating concise requests such
-	// as "解释下" while still keeping greeting-like inputs in the confirm flow.
-	return !hasShortTextExecutionSignal(trimmed)
+	// Short text should default to agent_loop. Only clearly non-goal inputs stay
+	// in confirmation so the gateway does not turn into a growing action lexicon.
+	return isClearlyAmbiguousShortText(trimmed)
 }
 
-func hasShortTextExecutionSignal(text string) bool {
-	normalized := strings.TrimSpace(strings.ToLower(text))
+func hasIntentContextAnchor(snapshot contextsvc.TaskContextSnapshot) bool {
+	return strings.TrimSpace(snapshot.SelectionText) != "" ||
+		strings.TrimSpace(snapshot.ErrorText) != "" ||
+		len(snapshot.Files) > 0 ||
+		strings.TrimSpace(snapshot.PageTitle) != "" ||
+		strings.TrimSpace(snapshot.WindowTitle) != "" ||
+		strings.TrimSpace(snapshot.VisibleText) != "" ||
+		strings.TrimSpace(snapshot.ScreenSummary) != ""
+}
+
+func isClearlyAmbiguousShortText(text string) bool {
+	if isPunctuationOrEmojiOnly(text) {
+		return true
+	}
+
+	normalized := normalizeAmbiguousShortText(text)
 	if normalized == "" {
 		return false
 	}
 
-	if containsAny(normalized,
-		"翻译", "解释", "总结", "概括", "改写", "润色", "分析", "检查", "查看", "看看",
-		"读取", "搜索", "整理", "提取", "定位", "修复", "查", "看", "写", "做",
-		"fix", "read", "scan", "grep") {
+	switch normalized {
+	case "hi", "hello", "hey", "ok", "okay",
+		"你好", "您好", "在吗", "在么",
+		"嗯", "嗯嗯", "哦", "哦哦", "啊", "啊啊",
+		"好的", "好", "行", "收到",
+		"这个", "那个", "这", "那":
 		return true
+	default:
+		return false
 	}
+}
 
-	return strings.ContainsAny(normalized, "/\\.:#@")
+func normalizeAmbiguousShortText(text string) string {
+	normalized := strings.TrimSpace(strings.ToLower(text))
+	return strings.Trim(normalized, " \t\r\n.,!?;:~，。！？；：、…'\"`“”‘’()[]{}<>《》【】")
+}
+
+func isPunctuationOrEmojiOnly(text string) bool {
+	hasSymbol := false
+	for _, value := range strings.TrimSpace(text) {
+		switch {
+		case unicode.IsSpace(value):
+			continue
+		case unicode.IsLetter(value), unicode.IsNumber(value):
+			return false
+		case unicode.IsPunct(value), unicode.IsSymbol(value):
+			hasSymbol = true
+		default:
+			return false
+		}
+	}
+	return hasSymbol
 }
 
 func directDeliveryTypeForSnapshot(snapshot contextsvc.TaskContextSnapshot, intentName string) string {

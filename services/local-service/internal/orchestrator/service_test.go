@@ -950,36 +950,41 @@ func TestServiceSubmitInputKeepsAmbiguousShortTextInIntentConfirmation(t *testin
 	}
 }
 
-func TestServiceSubmitInputRoutesShortActionTextToAgentLoopWithoutForcedConfirmation(t *testing.T) {
-	service, _ := newTestServiceWithExecution(t, "Short action request completed.")
+func TestServiceSubmitInputRoutesNonAmbiguousShortTextToAgentLoopWithoutForcedConfirmation(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "Short text request completed.")
 
-	result, err := service.SubmitInput(map[string]any{
-		"session_id": "sess_short_action",
-		"source":     "floating_ball",
-		"trigger":    "hover_text_input",
-		"input": map[string]any{
-			"type": "text",
-			"text": "解释下",
-		},
-	})
-	if err != nil {
-		t.Fatalf("submit input failed: %v", err)
-	}
+	testCases := []string{"解释下", "a.go", "v1.2", `C:\`, `@me`}
+	for index, testCase := range testCases {
+		t.Run(testCase, func(t *testing.T) {
+			result, err := service.SubmitInput(map[string]any{
+				"session_id": fmt.Sprintf("sess_short_text_%02d", index),
+				"source":     "floating_ball",
+				"trigger":    "hover_text_input",
+				"input": map[string]any{
+					"type": "text",
+					"text": testCase,
+				},
+			})
+			if err != nil {
+				t.Fatalf("submit input failed: %v", err)
+			}
 
-	task := result["task"].(map[string]any)
-	if task["status"] != "completed" {
-		t.Fatalf("expected short action text to execute directly, got %v", task["status"])
-	}
-	intentValue, ok := task["intent"].(map[string]any)
-	if !ok || intentValue["name"] != "agent_loop" {
-		t.Fatalf("expected short action text to route through agent_loop, got %+v", task["intent"])
-	}
-	deliveryResult, ok := result["delivery_result"].(map[string]any)
-	if !ok {
-		t.Fatal("expected short action text to return delivery_result")
-	}
-	if deliveryResult["type"] != "bubble" {
-		t.Fatalf("expected short action text to prefer bubble delivery, got %v", deliveryResult["type"])
+			task := result["task"].(map[string]any)
+			if task["status"] != "completed" {
+				t.Fatalf("expected non-ambiguous short text to execute directly, got %v", task["status"])
+			}
+			intentValue, ok := task["intent"].(map[string]any)
+			if !ok || intentValue["name"] != "agent_loop" {
+				t.Fatalf("expected non-ambiguous short text to route through agent_loop, got %+v", task["intent"])
+			}
+			deliveryResult, ok := result["delivery_result"].(map[string]any)
+			if !ok {
+				t.Fatal("expected non-ambiguous short text to return delivery_result")
+			}
+			if deliveryResult["type"] != "bubble" {
+				t.Fatalf("expected non-ambiguous short text to prefer bubble delivery, got %v", deliveryResult["type"])
+			}
+		})
 	}
 }
 
