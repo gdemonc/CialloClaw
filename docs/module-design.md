@@ -788,7 +788,62 @@ flowchart TB
 - `4.3` 负责“模型、工具、worker、检索”等**能力接入与检索子层**；
 - `4.5` 负责“平台抽象、执行后端、对象仓储、路径与机密存储”等**平台、执行与持久化适配子层**。
 
-阅读建议：
+#### 4.0.1 后端分层与反馈总览图
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '16px'}}}%%
+flowchart LR
+    subgraph L1[4.1 本地接入层]
+        direction TB
+        RPC[JSON-RPC Server]
+        ROUTE[Task / Session 路由]
+        QUERY[查询装配与通知回流]
+    end
+
+    subgraph L2[4.2 任务编排与运行层]
+        direction TB
+        ORCH[任务编排器]
+        CTX[上下文归一与准备器]
+        PLAN[入口判断与规划器]
+        RUN[运行控制器 / TaskRecord]
+        LANE[会话续接与串行器]
+    end
+
+    subgraph L3[4.4 治理与交付层]
+        direction TB
+        RISK[风险与授权]
+        REVIEW[审查 / Trace / Eval]
+        DELIVERY[正式交付 / 记忆沉淀]
+        RECOVER[审计 / 恢复]
+    end
+
+    subgraph L4[4.3 + 4.5 能力与存储层]
+        direction TB
+        CAP[模型 / 工具 / 插件 / Worker]
+        STORE[对象仓储 / 索引 / Artifact]
+        PLATFORM[路径策略 / 宿主能力 / 执行后端]
+    end
+
+    RPC --> ROUTE --> ORCH
+    QUERY --> ROUTE
+    ORCH --> CTX --> PLAN --> RUN
+    ORCH --> LANE --> RUN
+    RUN --> CAP --> PLATFORM
+    RUN --> RISK
+    RUN --> DELIVERY
+    CAP --> STORE
+    DELIVERY --> STORE
+    REVIEW --> STORE
+    RECOVER --> STORE
+
+    RISK -.->|approval.pending / authorization_record| QUERY
+    DELIVERY -.->|delivery.ready / artifact / citation| QUERY
+    REVIEW -.->|loop.* / trace / eval summary| QUERY
+    RECOVER -.->|recovery_point / recovery result| QUERY
+    QUERY -.->|task.updated / security summary / refreshed projection| RPC
+```
+
+#### 4.0.2 阅读说明
 
 - 想先看“任务如何从接入层进入内核”，从 `4.1` 开始。
 - 想看“能力怎样被内核调度”，看 `4.3`。
@@ -801,67 +856,75 @@ flowchart TB
 ### 模块定位
 本地接入层负责承接 JSON-RPC 请求、输出正式对象和标准错误，是前端与后端之间唯一稳定边界的实现层。
 
-### 接入到内核主编排关系图
+### 层内子模块图
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '16px'}}}%%
 flowchart LR
-    subgraph B1[接口接入层]
+    subgraph A1[本地接入层]
         direction TB
         JRPCS[JSON-RPC Server]
-        SESSION[Session / Task 接口]
-        STREAM[订阅 / 通知]
+        TASKAPI[Task / Session 路由器]
+        QUERY[查询装配器]
+        STREAM[通知回流器]
     end
 
-    subgraph B2[Harness 内核层]
+    subgraph A2[任务编排与运行层]
         direction TB
         ORCH[任务编排器]
-        CTXM[上下文管理]
-        INTENT[意图建议]
-        TASK[任务状态机]
-        DELIVERY[结果交付]
-        PLUGIN[插件系统]
+        RUN[运行控制器]
     end
 
-    JRPCS --> SESSION --> ORCH
-    JRPCS --> STREAM --> ORCH
-    ORCH --> CTXM
-    ORCH --> INTENT
-    ORCH --> TASK
-    ORCH --> DELIVERY
-    ORCH --> PLUGIN
+    subgraph A3[治理与交付层]
+        direction TB
+        GOV[授权 / 交付 / 恢复结果]
+    end
+
+    JRPCS --> TASKAPI --> ORCH
+    TASKAPI --> QUERY
+    ORCH --> RUN
+    RUN -.->|task.updated / loop.* / task.steered| STREAM
+    GOV -.->|approval.pending / delivery.ready / recovery| STREAM
+    QUERY --> JRPCS
+    STREAM --> JRPCS
 ```
 
 ### 组成
 - JSON-RPC 2.0 Server
-- Session / Task 接口
-- 订阅 / 通知 / 事件流
+- Task / Session 路由器
+- 查询装配器
+- 通知回流器
 
-### 子模块说明
-- **JSON-RPC 2.0 Server**：负责解析请求、返回标准响应与错误结构，是前后端唯一稳定协议入口。
-- **Session / Task 接口**：负责把前端输入、确认、查询、控制统一收口到 `task` 主对象体系，而不是让前端直接面向 `run / step / event`。
-- **订阅 / 通知 / 事件流**：负责把 `task.updated / delivery.ready / approval.pending / loop.*` 等正式通知统一回流给前端。
+### 层内处理细节
+
+| 子模块 | 处理入口 | 关键中间产物 | 对外输出与反馈 |
+| --- | --- | --- | --- |
+| JSON-RPC 2.0 Server | 前端方法调用、订阅建立、健康检查请求 | 规范化请求体、错误包装、`trace_id` | 标准成功响应、标准错误响应 |
+| Task / Session 路由器 | `agent.input.submit`、`agent.task.start`、`agent.task.confirm`、`agent.task.control` 等稳定方法 | `task_id / session_id / trace_id` 锚点、标准参数对象 | 下发到编排层的标准请求 |
+| 查询装配器 | 任务列表、详情、控制面板、安全摘要等查询请求 | 任务快照、治理摘要、存储查询结果的装配视图 | 统一的查询响应，不透传运行缓存 |
+| 通知回流器 | `TaskRecord` 通知队列、治理层回流对象 | 有序通知批次、订阅投影、重放顺序 | `task.updated / delivery.ready / approval.pending / loop.*` 等正式通知 |
 
 ### 职责
-- 解析请求；
-- 校验结构；
-- 分发到内核或治理模块；
-- 向前端返回正式对象和标准错误结构；
-- 管理 Notification / Subscription 的注册与推送。
+- 解析请求并校验 schema；
+- 把请求绑定到稳定的 `task / session / trace` 锚点；
+- 把查询请求装配成前端可消费的正式对象；
+- 回放运行期通知和治理回流；
+- 向前端返回正式对象和标准错误结构。
 
 ### 上下游关系
 - 上游是桌面入口层发起的 JSON-RPC 请求，以及前端对正式对象的查询和控制动作。
-- 下游一方面是 Harness 内核层，另一方面是治理与交付层回流的正式对象与事件。
-- 该层向上游返回的是标准响应、聚合查询和稳定通知，而不是底层运行缓存或 worker 原始输出。
+- 下游一方面是任务编排与运行层，另一方面是治理与交付层回流的审批、交付和恢复对象。
+- 该层向上游返回的是标准响应、聚合查询和稳定通知，而不是底层运行缓存、worker 原始输出或 provider 响应。
 
 ### 输入
 - 前端 JSON-RPC 请求；
-- 后端事件流；
-- 治理层和交付层输出的正式对象。
+- `runengine.TaskRecord` 通知队列；
+- 治理与交付层输出的正式对象与回流事件。
 
 ### 输出
 - 标准 JSON-RPC 成功响应和错误响应；
-- 通知事件和订阅流。
+- 订阅流与运行通知；
+- 任务列表、任务详情、仪表盘、安全摘要等查询视图。
 
 ### 关键接口
 - `handleRequest(jsonrpcRequest)`
@@ -871,10 +934,10 @@ flowchart LR
 - `marshalError(code, message, traceId)`
 
 ### 边界
-- 不负责业务规划；
-- 不负责模型调用；
-- 不负责数据库写入；
-- 只做协议收口、参数校验、错误包装和事件推送。
+- 不负责任务规划；
+- 不负责状态机推进；
+- 不负责模型、工具或数据库直连执行；
+- 只做协议收口、对象装配、错误包装和通知回流。
 
 ### 异常处理
 - 非法方法：返回统一协议错误码；
@@ -883,9 +946,9 @@ flowchart LR
 - 订阅方断开：回收订阅资源，不阻断主运行对象。
 
 ### 联调重点
-- `task_id` 是否贯穿请求、推送、交付；
-- Notification 是否只承担状态变化而不变成新命令通道；
-- 长任务订阅是否和查询接口一致；
+- `task_id / session_id / trace_id` 是否贯穿请求、查询、通知和交付；
+- Notification 是否只承担状态变化，而不变成隐藏命令通道；
+- 长任务查询结果与通知回放是否口径一致；
 - 错误码和 `trace_id` 是否总能回传。
 
 ---
@@ -1289,36 +1352,41 @@ flowchart LR
 ## 4.3 能力与存储层模块（能力接入与检索子层）
 
 ### 模块定位
-本章承接架构总览中的“能力与存储层”里偏能力接入的一半：统一接入模型、工具、worker、sidecar 和语义能力，不直接拥有主业务状态。
+本章承接架构总览中的“能力与存储层”里偏能力接入的一半：统一接入模型、工具、worker、sidecar、代码语义和检索能力，并把它们转换成可被任务编排与运行层消费的标准结果。它负责“提供能力”，不负责“拥有任务状态”。
 
-### 能力接入关系图
+### 能力接入与检索关系图
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '16px'}}}%%
 flowchart LR
     ORCH[任务编排器]
-    TASK[任务状态机]
-    MEMORY[记忆管理]
-    CTXM[上下文管理]
+    RUN[运行控制器]
+    GOV[治理与交付层]
+    CTX[上下文归一与准备器]
 
-    subgraph B3[能力接入层]
+    subgraph B3[能力与存储层<br/>能力接入与检索子层]
         direction TB
         MODEL[模型接入]
-        TOOL[工具适配]
-        LSP[LSP 语义能力]
-        PW[Playwright Sidecar]
+        TOOL[工具执行适配器]
+        CODE[LSP / 代码语义能力]
+        WEB[Playwright / 页面能力]
         MEDIA[OCR / Media Worker]
-        RAG[RAG / 检索]
-        SENSE[屏幕 / 视频能力]
+        RETRIEVE[RAG / 记忆检索]
+        SCREEN[授权式屏幕 / 视频能力]
     end
 
     ORCH --> MODEL
-    TASK --> TOOL
-    TASK --> LSP
-    TASK --> PW
-    TASK --> MEDIA
-    MEMORY --> RAG
-    CTXM --> SENSE
+    RUN --> TOOL
+    RUN --> CODE
+    RUN --> WEB
+    RUN --> MEDIA
+    ORCH --> RETRIEVE
+    CTX --> SCREEN
+
+    WEB -.->|tool_call / citation_seed| RUN
+    MEDIA -.->|artifact / evidence summary| RUN
+    RETRIEVE -.->|retrieval_hit / recall summary| ORCH
+    TOOL -.->|governance assessment / tool errors| GOV
 ```
 
 ### 组成
@@ -1338,8 +1406,19 @@ flowchart LR
 - **授权式屏幕 / 视频能力**：承接需要用户授权的采样与录制输入，但仍要回到主编排和治理链。
 - **RAG / 记忆检索层**：提供本地召回与摘要回填能力，不直接修改任务主状态机。
 
+### 层内处理细节
+
+| 子模块 | 进入条件 | 关键中间产物 | 返回与反馈 |
+| --- | --- | --- | --- |
+| 模型接入 | 编排层已经给出 `execution.Request` | 模型输入摘要、模型调用元数据、原始生成结果 | 标准化模型输出、token/cost/latency 元数据 |
+| 工具执行适配器 | 运行控制器决定进入某个工具意图 | `ToolCallRecord`、治理评估、错误分类 | `tool_call.completed`、统一错误码、交付候选 |
+| LSP / 代码语义能力 | 需要前馈补充或审查代码语义 | 诊断结果、引用关系、符号信息 | 结构化语义结果，不直接改写任务状态 |
+| Playwright / OCR / 媒体 Worker | 工具路由落到浏览器、OCR、媒体处理 | worker 请求、健康检查结果、`citation_seed`、artifact 元数据 | `tool_call`、artifact、证据摘要、worker 错误 |
+| 授权式屏幕 / 视频能力 | 入口或执行意图需要屏幕/视频采样 | capture candidate、授权状态、录制片段元数据 | 待授权能力结果或可执行素材路径 |
+| RAG / 记忆检索层 | 编排层挂接了记忆读取计划 | `retrieval_hit`、召回摘要、排序结果 | 给编排层的可注入记忆片段与检索摘要 |
+
 ### 输入
-- Harness 内核发出的能力请求；
+- 任务编排与运行层发出的能力请求；
 - 平台适配层提供的执行环境；
 - 配置和权限边界。
 
@@ -1350,7 +1429,7 @@ flowchart LR
 - OCR / 网页 / 视频处理结果。
 
 ### 上下游关系
-- 上游来自 Harness 内核层和治理层的能力调用请求、检索请求与执行请求。
+- 上游来自任务编排与运行层和治理与交付层的能力调用请求、检索请求与执行请求。
 - 下游是模型 provider、工具实现、sidecar worker、执行后端、检索索引和本地文件系统。
 - 该层向上返回的是标准化结果和统一错误语义，而不是底层实现细节。
 
@@ -1469,93 +1548,113 @@ flowchart LR
 ## 4.4 治理与交付层模块
 
 ### 模块定位
-治理与交付层负责安全、审查、可观测、恢复和人工升级，是 Harness 的守门层和反馈回路层。
+治理与交付层负责把“可以执行”收敛成“允许执行、可被观察、可被恢复、可被正式交付”的主链结果。它既是守门层，也是正式反馈和交付回流层；风险、授权、审查、Trace / Eval、恢复、正式交付、记忆沉淀都在这里并到同一条任务主链上。
 
-### 治理与反馈关系图
+### 治理与交付关系图
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '16px'}}}%%
 flowchart LR
-    TASK[任务状态机]
+    RUN[运行控制器]
+    ACCESS[本地接入层]
 
-    subgraph B4[治理与反馈层]
+    subgraph B4[治理与交付层]
         direction TB
-        SAFE[风险评估]
-        REVIEW[结果审查]
-        HOOKS[Hooks]
+        SAFE[风险评估 / 授权承接]
+        REVIEW[结果审查 / Hooks]
         TRACE[Trace / Eval]
-        LOOP[Loop 检测]
-        CLEANUP[熵清理]
-        HITL[人工升级]
-        AUDIT[审计]
-        SNAP[恢复点 / 回滚]
-        BUDGET[成本治理]
-        POLICY[边界策略]
+        DELIVERY[正式交付协调]
+        MEMORY[记忆 / 镜像沉淀]
+        LOOP[Loop 检测 / HITL]
+        AUDIT[审计 / 恢复]
+        POLICY[成本 / 边界策略]
     end
 
-    TASK --> SAFE
-    TASK --> REVIEW
-    TASK --> HOOKS
-    TASK --> TRACE
-    TASK --> LOOP
-    TASK --> CLEANUP
+    RUN --> SAFE
+    RUN --> REVIEW
+    RUN --> TRACE
+    RUN --> DELIVERY
+    RUN --> MEMORY
+    RUN --> LOOP
     SAFE --> AUDIT
-    SAFE --> SNAP
-    SAFE --> BUDGET
+    REVIEW --> DELIVERY
+    DELIVERY --> MEMORY
     SAFE --> POLICY
-    LOOP --> HITL
+    LOOP --> AUDIT
+
+    SAFE -.->|approval.pending / authorization_record| ACCESS
+    DELIVERY -.->|delivery.ready / artifact / citation| ACCESS
+    MEMORY -.->|memory_summary / retrieval summary| ACCESS
+    AUDIT -.->|audit / recovery_point / recovery result| ACCESS
+    TRACE -.->|trace / eval / loop diagnosis| ACCESS
 ```
 
 ### 组成
-- 风险评估引擎
-- 结果审查引擎
-- Hooks 引擎
-- Trace / Eval 引擎
-- Doom Loop 检测与熔断引擎
-- Entropy Cleanup 引擎
-- Human-in-the-loop 升级引擎
-- 审计与追踪引擎
-- 恢复与回滚引擎
-- 成本治理引擎
-- 边界与策略引擎
+- 风险评估与授权承接
+- 正式结果交付协调
+- 记忆与镜像沉淀
+- 结果审查与 Hooks
+- Trace / Eval
+- Doom Loop / Human-in-the-loop
+- 审计与恢复
+- 成本与边界策略
 
 ### 子模块说明
 - **风险评估 / 授权承接**：判断动作风险、形成待授权对象，并把用户决策重新并入主链。
+- **正式结果交付协调**：把执行结果装配成 `delivery_result / artifact / citation`，并决定如何进入通知和查询视图。
+- **记忆与镜像沉淀**：决定哪些运行结果应沉淀为长期记忆或镜像引用，哪些只能保留为运行态痕迹。
 - **结果审查 / Hooks / Trace / Eval**：负责对输出做质量检查、记录命中、沉淀可观测性与评估快照。
-- **Doom Loop / Entropy Cleanup / HITL**：在执行异常、重复无进展或高不确定性场景下，负责熔断、压缩和人工升级。
-- **审计与追踪 / 恢复与回滚**：负责动作留痕、恢复点创建、恢复结果回流。
-- **成本治理 / 边界与策略**：负责预算降级、白名单、工作区边界和执行约束，保证高风险动作不会越界。
+- **Doom Loop / Human-in-the-loop**：在执行异常、重复无进展或高不确定性场景下，负责熔断、重规划和人工升级。
+- **审计与恢复**：负责动作留痕、恢复点创建、恢复结果回流。
+- **成本与边界策略**：负责预算降级、白名单、工作区边界和执行约束，保证高风险动作不会越界。
+
+### 层内处理细节
+
+| 子模块 | 处理入口 | 关键中间产物 | 返回与反馈 |
+| --- | --- | --- | --- |
+| 风险评估与授权承接 | 运行层提交的拟执行动作、目标范围、能力请求 | `risk_level`、`impact_scope`、`approval_request`、`pending_execution` | `approval.pending`、授权结果、阻断或继续执行结论 |
+| 正式结果交付协调 | 执行结果、artifact/citation 候选、交付偏好 | `delivery_result`、artifact 计划、交付说明 | `delivery.ready`、任务详情交付、文件/文档/结果页入口 |
+| 记忆与镜像沉淀 | 已完成阶段结果、检索计划、摘要候选 | `memory_candidate`、`memory_summary`、镜像引用关系 | 后续检索命中、任务详情中的记忆摘要 |
+| 结果审查与 Hooks | 执行结果、工具调用记录、交付对象 | 审查结论、hook 命中、结构化失败原因 | 继续交付、重试、HITL 或阻断 |
+| Trace / Eval | 模型调用、tool_call、输出摘要、资产命中 | `trace_record`、`eval_snapshot`、review result | 调试视图、loop 诊断、评估快照 |
+| Doom Loop / HITL | 重复错误、无进展调用、审查失败 | Doom Loop 命中、人工复核 payload | `blocked`、重规划、人工继续执行 |
+| 审计与恢复 | 高风险执行前后、恢复请求 | `audit_record`、`recovery_point`、恢复结果 | 安全摘要、恢复入口、恢复结果回流 |
+| 成本与边界策略 | 预算设置、workspace/path policy、worker 权限 | budget downgrade decision、policy deny reason | 执行降级、策略拦截、正式错误码 |
 
 ### 输入
-- 内核层的过程对象；
+- 任务编排与运行层的过程对象；
 - worker 和工具输出；
 - 风险配置、预算、平台边界。
 
 ### 输出
 - 审查结果；
 - 授权请求；
+- 正式交付对象；
+- 记忆与镜像对象；
 - 审计记录；
 - 恢复点；
 - 熔断或升级指令；
 - Trace / Eval 记录。
 
 ### 上下游关系
-- 上游来自 Harness 内核层提交的运行结果、拟执行动作、停止原因、工具输出和恢复请求。
-- 下游一方面落到存储与执行边界，另一方面通过接口接入层把授权请求、结果摘要和恢复结果回流给前端。
+- 上游来自任务编排与运行层提交的运行结果、拟执行动作、停止原因、工具输出和恢复请求。
+- 下游一方面落到存储与执行边界，另一方面通过本地接入层把授权请求、结果摘要和恢复结果回流给前端。
 - 该层既参与执行前拦截，也参与执行后收敛，不能只在出错后补日志。
 
 ### 异常处理
 - 审查失败：回退到用户确认、降级或 HITL；
+- 交付构建失败：回退到保底交付出口，并保留失败说明；
 - 审计失败：记录错误但不能静默丢失高风险动作；
 - 熔断触发：必须生成结构化失败结果。
 
 ### 联调重点
-- 风险、审查、恢复、Trace 是否都能回到主链路；
+- 风险、交付、记忆、恢复、Trace 是否都能回到主链路；
 - 是否存在“动作做了但没进入审计”的空洞；
 - 是否存在“错误发生了但前端看不到正式对象”的问题。
 
 ### 当前实现对齐补充
 - `risk.Service` 只负责输出可测试的风险判断结果；等待授权、继续执行、终止收敛和恢复回流仍由编排层与运行态接管。
+- `delivery.Service` 与记忆沉淀相关写入在逻辑分层上归入治理与交付层；任务编排与运行层只负责挂计划和触发交接，不拥有最终发布语义。
 - `checkpoint` 模块定位为恢复点能力的最小收口层，不独占完整回滚编排；恢复结果必须重新并入正式任务主链。
 
 ### 4.4.1 风险评估引擎
@@ -1703,30 +1802,23 @@ flowchart LR
 ## 4.5 能力与存储层模块（平台、执行与持久化适配子层）
 
 ### 模块定位
-本章承接架构总览中的“能力与存储层”里偏平台与真源的一半：负责对象仓储、索引、Workspace / Artifact、路径策略、机密存储，以及平台与执行后端抽象。
+本章承接架构总览中的“能力与存储层”里偏平台与真源的一半：负责对象仓储、索引、Workspace / Artifact、路径策略、机密存储，以及平台与执行后端抽象。它解决的是“能力和数据怎样被稳定托底”，而不是“任务该怎么编排”。
 
-### 数据与平台支撑关系图
+### 平台、执行与持久化支撑关系图
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '16px'}}}%%
 flowchart LR
-    TASK[任务状态机]
-    MEMORY[记忆管理]
-    DELIVERY[结果交付]
-    TRACE[Trace / Eval]
-    TOOL[工具适配]
+    RUN[运行控制器]
+    GOV[治理与交付层]
+    CAP[能力接入与检索子层]
 
-    subgraph B5[数据与索引]
+    subgraph B5[能力与存储层<br/>平台、执行与持久化适配子层]
         direction TB
-        SQLITE[SQLite + WAL]
-        VSTORE[本地检索索引]
-        WORKSPACE[Workspace]
-        ARTIFACT[Artifact 存储]
-        SECRET[Stronghold]
-    end
-
-    subgraph B6[平台与执行适配]
-        direction TB
+        STORE[对象仓储 / SQLite + WAL]
+        INDEX[本地检索索引]
+        WORKSPACE[Workspace / Artifact 存储]
+        SECRET[路径策略 / Stronghold]
         FSABS[文件系统抽象]
         OSABS[系统能力抽象]
         EXECABS[执行后端适配]
@@ -1734,26 +1826,52 @@ flowchart LR
         WIN[Windows 实现]
     end
 
-    TASK --> SQLITE
-    MEMORY --> VSTORE
-    DELIVERY --> WORKSPACE
-    DELIVERY --> ARTIFACT
-    TASK --> SECRET
-    TOOL --> EXECABS
+    RUN --> STORE
+    GOV --> STORE
+    GOV --> INDEX
+    GOV --> WORKSPACE
+    CAP --> EXECABS
+    CAP --> INDEX
+    RUN --> SECRET
     FSABS --> WIN
     OSABS --> WIN
     EXECABS --> DOCKER
+
+    STORE -.->|task / run / event / delivery_result query| RUN
+    INDEX -.->|retrieval_hit / index lookup| CAP
+    WORKSPACE -.->|artifact path / document path| GOV
+    SECRET -.->|path policy / secret lookup| CAP
 ```
 
 ### 组成
+- 对象仓储与运行态持久化
+- 本地索引与检索
+- Workspace / Artifact 存储
+- 路径策略与机密存储
 - 文件系统抽象层
 - 系统能力抽象层
 - 执行后端适配层
 
 ### 子模块说明
+- **对象仓储与运行态持久化**：承接 `task / run / event / tool_call / delivery_result / approval_request` 等正式对象和兼容对象的持久化。
+- **本地索引与检索**：承接 FTS5、向量检索和后续结构化召回索引。
+- **Workspace / Artifact 存储**：承接工作区文档、交付产物和证据文件。
+- **路径策略与机密存储**：负责 workspace 边界、敏感路径校验和 Stronghold 等机密存储。
 - **文件系统抽象层**：统一约束工作区、产物目录和路径策略下的文件读写。
 - **系统能力抽象层**：统一承接窗口、通知、系统动作、环境元数据等平台能力。
 - **执行后端适配层**：统一承接 Docker sandbox、受控宿主执行和未来跨平台执行后端。
+
+### 层内处理细节
+
+| 子模块 | 处理入口 | 关键中间产物 | 返回与反馈 |
+| --- | --- | --- | --- |
+| 对象仓储与运行态持久化 | 运行控制器和治理层提交的正式对象写入计划 | `TaskRunRecord`、`DeliveryResultRecord`、`CitationRecord` 等持久化记录 | 查询结果、运行态恢复、任务详情真源 |
+| 本地索引与检索 | 记忆沉淀、文本索引写入、召回请求 | FTS5 条目、向量索引、结构化键值命中 | `retrieval_hit`、检索摘要、排序结果 |
+| Workspace / Artifact 存储 | 正式交付、屏幕证据、文档写入 | artifact 元数据、路径映射、交付 payload | 文档路径、artifact 列表、文件定位入口 |
+| 路径策略与机密存储 | 高风险执行前的路径检查和密钥读取 | workspace allowlist、secret handle、敏感路径决策 | allow / deny、配置读取、统一错误码 |
+| 文件系统抽象层 | 文件读写、路径归一化、artifact 落盘 | 规范化路径、文件句柄、workspace 边界校验 | 安全文件操作结果 |
+| 系统能力抽象层 | 通知、快捷键、剪贴板、屏幕授权、sidecar 生命周期 | 平台调用请求、环境元数据 | 宿主能力结果或平台级降级信号 |
+| 执行后端适配层 | 工具与执行请求 | sandbox profile、resource limit、backend routing | 受控执行结果、执行环境错误 |
 
 ### 输入
 - 上层标准接口请求；
@@ -1764,7 +1882,7 @@ flowchart LR
 - 容器或执行后端路由结果。
 
 ### 上下游关系
-- 上游来自能力接入层和治理层的执行请求、路径策略请求和平台能力请求。
+- 上游来自能力与存储层的能力接入与检索子层，以及治理与交付层的执行请求、路径策略请求和平台能力请求。
 - 下游是 Windows 当前实现、Docker sandbox 和未来跨平台保留接口。
 - 该层对上只暴露抽象能力，不把平台细节、硬编码路径或宿主实现差异泄漏给上层。
 
@@ -1874,28 +1992,32 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    A[任务进入 Harness]
-    B[Context Manager 收集候选上下文]
-    C[读取短期记忆 / 长期记忆]
-    D[读取 AGENTS.md / 架构约束]
-    E[读取 Skill / Blueprint / Prompt 模板]
-    F[LSP / 代码语义补充]
-    G[预算裁剪与优先级排序]
-    H[生成结构化 Blueprint]
-    I[形成本轮 Prompt 输入]
-    J[进入 Planning Loop / ReAct]
+    A[任务进入后端主编排]
+    B[任务编排器绑定 task / session / trace 锚点]
+    C[上下文归一与准备器生成 TaskContextSnapshot]
+    D[挂接记忆读取计划 / AGENTS 规则 / 资产引用]
+    E[入口判断与规划器生成 Suggestion]
+    F{是否需要确认或补充输入}
+    G[返回 bubble 确认 / waiting_input]
+    H[折叠为 CreateTaskInput]
+    I[运行控制器创建 TaskRecord]
+    J[资产路由与 Prompt 组装]
+    K[生成 execution.Request]
+    L[进入受控执行循环 / Planning Loop]
+    M[execution.Result / loop.*]
 
-    A --> B
-    B --> C
-    B --> D
-    B --> E
-    B --> F
-    C --> G
-    D --> G
-    E --> G
-    F --> G
-    G --> H --> I --> J
+    A --> B --> C --> D --> E --> F
+    F -- 是 --> G
+    F -- 否 --> H --> I --> J --> K --> L --> M
+    M -. 结果与停止原因回流 .-> I
+    M -. trace / eval / review .-> D
 ```
+
+补充说明：
+
+- `TaskContextSnapshot` 是入口阶段的统一上下文快照，不等同于最终 Prompt。
+- `Suggestion` 只决定“怎样入链”，例如 `Intent`、`RequiresConfirm`、`TaskTitle` 和交付偏好，不直接替代执行期 Planner。
+- 真正的 ReAct / Agent Loop 发生在 `execution.Request` 已经成形并进入受控执行循环之后。
 
 ### 5.3 风险执行与回滚图
 
@@ -1925,26 +2047,31 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    A[Tool / SubAgent / Worker 输出结果]
-    B[Linter / CI / Test Harness]
-    C[Agent Review]
-    D[Hooks 记录与拦截]
-    E[Trace 记录 input / output / latency / cost]
-    F{是否通过}
-    G[进入正式交付]
-    H[Doom Loop 检测]
-    I{是否需要升级}
-    J[切换方法 / 重规划]
-    K[Human-in-the-loop]
-    L[结构化失败报告]
-    M[Entropy Cleanup]
+    A[execution.Result / tool_call / loop.*]
+    B[运行控制器记录 LatestEvent / LatestToolCall]
+    C[治理与交付层执行审查 / Hooks / Trace]
+    D{是否通过}
+    E[正式交付协调]
+    F[runengine.CompleteTask / SetPresentation]
+    G[写入 task.updated / delivery.ready]
+    H[本地接入层回流任务详情与轻反馈]
+    I[Doom Loop / HITL 评估]
+    J{重规划还是人工复核}
+    K[ReopenIntentConfirmation / ReopenWaitingInput]
+    L[blocked + human_in_loop / 结构化失败]
 
-    A --> B --> C --> D --> E --> F
-    F -- 是 --> G --> M
-    F -- 否 --> H --> I
-    I -- 否 --> J
-    I -- 是 --> K --> L --> M
+    A --> B --> C --> D
+    D -- 是 --> E --> F --> G --> H
+    D -- 否 --> I --> J
+    J -- 重规划 --> K --> G --> H
+    J -- 人工复核 --> L --> G --> H
+    C -. 审查摘要 / trace / eval .-> H
 ```
+
+补充说明：
+
+- 反馈闭环不是“执行完再补日志”，而是执行结果先回到运行控制器，再进入治理与交付层决定继续、重规划、人工复核或正式交付。
+- `task.updated` 和 `delivery.ready` 是前端看到反馈链的正式出口；它们必须与任务详情查询口径一致。
 
 ### 5.5 记忆写入与检索图
 
@@ -2092,27 +2219,33 @@ flowchart TB
 ```mermaid
 flowchart TB
     A[任务执行结束或阶段完成]
-    B{是否成功}
-    C[前置说明：结果交付位置]
-    D{结果承载形态}
-    E[气泡短交付]
-    F[工作区文档交付]
-    G[结果页 / 浏览器交付]
-    H[文件交付 / 定位到文件夹]
-    I[任务详情交付]
-    J[失败/中断说明]
-    K[说明卡点、可否重试、是否可恢复]
-    L[跳转任务详情 / 安全卫士 / 恢复点]
+    B[治理与交付层判断交付形态]
+    C[构建 DeliveryResult / Artifact / Citation]
+    D[运行控制器写回 presentation 与完成态]
+    E[通知队列写入 task.updated / delivery.ready]
+    F[本地接入层回流]
+    G{交付形态}
+    H[气泡短交付]
+    I[工作区文档交付]
+    J[结果页 / 浏览器交付]
+    K[文件交付 / 定位到文件夹]
+    L[任务详情交付]
+    M[失败 / 中断说明]
+    N[安全摘要 / 恢复点 / 重试入口]
 
-    A --> B
-    B -- 成功 --> C --> D
-    D -- 短结果 --> E
-    D -- 长文本 --> F
-    D -- 结构化结果 --> G
-    D -- 文件产物 --> H
-    D -- 连续任务 --> I
-    B -- 失败/中断 --> J --> K --> L
+    A --> B --> C --> D --> E --> F --> G
+    G -- 短结果 --> H
+    G -- 长文本 --> I
+    G -- 结构化结果 --> J
+    G -- 文件产物 --> K
+    G -- 连续任务 --> L
+    A -. 执行失败 / 被阻断 .-> M --> N --> F
 ```
+
+补充说明：
+
+- 结果先形成正式交付对象，再决定前端展示位置；前端不应自己拼接“临时结果”。
+- 失败与中断也必须走正式反馈链，至少要给出卡点说明、是否可恢复、以及恢复点或任务详情入口。
 
 ### 5.12 本章与后续章节的边界说明
 
@@ -2135,7 +2268,7 @@ flowchart TB
 ### 6.1 近场对象承接时序：文本选中 / 文件拖拽 -> 意图确认 -> 执行
 
 **链路目标**：把文本选中、文件拖拽等“近场对象承接”转换成正式任务。  
-**主要模块参与**：表现层、应用编排层、协议适配层、接口接入层、上下文管理内核、入口判断与规划内核、任务状态机、风险评估、结果交付。
+**主要模块参与**：表现层、应用编排层、协议适配层、本地接入层、上下文归一与准备器、入口判断与规划器、运行控制器、风险评估与授权承接、正式结果交付协调。
 **关键结果**：形成 `task`，必要时生成 `bubble_message` 进行意图确认，最终得到 `delivery_result`。  
 **异常分支**：高风险动作进入授权链路；对象失效则回退到待机或确认失败态。  
 **实现说明**：此链路是所有近场承接动作的统一模板，文本选中、拖拽文件、错误信息承接和主动机会承接都应先落在这个链路上再分化。
@@ -2182,7 +2315,7 @@ sequenceDiagram
 ### 6.2 高风险治理时序：授权 -> 执行 -> 回滚
 
 **链路目标**：保证高风险动作不会绕过授权、审计和恢复点。  
-**主要模块参与**：应用编排层、接口接入层、风险评估引擎、恢复与回滚引擎、执行后端适配层、审计与追踪引擎。  
+**主要模块参与**：应用编排层、本地接入层、风险评估引擎、恢复与回滚引擎、执行后端适配层、审计与追踪引擎。
 **关键结果**：在执行前形成 `approval_request` 和 `recovery_point`，在执行后形成 `authorization_record` 和 `audit_record`。  
 **异常分支**：执行失败或用户中断时，必须显式回滚或保留可恢复信息。  
 **实现说明**：此链路是治理链的最小闭环，凡是跨工作区、命令执行、联网下载、删除/覆盖等动作，都必须从这里经过。
@@ -2229,7 +2362,7 @@ sequenceDiagram
 ### 6.3 记忆沉淀时序：写入 -> 检索
 
 **链路目标**：把阶段结果沉淀为长期记忆，并在镜子视图或后续调用中进行召回。  
-**主要模块参与**：任务运行时、记忆管理内核、SQLite FTS5、sqlite-vec、镜子相关接口。  
+**主要模块参与**：任务运行时、记忆与镜像沉淀、SQLite FTS5、sqlite-vec、镜子相关接口。
 **关键结果**：形成 `memory_summary / memory_candidate / retrieval_hit` 三类对象。  
 **异常分支**：记忆写入失败不影响任务完成，但必须有 Trace 记录；召回失败时镜子视图可降级为空结果。  
 **实现说明**：该链路强调记忆层与运行态主表分层，命中结果必须通过标准对象返回，不能直接改写 `task` 主表。
@@ -2265,7 +2398,7 @@ sequenceDiagram
 ### 6.4 插件运行态时序：执行 -> 事件流 -> 仪表盘
 
 **链路目标**：把插件运行态、指标和产物纳入统一事件流和仪表盘。  
-**主要模块参与**：插件系统与插件管理器、事件流、接口接入层、仪表盘模块。  
+**主要模块参与**：插件运行态协调器、事件流、本地接入层、仪表盘模块。
 **关键结果**：插件运行不直接暴露给前端，而是通过 `plugin.updated` 等事件与 `agent.plugin.runtime.list / agent.plugin.list / agent.plugin.detail.get` 查询结果统一展示。  
 **实现说明**：插件视图不能成为独立协议体系，仍必须通过标准事件和标准对象链回流；详情页和列表页消费的是后端聚合后的正式读模型，而不是裸 worker / sidecar 缓存。
 
@@ -2820,11 +2953,11 @@ stateDiagram-v2
 
 | 模块 | 详细章节 | 核心职责摘要 |
 | --- | --- | --- |
-| 本地接入层 | `4.1` | JSON-RPC 收口、对象锚定、错误包装、事件推送 |
-| 任务编排与运行层 | `4.2` | 任务编排、上下文归一、意图建议、状态推进、交付与插件系统 |
+| 本地接入层 | `4.1` | JSON-RPC 收口、对象锚定、查询装配、通知回流 |
+| 任务编排与运行层 | `4.2` | 任务编排、上下文归一、入口规划、运行控制、会话串行与插件协调 |
 | 能力与存储层（能力接入与检索子层） | `4.3` | 模型、工具、worker、sidecar、RAG 与屏幕/视频能力接入 |
-| 治理与交付层 | `4.4` | 风险评估、审查、Trace / Eval、恢复、预算和边界治理 |
-| 能力与存储层（平台、执行与持久化适配子层） | `4.5` | 文件系统、系统能力、执行后端和跨平台抽象 |
+| 治理与交付层 | `4.4` | 风险评估、正式交付、记忆沉淀、Trace / Eval、恢复、预算和边界治理 |
+| 能力与存储层（平台、执行与持久化适配子层） | `4.5` | 对象仓储、索引、文件系统、系统能力、执行后端和跨平台抽象 |
 | 系统级主链流程 | `5.0~5.11` | 用流程图解释主链、反馈链、推荐与结果分流 |
 | 功能级时序与状态图 | `6.1~6.16` | 用时序图和状态图解释具体功能如何实现 |
 
