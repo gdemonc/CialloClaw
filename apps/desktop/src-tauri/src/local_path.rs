@@ -31,6 +31,18 @@ impl LocalPathRoots {
             workspace_root: canonicalize_root(workspace_root),
         }
     }
+
+    /// Returns the trusted workspace root used for workspace-relative desktop
+    /// path resolution.
+    pub(crate) fn workspace_root(&self) -> Option<&PathBuf> {
+        self.workspace_root.as_ref()
+    }
+
+    /// Returns the trusted repository root used for repo-relative desktop path
+    /// resolution.
+    pub(crate) fn repo_root(&self) -> Option<&PathBuf> {
+        self.repo_root.as_ref()
+    }
 }
 
 /// Opens a local file or directory through the operating system shell.

@@ -5,6 +5,7 @@ mod activity;
 mod local_path;
 mod screen_capture;
 mod selection;
+mod source_notes;
 mod window_context;
 
 use serde_json::Value;
@@ -315,6 +316,51 @@ async fn desktop_reveal_local_path(
     })
     .await
     .map_err(|error| format!("desktop local reveal task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_load_source_notes(
+    state: tauri::State<'_, Arc<NamedPipeBridgeState>>,
+    sources: Vec<String>,
+) -> Result<source_notes::DesktopSourceNoteSnapshot, String> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = build_local_path_roots(&state);
+        source_notes::load_source_notes(&sources, &roots)
+    })
+    .await
+    .map_err(|error| format!("desktop source notes load task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_create_source_note(
+    state: tauri::State<'_, Arc<NamedPipeBridgeState>>,
+    sources: Vec<String>,
+    content: String,
+) -> Result<source_notes::DesktopSourceNoteDocument, String> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = build_local_path_roots(&state);
+        source_notes::create_source_note(&sources, &roots, &content)
+    })
+    .await
+    .map_err(|error| format!("desktop source note create task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn desktop_save_source_note(
+    state: tauri::State<'_, Arc<NamedPipeBridgeState>>,
+    sources: Vec<String>,
+    path: String,
+    content: String,
+) -> Result<source_notes::DesktopSourceNoteDocument, String> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = build_local_path_roots(&state);
+        source_notes::save_source_note(&sources, &roots, &path, &content)
+    })
+    .await
+    .map_err(|error| format!("desktop source note save task failed: {error}"))?
 }
 
 fn build_local_path_roots(state: &Arc<NamedPipeBridgeState>) -> local_path::LocalPathRoots {
@@ -1296,6 +1342,9 @@ fn main() {
             desktop_get_active_window_context,
             desktop_open_local_path,
             desktop_reveal_local_path,
+            desktop_load_source_notes,
+            desktop_create_source_note,
+            desktop_save_source_note,
             pick_shell_ball_files,
             shell_ball_apply_window_frame,
             shell_ball_read_selection_snapshot

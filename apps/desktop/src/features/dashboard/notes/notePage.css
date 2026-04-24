@@ -69,6 +69,7 @@
 
 .note-preview-page .dashboard-page__home-link,
 .note-preview-page .dashboard-page__module-link,
+.note-preview-page__summary-action,
 .note-preview-shell__toggle,
 .note-detail-actions__button,
 .note-preview-page__floating-card-action {
@@ -86,6 +87,7 @@
 .note-preview-page .dashboard-page__home-link:hover,
 .note-preview-page .dashboard-page__module-link:hover,
 .note-preview-page .dashboard-page__module-link.is-active,
+.note-preview-page__summary-action:hover,
 .note-preview-shell__toggle:hover,
 .note-detail-actions__button:hover,
 .note-preview-page__floating-card-action:hover {
@@ -105,6 +107,7 @@
 }
 
 .note-preview-page__summary-shell,
+.note-source-studio,
 .note-preview-shell,
 .note-preview-page__board,
 .note-detail-shell,
@@ -243,17 +246,257 @@
   border-radius: 1.25rem;
   display: flex;
   gap: 0.65rem;
+  justify-content: space-between;
   min-height: auto;
+  min-width: 0;
   padding: 0.75rem 0.9rem;
 }
 
-.note-preview-page__summary-notice span {
+.note-preview-page__summary-notice-copy {
+  align-items: center;
+  display: flex;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.note-preview-page__summary-notice-copy span {
   color: var(--note-copy);
   display: -webkit-box;
   line-height: 1.45;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.note-preview-page__summary-notice-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
+}
+
+.note-preview-page__summary-action {
+  backdrop-filter: blur(14px);
+}
+
+.note-source-studio {
+  border-radius: 2rem;
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.note-source-studio__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.note-source-studio__heading {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.note-source-studio__title-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.85rem;
+}
+
+.note-source-studio__title-row h2 {
+  color: var(--note-ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: clamp(1.15rem, 1.5vw, 1.45rem);
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin: 0;
+}
+
+.note-source-studio__title-row p {
+  color: var(--note-copy);
+  margin: 0.28rem 0 0;
+  max-width: 40rem;
+}
+
+.note-source-studio__title-icon {
+  color: var(--note-accent-strong);
+  flex-shrink: 0;
+  height: 1.35rem;
+  margin-top: 0.1rem;
+  width: 1.35rem;
+}
+
+.note-source-studio__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+.note-source-studio__button {
+  background: color-mix(in srgb, var(--note-paper-strong) 84%, var(--note-accent) 16%);
+  border: 1px solid color-mix(in srgb, var(--note-line) 76%, var(--note-accent) 24%);
+  color: var(--note-ink);
+}
+
+.note-source-studio__button:hover {
+  background: color-mix(in srgb, var(--note-paper-strong) 76%, var(--note-accent) 24%);
+  border-color: color-mix(in srgb, var(--note-accent) 42%, var(--note-line) 58%);
+}
+
+.note-source-studio__button--primary {
+  background: color-mix(in srgb, var(--note-accent) 20%, var(--note-paper-strong) 80%);
+}
+
+.note-source-studio__status-bar {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.44);
+  border-radius: 1.25rem;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0.7rem 0.9rem;
+}
+
+.note-source-studio__status-copy {
+  color: var(--note-copy);
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.note-source-studio__dirty-pill {
+  background: rgba(216, 142, 99, 0.14);
+  border: 1px solid rgba(216, 142, 99, 0.3);
+  border-radius: 999px;
+  color: var(--note-accent-strong);
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.22rem 0.58rem;
+}
+
+.note-source-studio__body {
+  display: grid;
+  gap: 0.95rem;
+  grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr);
+  min-height: 20rem;
+}
+
+.note-source-studio__list,
+.note-source-studio__editor {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 249, 0.9), rgba(247, 239, 229, 0.84)),
+    var(--note-paper);
+  border: 1px solid color-mix(in srgb, var(--note-line) 74%, var(--note-accent) 26%);
+  border-radius: 1.5rem;
+  box-shadow: 0 18px 42px -34px rgba(98, 68, 42, 0.18);
+  min-height: 0;
+}
+
+.note-source-studio__list {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.note-source-studio__list-header {
+  align-items: center;
+  border-bottom: 1px solid rgba(122, 92, 65, 0.12);
+  color: var(--note-copy);
+  display: flex;
+  justify-content: space-between;
+  padding: 0.8rem 0.95rem 0.75rem;
+}
+
+.note-source-studio__list-items {
+  display: grid;
+  gap: 0.55rem;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.8rem;
+}
+
+.note-source-studio__list-item {
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(122, 92, 65, 0.12);
+  border-radius: 1.1rem;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.78rem 0.82rem;
+  text-align: left;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.note-source-studio__list-item:hover,
+.note-source-studio__list-item.is-active {
+  border-color: color-mix(in srgb, var(--note-accent) 46%, rgba(122, 92, 65, 0.2));
+  box-shadow: 0 16px 28px -26px rgba(98, 68, 42, 0.24);
+  transform: translateY(-1px);
+}
+
+.note-source-studio__list-item-copy {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.note-source-studio__list-item-copy strong {
+  color: var(--note-ink);
+  font-size: 0.94rem;
+}
+
+.note-source-studio__list-item-copy span {
+  color: var(--note-copy);
+  font-size: 0.74rem;
+}
+
+.note-source-studio__empty {
+  align-content: center;
+  color: var(--note-copy);
+  display: grid;
+  min-height: 12rem;
+  padding: 1rem;
+  text-align: center;
+}
+
+.note-source-studio__editor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 0.9rem;
+}
+
+.note-source-studio__editor-head {
+  border-bottom: 1px solid rgba(122, 92, 65, 0.12);
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.72rem;
+}
+
+.note-source-studio__editor-head strong {
+  color: var(--note-ink);
+  display: block;
+  font-size: 1rem;
+}
+
+.note-source-studio__editor-head p {
+  color: var(--note-copy);
+  margin: 0.22rem 0 0;
+}
+
+.note-source-studio__textarea {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(122, 92, 65, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+  color: var(--note-ink);
+  height: 100%;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  min-height: 0;
+  resize: vertical;
 }
 
 .note-preview-page__workspace {
@@ -872,6 +1115,56 @@
   z-index: 70;
 }
 
+.note-source-modal__backdrop {
+  z-index: 72;
+}
+
+.note-detail-modal--source {
+  z-index: 74;
+}
+
+.note-source-modal {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: min(88vh, 900px);
+  margin: auto;
+  max-width: min(82vw, 1240px);
+  min-height: 0;
+  pointer-events: auto;
+  width: 100%;
+}
+
+.note-source-modal__header {
+  align-items: start;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-inline: 0.25rem;
+}
+
+.note-source-modal__title {
+  color: var(--note-ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: clamp(1.25rem, 1.7vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin: 0.3rem 0 0;
+}
+
+.note-source-modal__close {
+  background: color-mix(in srgb, var(--note-paper-strong) 86%, var(--note-accent) 14%);
+  border: 1px solid color-mix(in srgb, var(--note-line) 74%, var(--note-accent) 26%);
+  border-radius: 999px;
+}
+
+.note-source-modal .note-source-studio {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
 .note-detail-shell {
   border-radius: 2rem;
   display: grid;
@@ -1102,6 +1395,7 @@
   }
 
   .note-preview-page__summary-shell,
+  .note-source-studio__body,
   .note-preview-page__workspace {
     grid-template-columns: 1fr;
   }
@@ -1133,6 +1427,10 @@
   .note-detail-shell {
     max-width: min(92vw, 1120px);
   }
+
+  .note-source-modal {
+    max-width: min(92vw, 1240px);
+  }
 }
 
 @media (max-width: 720px) {
@@ -1142,6 +1440,19 @@
 
   .note-preview-page__frame {
     padding: 0.8rem 0.95rem 1rem;
+  }
+
+  .note-source-studio {
+    padding: 0.85rem;
+  }
+
+  .note-source-studio__header,
+  .note-source-studio__actions,
+  .note-source-studio__status-bar,
+  .note-preview-page__summary-notice,
+  .note-preview-page__summary-notice-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .note-preview-page__summary-grid,
@@ -1204,6 +1515,15 @@
     height: 100%;
     max-width: none;
     padding: 0.95rem;
+  }
+
+  .note-source-modal {
+    height: 100%;
+    max-width: none;
+  }
+
+  .note-source-modal__header {
+    padding-inline: 0;
   }
 
   .note-preview-page__floating-card {

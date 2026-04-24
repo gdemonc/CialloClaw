@@ -6,11 +6,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useUnmount } from "ahooks";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, CircleDashed, NotebookPen, PanelLeftClose, PanelLeftOpen, RefreshCcw } from "lucide-react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ArrowLeft, CircleDashed, FilePlus2, NotebookPen, PanelLeftClose, PanelLeftOpen, RefreshCcw, ScanSearch, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { NotepadAction } from "@cialloclaw/protocol";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { loadDashboardDataMode, saveDashboardDataMode } from "@/features/dashboard/shared/dashboardDataMode";
 import { DashboardMockToggle } from "@/features/dashboard/shared/DashboardMockToggle";
 import { navigateToDashboardTaskDetail } from "@/features/dashboard/shared/dashboardTaskDetailNavigation";
@@ -19,12 +20,14 @@ import { dashboardModules } from "@/features/dashboard/shared/dashboardRoutes";
 import { cn } from "@/utils/cn";
 import { buildNoteSummary, describeNotePreview, getNoteBucketLabel, getNoteStatusBadgeClass, groupClosedNotes, sortClosedNotes, sortNotesByUrgency } from "./notePage.mapper";
 import { buildDashboardNoteBucketInvalidateKeys, buildDashboardNoteBucketQueryKey, dashboardNoteBucketGroups, getDashboardNoteRefreshPlan } from "./notePage.query";
+import { areDesktopSourceNotesAvailable, createNoteSource, loadNoteSourceConfig, loadNoteSourceSnapshot, runNoteSourceInspection, saveNoteSource } from "./noteSource.service";
 import { convertNoteToTask, loadNoteBucket, performNoteResourceOpenExecution, resolveNoteResourceOpenExecutionPlan, updateNote, type NotePageDataMode } from "./notePage.service";
 import type { NoteDetailAction, NoteListItem } from "./notePage.types";
 import { NoteDetailPanel } from "./components/NoteDetailPanel";
 import { NoteEmptyState } from "./components/NoteEmptyState";
 import { NotePreviewCard } from "./components/NotePreviewCard";
 import { NotePreviewSection } from "./components/NotePreviewSection";
+import { SourceNoteStudio } from "./components/SourceNoteStudio";
 import "./notePage.css";
 
 type NoteCanvasCard = {
@@ -44,12 +47,18 @@ type NoteDrawerDragPreview = {
 
 const NOTE_CANVAS_CARD_WIDTH = 360;
 const NOTE_CANVAS_CARD_HEIGHT = 280;
+const SOURCE_NOTE_POLL_INTERVAL_MS = 2_500;
+const NEW_SOURCE_NOTE_TEMPLATE = "";
 const NOTE_CANVAS_SEED_POSITIONS = [
   { x: 150, y: 110 },
   { x: 540, y: 120 },
   { x: 920, y: 140 },
   { x: 330, y: 360 },
 ];
+
+function normalizeSourceNoteKey(value: string) {
+  return value.trim().replace(/\\/g, "/").toLowerCase();
+}
 
 /**
  * Renders the note dashboard page and coordinates note selection, feedback, and
@@ -77,7 +86,17 @@ export function NotePage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [boardLayerSize, setBoardLayerSize] = useState<{ height: number; width: number } | null>(null);
   const [dataMode, setDataMode] = useState<NotePageDataMode>(() => loadDashboardDataMode("notes") as NotePageDataMode);
+  const [selectedSourceNotePath, setSelectedSourceNotePath] = useState<string | null>(null);
+  const [sourceNoteDraft, setSourceNoteDraft] = useState("");
+  const [sourceNoteBaseline, setSourceNoteBaseline] = useState("");
+  const [sourceNoteSyncMessage, setSourceNoteSyncMessage] = useState<string | null>(null);
+  const [isCreatingSourceNote, setIsCreatingSourceNote] = useState(false);
+  const [sourceStudioOpen, setSourceStudioOpen] = useState(false);
+  const [isSavingSourceNote, setIsSavingSourceNote] = useState(false);
+  const [isRunningInspection, setIsRunningInspection] = useState(false);
   const feedbackTimeoutRef = useRef<number | null>(null);
+  const sourceNotesFingerprintRef = useRef<string | null>(null);
+  const skipNextSourceNoteRefreshRef = useRef(false);
   const dragStateRef = useRef<{
     itemId: string;
     pointerId: number;
@@ -104,6 +123,7 @@ export function NotePage() {
     width: number;
   } | null>(null);
   const noteRefreshPlan = useMemo(() => getDashboardNoteRefreshPlan(dataMode), [dataMode]);
+  const desktopSourceNotesAvailable = useMemo(() => areDesktopSourceNotesAvailable(), []);
 
   useEffect(() => {
     saveDashboardDataMode("notes", dataMode);
@@ -146,10 +166,40 @@ export function NotePage() {
     ],
   });
 
+  const sourceConfigQuery = useQuery({
+    enabled: dataMode === "rpc",
+    queryFn: loadNoteSourceConfig,
+    queryKey: ["note-source-config", dataMode],
+    refetchOnMount: noteRefreshPlan.refetchOnMount,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
+  const configuredTaskSourceRoots = sourceConfigQuery.data?.task_sources;
+  const taskSourceRoots = useMemo(() => configuredTaskSourceRoots ?? [], [configuredTaskSourceRoots]);
+  const sourceNotesQuery = useQuery({
+    enabled: dataMode === "rpc" && desktopSourceNotesAvailable && taskSourceRoots.length > 0,
+    queryFn: () => loadNoteSourceSnapshot(taskSourceRoots),
+    queryKey: ["note-source-snapshot", dataMode, taskSourceRoots],
+    refetchInterval:
+      dataMode === "rpc" && desktopSourceNotesAvailable && taskSourceRoots.length > 0
+        ? SOURCE_NOTE_POLL_INTERVAL_MS
+        : false,
+    refetchOnMount: noteRefreshPlan.refetchOnMount,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
   const upcomingItems = sortNotesByUrgency(upcomingQuery.data?.items ?? []);
   const laterItems = sortNotesByUrgency(laterQuery.data?.items ?? []);
   const recurringItems = sortNotesByUrgency(recurringQuery.data?.items ?? []);
   const closedItems = sortClosedNotes(closedQuery.data?.items ?? []);
+  const sourceNotesData = sourceNotesQuery.data?.notes;
+  const sourceRootsData = sourceNotesQuery.data?.sourceRoots;
+  const sourceNotes = useMemo(() => sourceNotesData ?? [], [sourceNotesData]);
+  const resolvedSourceRoots = useMemo(() => sourceRootsData ?? taskSourceRoots, [sourceRootsData, taskSourceRoots]);
   const canvasItemIdSet = useMemo(() => new Set(canvasCards.map((entry) => entry.itemId)), [canvasCards]);
   const visibleUpcomingItems = useMemo(() => upcomingItems.filter((item) => !canvasItemIdSet.has(item.item.item_id)), [canvasItemIdSet, upcomingItems]);
   const visibleLaterItems = useMemo(() => laterItems.filter((item) => !canvasItemIdSet.has(item.item.item_id)), [canvasItemIdSet, laterItems]);
@@ -172,6 +222,47 @@ export function NotePage() {
     () => allItems.find((entry) => entry.item.item_id === selectedItemId) ?? upcomingItems[0] ?? laterItems[0] ?? recurringItems[0] ?? closedItems[0] ?? null,
     [allItems, closedItems, laterItems, recurringItems, selectedItemId, upcomingItems],
   );
+  const sourceNotesByPath = useMemo(
+    () => new Map(sourceNotes.map((note) => [normalizeSourceNoteKey(note.path), note])),
+    [sourceNotes],
+  );
+  const sourceNotesByTitle = useMemo(
+    () => new Map(sourceNotes.map((note) => [note.title.trim().toLowerCase(), note])),
+    [sourceNotes],
+  );
+  const selectedSourceNote = useMemo(
+    () => (isCreatingSourceNote ? null : sourceNotes.find((note) => note.path === selectedSourceNotePath) ?? null),
+    [isCreatingSourceNote, selectedSourceNotePath, sourceNotes],
+  );
+  const sourceEditorDirty = sourceNoteDraft !== sourceNoteBaseline;
+  const sourceNotesFingerprint = useMemo(
+    () => sourceNotes.map((note) => `${note.path}:${note.modifiedAtMs ?? 0}:${note.content.length}`).join("|"),
+    [sourceNotes],
+  );
+  const sourceNoteAvailabilityMessage = useMemo(() => {
+    if (dataMode !== "rpc") {
+      return "Mock 模式下不会读写真实 markdown 便签。";
+    }
+
+    if (!desktopSourceNotesAvailable) {
+      return "当前运行环境不支持桌面端 markdown 便签桥接。";
+    }
+
+    if (sourceConfigQuery.error) {
+      return sourceConfigQuery.error instanceof Error ? sourceConfigQuery.error.message : "任务来源配置读取失败。";
+    }
+
+    if (sourceConfigQuery.isPending) {
+      return "正在读取任务来源配置…";
+    }
+
+    if (taskSourceRoots.length === 0) {
+      return "请先在设置面板的任务来源列表里配置至少一个目录。";
+    }
+
+    return null;
+  }, [dataMode, desktopSourceNotesAvailable, sourceConfigQuery.error, sourceConfigQuery.isPending, taskSourceRoots.length]);
+  const sourceNotesLoading = sourceConfigQuery.isFetching || sourceNotesQuery.isFetching;
 
   const pageStyle = {
     "--note-accent": "#d88e63",
@@ -195,6 +286,171 @@ export function NotePage() {
     }
     feedbackTimeoutRef.current = window.setTimeout(() => setFeedback(null), 2600);
   }
+
+  function buildInspectionSummary(parsedFiles: number, identifiedItems: number, overdue: number, prefix?: string) {
+    const summaryCopy = `本次巡检解析 ${parsedFiles} 个文件，识别 ${identifiedItems} 条事项，逾期 ${overdue} 条。`;
+    return prefix ? `${prefix}。${summaryCopy}` : summaryCopy;
+  }
+
+  async function invalidateAllNoteBuckets() {
+    await Promise.all(
+      dashboardNoteBucketGroups.map((group) =>
+        queryClient.invalidateQueries({
+          queryKey: buildDashboardNoteBucketQueryKey(dataMode, group),
+        }),
+      ),
+    );
+  }
+
+  async function refreshInspection(reason: string, prefix?: string) {
+    if (dataMode !== "rpc") {
+      showFeedback("Mock 模式下不会执行真实巡检。");
+      return;
+    }
+
+    if (taskSourceRoots.length === 0) {
+      const message = "请先在设置面板里配置任务来源目录。";
+      setSourceNoteSyncMessage(message);
+      showFeedback(message);
+      return;
+    }
+
+    if (isRunningInspection) {
+      return;
+    }
+
+    setIsRunningInspection(true);
+    try {
+      const result = await runNoteSourceInspection(taskSourceRoots, reason);
+      await invalidateAllNoteBuckets();
+      const message = buildInspectionSummary(
+        result.summary.parsed_files,
+        result.summary.identified_items,
+        result.summary.overdue,
+        prefix,
+      );
+      setSourceNoteSyncMessage(message);
+      showFeedback(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "便签巡检失败。";
+      setSourceNoteSyncMessage(message);
+      showFeedback(message);
+    } finally {
+      setIsRunningInspection(false);
+    }
+  }
+
+  function openSourceNote(path: string) {
+    const note = sourceNotes.find((entry) => entry.path === path);
+    if (!note) {
+      return;
+    }
+
+    setIsCreatingSourceNote(false);
+    setSelectedSourceNotePath(path);
+    setSourceNoteDraft(note.content);
+    setSourceNoteBaseline(note.content);
+    setSourceNoteSyncMessage(null);
+  }
+
+  function startCreatingSourceNote() {
+    setIsCreatingSourceNote(true);
+    setSelectedSourceNotePath(null);
+    setSourceNoteDraft(NEW_SOURCE_NOTE_TEMPLATE);
+    setSourceNoteBaseline("");
+    setSourceNoteSyncMessage(
+      resolvedSourceRoots[0]
+        ? `新文件会保存到 ${resolvedSourceRoots[0]}`
+        : "新文件会保存到第一个任务来源目录。",
+    );
+  }
+
+  function openCreateSourceNoteStudio() {
+    startCreatingSourceNote();
+    setDetailOpen(false);
+    setSourceStudioOpen(true);
+  }
+
+  function openSourceNoteStudio(path: string) {
+    openSourceNote(path);
+    setDetailOpen(false);
+    setSourceStudioOpen(true);
+  }
+
+  function resolveSourceNotePathForItem(item: NoteListItem) {
+    const resourceMatch = item.experience.relatedResources
+      .map((resource) => sourceNotesByPath.get(normalizeSourceNoteKey(resource.path)))
+      .find((note) => note !== undefined);
+    if (resourceMatch) {
+      return resourceMatch.path;
+    }
+
+    return sourceNotesByTitle.get(item.item.title.trim().toLowerCase())?.path ?? null;
+  }
+
+  function openSourceStudioForItem(item: NoteListItem) {
+    const matchedPath = resolveSourceNotePathForItem(item);
+    if (matchedPath) {
+      openSourceNoteStudio(matchedPath);
+      return;
+    }
+
+    if (sourceNotes.length === 0) {
+      openCreateSourceNoteStudio();
+      showFeedback(sourceNoteAvailabilityMessage ?? "还没有源便签，已为你打开空白便签。");
+      return;
+    }
+
+    setDetailOpen(false);
+    setSourceStudioOpen(true);
+    if (sourceNoteAvailabilityMessage) {
+      showFeedback(sourceNoteAvailabilityMessage);
+      return;
+    }
+
+    showFeedback("未定位到对应源便签，已为你打开源便签列表。");
+  }
+
+  async function handleSaveSourceNote() {
+    if (sourceNoteAvailabilityMessage !== null || taskSourceRoots.length === 0) {
+      const message = sourceNoteAvailabilityMessage ?? "请先配置任务来源目录。";
+      setSourceNoteSyncMessage(message);
+      showFeedback(message);
+      return;
+    }
+
+    if (isSavingSourceNote || sourceNoteDraft.trim() === "") {
+      return;
+    }
+
+    setIsSavingSourceNote(true);
+    try {
+      const savedNote = isCreatingSourceNote
+        ? await createNoteSource(taskSourceRoots, sourceNoteDraft)
+        : await saveNoteSource(taskSourceRoots, selectedSourceNotePath ?? "", sourceNoteDraft);
+
+      skipNextSourceNoteRefreshRef.current = true;
+      await sourceNotesQuery.refetch();
+      setIsCreatingSourceNote(false);
+      setSelectedSourceNotePath(savedNote.path);
+      setSourceNoteDraft(savedNote.content);
+      setSourceNoteBaseline(savedNote.content);
+      setSourceNoteSyncMessage(`${savedNote.fileName} 已保存，正在同步巡检结果。`);
+      await refreshInspection(
+        isCreatingSourceNote ? "notes_markdown_created" : "notes_markdown_saved",
+        isCreatingSourceNote ? `已创建 ${savedNote.fileName}` : `已保存 ${savedNote.fileName}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "markdown 便签保存失败。";
+      setSourceNoteSyncMessage(message);
+      showFeedback(message);
+    } finally {
+      setIsSavingSourceNote(false);
+    }
+  }
+
+  const refreshInspectionRef = useRef(refreshInspection);
+  refreshInspectionRef.current = refreshInspection;
 
   function getNextCanvasZIndex(cards: NoteCanvasCard[]) {
     return cards.reduce((max, entry) => Math.max(max, entry.zIndex), 0) + 1;
@@ -329,6 +585,11 @@ export function NotePage() {
       return;
     }
 
+    if (action === "edit") {
+      openSourceStudioForItem(selectedItem);
+      return;
+    }
+
     const mutationAction = mapActionToMutation(action);
     if (mutationAction) {
       updateMutation.mutate({
@@ -338,8 +599,14 @@ export function NotePage() {
       return;
     }
 
-    const placeholderMessage = action === "edit" ? "编辑能力稍后接入。" : "跳过本次的真实动作稍后接入。";
+    /* Legacy placeholder kept commented out after edit now opens source notes.
+    const placeholderMessage =
+      false
+        ? sourceNoteAvailabilityMessage ?? "请在上方 markdown 便签区编辑源文件。"
+        : "跳过本次真实动作，后续再接入。";
     showFeedback(placeholderMessage);
+    */
+    showFeedback("跳过本次真实动作，后续再接入。");
   }
 
   async function handleResourceOpen(resourceId: string) {
@@ -361,6 +628,75 @@ export function NotePage() {
       },
     }));
   }
+
+  useEffect(() => {
+    sourceNotesFingerprintRef.current = null;
+  }, [dataMode, taskSourceRoots]);
+
+  useEffect(() => {
+    if (isCreatingSourceNote) {
+      return;
+    }
+
+    if (sourceNotes.length === 0) {
+      setSelectedSourceNotePath(null);
+      if (!sourceEditorDirty) {
+        setSourceNoteDraft("");
+        setSourceNoteBaseline("");
+      }
+      return;
+    }
+
+    if (selectedSourceNotePath && sourceNotes.some((note) => note.path === selectedSourceNotePath)) {
+      return;
+    }
+
+    const nextSourceNote = sourceNotes[0];
+    setSelectedSourceNotePath(nextSourceNote.path);
+    setSourceNoteDraft(nextSourceNote.content);
+    setSourceNoteBaseline(nextSourceNote.content);
+    setSourceNoteSyncMessage(null);
+  }, [isCreatingSourceNote, selectedSourceNotePath, sourceEditorDirty, sourceNotes]);
+
+  useEffect(() => {
+    if (isCreatingSourceNote || !selectedSourceNote) {
+      return;
+    }
+
+    if (!sourceEditorDirty) {
+      setSourceNoteDraft(selectedSourceNote.content);
+      setSourceNoteBaseline(selectedSourceNote.content);
+      return;
+    }
+
+    if (selectedSourceNote.content !== sourceNoteBaseline) {
+      setSourceNoteSyncMessage("检测到源文件已在外部变更。当前编辑器保留未保存内容，请确认后再保存。");
+    }
+  }, [isCreatingSourceNote, selectedSourceNote, sourceEditorDirty, sourceNoteBaseline]);
+
+  useEffect(() => {
+    if (!sourceNotesQuery.data || dataMode !== "rpc") {
+      return;
+    }
+
+    if (sourceNotesFingerprintRef.current === null) {
+      sourceNotesFingerprintRef.current = sourceNotesFingerprint;
+      return;
+    }
+
+    if (sourceNotesFingerprint === sourceNotesFingerprintRef.current) {
+      return;
+    }
+
+    sourceNotesFingerprintRef.current = sourceNotesFingerprint;
+    if (skipNextSourceNoteRefreshRef.current) {
+      skipNextSourceNoteRefreshRef.current = false;
+      return;
+    }
+
+    setSourceNoteSyncMessage("检测到任务来源 markdown 发生变化，正在同步巡检结果。");
+    void refreshInspectionRef.current("notes_source_polled_change", "检测到任务来源文件变更");
+  }, [dataMode, sourceNotesFingerprint, sourceNotesQuery.data]);
 
   useEffect(() => {
     if (allItems.length === 0) {
@@ -389,6 +725,8 @@ export function NotePage() {
     { label: "后续安排", error: laterQuery.error },
     { label: "重复事项", error: recurringQuery.error },
     { label: "已结束", error: closedQuery.error },
+    { label: "任务来源配置", error: sourceConfigQuery.error },
+    { label: "markdown 便签", error: sourceNotesQuery.error },
   ].filter((item) => item.error);
 
   const pageNotice =
@@ -872,8 +1210,28 @@ export function NotePage() {
             </div>
 
             <div className="note-preview-page__summary-notice">
-              <CircleDashed className="h-4 w-4" />
-              <span>{pageNotice}</span>
+              <div className="note-preview-page__summary-notice-copy">
+                <CircleDashed className="h-4 w-4" />
+                <span>{pageNotice}</span>
+              </div>
+
+              <div className="note-preview-page__summary-notice-actions">
+                <Button className="note-preview-page__summary-action" onClick={openCreateSourceNoteStudio} size="sm" type="button" variant="ghost">
+                  <FilePlus2 className="h-4 w-4" />
+                  新建便签
+                </Button>
+                <Button
+                  className="note-preview-page__summary-action"
+                  disabled={isRunningInspection}
+                  onClick={() => void refreshInspection("notes_page_manual_run")}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ScanSearch className="h-4 w-4" />
+                  {isRunningInspection ? "巡检中..." : "立即巡检"}
+                </Button>
+              </div>
             </div>
           </section>
 
@@ -1053,6 +1411,65 @@ export function NotePage() {
         </AnimatePresence>
 
         <AnimatePresence>
+            {sourceStudioOpen ? (
+              <>
+                <motion.button
+                  animate={{ opacity: 1 }}
+                  className="note-detail-modal__backdrop note-source-modal__backdrop"
+                  exit={{ opacity: 0 }}
+                  initial={{ opacity: 0 }}
+                  onClick={() => setSourceStudioOpen(false)}
+                  type="button"
+                />
+                <motion.div
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  className="note-detail-modal note-detail-modal--source"
+                  exit={{ opacity: 0, scale: 0.98, y: 20 }}
+                  initial={{ opacity: 0, scale: 0.98, y: 16 }}
+                  transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  <section className="note-source-modal">
+                    <div className="note-source-modal__header">
+                      <div>
+                        <p className="note-preview-page__eyebrow">Source Notes</p>
+                        <h2 className="note-source-modal__title">{isCreatingSourceNote ? "空白便签" : "任务来源便签"}</h2>
+                      </div>
+                      <Button className="note-source-modal__close" onClick={() => setSourceStudioOpen(false)} size="icon-sm" type="button" variant="ghost">
+                        <X className="h-4 w-4" />
+                        <span className="sr-only">关闭源便签编辑器</span>
+                      </Button>
+                    </div>
+
+                    <SourceNoteStudio
+                      activePath={isCreatingSourceNote ? null : selectedSourceNotePath}
+                      availabilityMessage={sourceNoteAvailabilityMessage}
+                      draftContent={sourceNoteDraft}
+                      isCreating={isCreatingSourceNote}
+                      isDirty={sourceEditorDirty}
+                      isInspecting={isRunningInspection}
+                      isLoading={sourceNotesLoading}
+                      isSaving={isSavingSourceNote}
+                      notes={sourceNotes}
+                      onChange={(value) => setSourceNoteDraft(value)}
+                      onCreate={openCreateSourceNoteStudio}
+                      onInspect={() => void refreshInspection("notes_page_manual_run")}
+                      onReload={() => {
+                        void sourceConfigQuery.refetch();
+                        void sourceNotesQuery.refetch();
+                      }}
+                      onSave={() => void handleSaveSourceNote()}
+                      onSelect={openSourceNote}
+                      selectedNote={selectedSourceNote}
+                      sourceRoots={resolvedSourceRoots}
+                      syncMessage={sourceNoteSyncMessage}
+                    />
+                  </section>
+                </motion.div>
+              </>
+            ) : null}
+        </AnimatePresence>
+
+        <AnimatePresence>
             {(feedback || queryErrors.length > 0) ? (
               <motion.aside
                 animate={{ opacity: 1, y: 0 }}
@@ -1098,6 +1515,7 @@ export function NotePage() {
           enabled={dataMode === "mock"}
           onToggle={() => {
             setFeedback(null);
+            setSourceNoteSyncMessage(null);
             setDataMode((current) => (current === "rpc" ? "mock" : "rpc"));
           }}
         />

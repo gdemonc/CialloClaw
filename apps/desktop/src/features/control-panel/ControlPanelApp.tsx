@@ -631,7 +631,7 @@ export function ControlPanelApp() {
   };
 
   const handleSave = async () => {
-    if (!hasChanges || isRunningInspection) {
+    if (!hasChanges) {
       return;
     }
 
@@ -677,6 +677,7 @@ export function ControlPanelApp() {
       setIsRunningInspection(false);
     }
   };
+  void handleRunInspection;
 
   const renderSectionContent = () => {
     switch (activeSection) {
@@ -1330,15 +1331,6 @@ export function ControlPanelApp() {
             </div>
 
             <div className="control-panel-shell__action-buttons">
-              <Button
-                className="control-panel-shell__button control-panel-shell__button--secondary"
-                variant="soft"
-                onClick={() => void handleRunInspection()}
-                disabled={isRunningInspection || isSaving}
-              >
-                {isRunningInspection ? "巡检执行中…" : "立即巡检"}
-              </Button>
-
               <Button
                 className="control-panel-shell__button control-panel-shell__button--ghost"
                 variant="soft"
