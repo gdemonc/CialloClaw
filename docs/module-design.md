@@ -612,10 +612,10 @@ flowchart TB
 当前 owner-5 底座约束：
 
 - `notes` 详情补强优先复用现有 `TodoItem / RecurringRule` 数据来源，不新增独立底座对象名；
-- 详情补强字段（如 `note_text`、`prerequisite`、`planned_at`、`ended_at`、`related_resources`）先在后端运行态与后续存储扩展层准备，不直接绕过协议暴露；
-- 重复事项补强字段（如 `repeat_rule_text`、`next_occurrence_at`、`recent_instance_status`、`effective_scope`、`recurring_enabled`）属于规则引擎与巡检底座职责；
-- complete / cancel / restore / toggle-recurring / delete 等事项动作，先由 owner-5 提供真实状态变更底座，再由 4 号冻结正式 RPC 面；
-- “打开相关资料”先由 owner-5 提供资源归一化与目标类型判断底座，是否进入稳定 open RPC 由 4 号统一收口。
+- 详情补强字段中，`note_text`、`prerequisite`、`related_resources`、`linked_task_id` 已进入稳定 `TodoItem` 协议投影；`planned_at`、`ended_at` 等存储补强字段继续留在后端运行态与持久化层承接。
+- 重复事项补强字段中，`repeat_rule_text`、`next_occurrence_at`、`recent_instance_status`、`effective_scope` 用于规则引擎与巡检底座；前端稳定消费的协议字段仍以 `TodoItem.repeat_rule / next_occurrence_at / recent_instance_status / effective_scope / recurring_enabled` 为准。
+- complete / cancel / restore / toggle-recurring / delete 等事项动作已经通过 `agent.notepad.update` 进入稳定 RPC 面；运行态与存储层继续负责真实生命周期收敛。
+- “打开相关资料”当前通过 `related_resources[].open_action / open_payload` 与共享 delivery open 语义承接，不额外冻结专用 `agent.notepad.open_resource` 接口。
 
 ### 3.7.4 镜子记忆与长期协作域
 
@@ -632,7 +632,7 @@ flowchart TB
 - 默认本地存储，可一键开关
 - 长期记忆与运行态恢复状态分离
 - 用户可见、可管理、可删除
-- 周期总结和画像更新受操作面板配置控制
+- 周期总结和画像更新受控制面板配置控制
 
 ### 3.7.5 安全卫士与恢复治理域
 
@@ -650,19 +650,22 @@ flowchart TB
 - 审计日志
 - Docker 沙盒执行策略接入
 
-### 3.7.6 操作面板与系统配置域
+### 3.7.6 控制面板与系统配置域
 
-操作面板是系统配置中心，不承接任务，不替代仪表盘。它承担通用设置、外观与桌面入口、记忆、任务与自动化、数据与日志、模型与密钥等系统级配置职责，是桌面宿主与本地 Harness 行为约束的显式入口。
+控制面板是系统配置中心，不承接任务，不替代仪表盘。它承担通用设置、悬浮球、记忆、任务巡检、模型与安全等系统级配置职责，是桌面宿主与本地 Harness 行为约束的显式入口。
 
 主入口为托盘右键，信息架构分为：
 
 - 通用设置
-- 外观与桌面入口
+- 悬浮球
 - 记忆
-- 任务与自动化
-- 数据与日志
-- 模型与密钥
-- 关于
+- 任务与巡检
+- 模型与安全
+
+补充约束：
+
+- `task_automation` 相关表单当前由 `agent.task_inspector.config.get / update / run` 与 `agent.settings.get / update` 组合承接，而不是单纯落在一个设置 RPC 中。
+- “关于”、日志查看、数据清理等入口仍属后续扩展项，当前桌面控制面板尚未冻结为独立导航分组。
 
 ### 3.7.7 扩展能力中心与多模型配置域
 
