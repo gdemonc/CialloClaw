@@ -1903,8 +1903,13 @@ test("conversation session reuse expires after the backend freshness window", ()
   const originalDate = globalThis.Date;
 
   class FreshFakeDate extends Date {
-    constructor(...args: ConstructorParameters<typeof Date>) {
-      super(args.length === 0 ? FreshFakeDate.now() : args[0]);
+    constructor(...args: unknown[]) {
+      if (args.length === 0) {
+        super(FreshFakeDate.now());
+        return;
+      }
+
+      super(args[0] as string | number | Date);
     }
 
     static now() {
@@ -1935,8 +1940,13 @@ test("conversation session reuse expires after the backend freshness window", ()
     Object.defineProperty(globalThis, "Date", {
       configurable: true,
       value: class ExpiredFakeDate extends Date {
-        constructor(...args: ConstructorParameters<typeof Date>) {
-          super(args.length === 0 ? ExpiredFakeDate.now() : args[0]);
+        constructor(...args: unknown[]) {
+          if (args.length === 0) {
+            super(ExpiredFakeDate.now());
+            return;
+          }
+
+          super(args[0] as string | number | Date);
         }
 
         static now() {

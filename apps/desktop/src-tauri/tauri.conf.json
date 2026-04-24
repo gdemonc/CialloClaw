@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "corepack pnpm dev",
-    "beforeBuildCommand": "corepack pnpm build"
+    "beforeDevCommand": "node ./src-tauri/scripts/runWithSidecar.mjs dev",
+    "beforeBuildCommand": "node ./src-tauri/scripts/runWithSidecar.mjs build"
   },
   "bundle": {
     "icon": [
