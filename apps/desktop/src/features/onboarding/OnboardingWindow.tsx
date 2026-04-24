@@ -20,7 +20,7 @@ function getOnboardingCopy(step: string) {
       return {
         body: "这是一段约 2 分钟的轻量引导。你可以随时跳过，之后也能在控制面板重新查看。",
         primaryLabel: "开始引导",
-        secondaryLabel: "跳过",
+        secondaryLabel: null,
         stepLabel: null,
         title: "欢迎来到 CialloClaw",
       };

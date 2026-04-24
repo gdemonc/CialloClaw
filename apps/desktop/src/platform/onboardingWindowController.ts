@@ -67,5 +67,5 @@ export async function hideOnboardingWindow() {
     return;
   }
 
-  await onboardingWindow.hide();
+  await onboardingWindow.destroy();
 }

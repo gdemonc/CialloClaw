@@ -34,7 +34,7 @@ export type ShellBallPendingFileAction = "append" | "remove";
 
 export type ShellBallIntentDecision = "confirm" | "cancel";
 
-export type ShellBallBubbleAction = "pin" | "unpin" | "delete";
+export type ShellBallBubbleAction = "pin" | "unpin" | "delete" | "allow_approval" | "deny_approval";
 
 export type ShellBallBubbleActionSource = "bubble" | "pinned_window";
 
