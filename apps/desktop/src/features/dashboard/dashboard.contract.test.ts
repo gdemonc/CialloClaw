@@ -336,6 +336,89 @@ function loadDashboardSettingsSnapshotModule(rpcMethods?: {
   }, rpcMethods);
 }
 
+function loadMirrorServiceModule() {
+  return withDesktopAliasRuntime((requireFn) => {
+    const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/memory/mirrorService.js");
+    delete requireFn.cache[modulePath];
+
+    return requireFn(modulePath) as {
+      applyMirrorSettingsSnapshot: (
+        current: {
+          overview: {
+            history_summary: string[];
+          };
+          insight: {
+            badge: string;
+          };
+          latestRestorePoint: RecoveryPoint | null;
+          rpcContext: {
+            serverTime: string | null;
+            warnings: string[];
+          };
+          settingsSnapshot: {
+            source: string;
+            settings: {
+              memory: {
+                enabled: boolean;
+                lifecycle: string;
+              };
+              general: {
+                download: {
+                  ask_before_save_each_file: boolean;
+                };
+              };
+            };
+          };
+          source: "rpc" | "mock";
+          conversations: Array<{ id: string }>;
+        },
+        settingsSnapshot: {
+          source: string;
+          settings: {
+            memory: {
+              enabled: boolean;
+              lifecycle: string;
+            };
+            general: {
+              download: {
+                ask_before_save_each_file: boolean;
+              };
+            };
+          };
+        },
+      ) => {
+        overview: {
+          history_summary: string[];
+        };
+        insight: {
+          badge: string;
+        };
+        latestRestorePoint: RecoveryPoint | null;
+        rpcContext: {
+          serverTime: string | null;
+          warnings: string[];
+        };
+        settingsSnapshot: {
+          source: string;
+          settings: {
+            memory: {
+              enabled: boolean;
+              lifecycle: string;
+            };
+            general: {
+              download: {
+                ask_before_save_each_file: boolean;
+              };
+            };
+          };
+        };
+        source: "rpc" | "mock";
+        conversations: Array<{ id: string }>;
+      };
+    };
+  });
+}
+
 type DashboardContractRpcMethodOverrides = {
   controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
   convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
@@ -1474,6 +1557,127 @@ test("dashboard settings mutation reloads only the touched memory scope after rp
       Object.assign(globalThis, { window: originalWindow });
     }
   }
+});
+
+test("mirror overview can reuse a refreshed settings snapshot without reloading the page data", async () => {
+  const { updateDashboardSettings } = loadDashboardSettingsMutationModule({
+    updateSettings: async () => ({
+      apply_mode: "immediate",
+      need_restart: false,
+      updated_keys: ["memory.enabled", "memory.lifecycle"],
+      effective_settings: {
+        memory: {
+          enabled: false,
+          lifecycle: "session",
+        },
+      },
+    }),
+    getSettingsDetailed: async () => ({
+      data: {
+        settings: {
+          memory: {
+            enabled: false,
+            lifecycle: "session",
+            work_summary_interval: {
+              unit: "week",
+              value: 1,
+            },
+            profile_refresh_interval: {
+              unit: "month",
+              value: 1,
+            },
+          },
+        },
+      },
+      meta: {
+        server_time: "2026-04-24T09:40:00Z",
+      },
+      warnings: [],
+    }),
+  });
+  const { applyMirrorSettingsSnapshot } = loadMirrorServiceModule();
+  const originalWindow = globalThis.window;
+  const storage = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      storage.set(key, value);
+    },
+    removeItem(key: string) {
+      storage.delete(key);
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      localStorage,
+    },
+  });
+
+  try {
+    const result = await updateDashboardSettings({
+      memory: {
+        enabled: false,
+        lifecycle: "session",
+      },
+    });
+    const currentOverview = {
+      overview: {
+        history_summary: ["recent mirror summary"],
+      },
+      insight: {
+        badge: "mirror ready",
+      },
+      latestRestorePoint: null,
+      rpcContext: {
+        serverTime: "2026-04-24T09:00:00Z",
+        warnings: [],
+      },
+      settingsSnapshot: {
+        source: "rpc",
+        settings: {
+          memory: {
+            enabled: true,
+            lifecycle: "30d",
+          },
+          general: {
+            download: {
+              ask_before_save_each_file: true,
+            },
+          },
+        },
+      },
+      source: "rpc" as const,
+      conversations: [{ id: "conv_1" }],
+    };
+
+    const nextOverview = applyMirrorSettingsSnapshot(currentOverview, result.snapshot);
+
+    assert.equal(nextOverview.settingsSnapshot.settings.memory.enabled, false);
+    assert.equal(nextOverview.settingsSnapshot.settings.memory.lifecycle, "session");
+    assert.equal(nextOverview.settingsSnapshot.settings.general.download.ask_before_save_each_file, true);
+    assert.deepEqual(nextOverview.overview.history_summary, currentOverview.overview.history_summary);
+    assert.deepEqual(nextOverview.conversations, currentOverview.conversations);
+    assert.equal(nextOverview.source, "rpc");
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
+test("mirror app reuses the mutation snapshot instead of triggering a second mirror overview reload", () => {
+  const mirrorAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/MirrorApp.tsx"), "utf8");
+
+  assert.match(mirrorAppSource, /applyMirrorSettingsSnapshot\(current, result\.snapshot\)/);
+  assert.doesNotMatch(
+    mirrorAppSource,
+    /const handleSettingsUpdate = useCallback\([\s\S]*loadMirrorOverviewData\(dataMode\)/,
+  );
 });
 
 test("dashboard settings mutation keeps fallback snapshots read-only when the RPC transport is unavailable", async () => {

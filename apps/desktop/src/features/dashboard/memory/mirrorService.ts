@@ -229,6 +229,20 @@ export function getInitialMirrorOverviewData(): MirrorOverviewData {
   );
 }
 
+/**
+ * Reuses an already refreshed dashboard settings snapshot inside the current
+ * mirror overview state so settings writes do not need a second mirror reload.
+ */
+export function applyMirrorSettingsSnapshot(
+  current: MirrorOverviewData,
+  settingsSnapshot: DashboardSettingsSnapshotData,
+): MirrorOverviewData {
+  return {
+    ...current,
+    settingsSnapshot,
+  };
+}
+
 export async function loadMirrorOverviewData(source: MirrorOverviewSource = "rpc"): Promise<MirrorOverviewData> {
   if (source === "mock") {
     const overview = buildFallbackOverview();
