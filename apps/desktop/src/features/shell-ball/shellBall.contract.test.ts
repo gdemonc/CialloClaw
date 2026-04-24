@@ -5380,6 +5380,175 @@ test("shell-ball replays delivery.ready notifications that arrive before submit 
   assert.match(deliveryBubble?.bubble.text ?? "", /summary\.docx/i);
 });
 
+test("shell-ball replays task.updated notifications that arrive before submit resolves", async () => {
+  const coordinatorSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"), "utf8");
+  let taskUpdatedListener: ((payload: {
+    task_id: string;
+    session_id: string | null;
+    status: "processing" | "waiting_auth";
+  }) => void) | null = null;
+  let resolveSubmit: ((value: {
+    task: {
+      task_id: string;
+      status: "processing";
+    };
+    bubble_message: null;
+    delivery_result: null;
+  }) => void) | null = null;
+  const reactRuntime = createImmediateShellBallReactRuntime();
+
+  await withSourceModuleRuntime(
+    resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"),
+    {
+      react: reactRuntime.react,
+      "@tauri-apps/api/window": {
+        getCurrentWindow() {
+          return {
+            label: shellBallWindowLabels.ball,
+            listen() {
+              return Promise.resolve(() => {});
+            },
+            onMoved() {
+              return Promise.resolve(() => {});
+            },
+            onResized() {
+              return Promise.resolve(() => {});
+            },
+            outerPosition() {
+              return Promise.resolve({ toLogical: () => ({ x: 0, y: 0 }) });
+            },
+            outerSize() {
+              return Promise.resolve({ toLogical: () => ({ width: 124, height: 104 }) });
+            },
+            scaleFactor() {
+              return Promise.resolve(1);
+            },
+          };
+        },
+      },
+      "@/rpc/subscriptions": {
+        subscribeApprovalPending() {
+          return () => {};
+        },
+        subscribeDeliveryReady() {
+          return () => {};
+        },
+        subscribeTaskUpdated(callback: typeof taskUpdatedListener) {
+          taskUpdatedListener = callback;
+          return () => {};
+        },
+      },
+      "@/services/agentInputService": {
+        submitTextInput() {
+          return new Promise((resolve) => {
+            resolveSubmit = resolve as typeof resolveSubmit;
+          });
+        },
+      },
+      "@/features/dashboard/tasks/taskOutput.service": {
+        openTaskDeliveryForTask() {
+          return Promise.resolve(null);
+        },
+        resolveTaskOpenExecutionPlan() {
+          return {
+            feedback: "open task detail",
+            mode: "task_detail" as const,
+            path: null,
+            taskId: null,
+            url: null,
+          };
+        },
+        performTaskOpenExecution() {
+          return Promise.resolve("open task detail");
+        },
+      },
+      "@/features/dashboard/shared/dashboardTaskDetailNavigation": {
+        requestDashboardTaskDetailOpen() {
+          return Promise.resolve();
+        },
+      },
+      "../../platform/shellBallWindowController": {
+        SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME: { width: 240, height: 140 },
+        closeShellBallPinnedBubbleWindow() {
+          return Promise.resolve();
+        },
+        emitToShellBallWindowLabel() {
+          return Promise.resolve();
+        },
+        getShellBallPinnedBubbleIdFromLabel(): string | null {
+          return null;
+        },
+        getShellBallPinnedBubbleWindowAnchor() {
+          return { x: 0, y: 0 };
+        },
+        getShellBallPinnedBubbleWindowLabel(bubbleId: string) {
+          return `shell-ball-bubble-pinned-${bubbleId}`;
+        },
+        openShellBallPinnedBubbleWindow() {
+          return Promise.resolve();
+        },
+        setShellBallPinnedBubbleWindowVisible() {
+          return Promise.resolve();
+        },
+        shellBallWindowLabels,
+      },
+      "./useShellBallWindowMetrics": {
+        getShellBallBubbleAnchor() {
+          return { x: 0, y: 0 };
+        },
+      },
+    },
+    async (moduleExports) => {
+      const { useShellBallCoordinator } = moduleExports as {
+        useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator;
+      };
+
+      const { handlePrimaryAction } = useShellBallCoordinator({
+        visualState: "hover_input",
+        regionActive: false,
+        inputValue: "截屏",
+        inputFocused: true,
+        finalizedSpeechPayload: null,
+        voicePreview: null,
+        voiceHintMode: "hidden",
+        setInputValue: () => {},
+        onFinalizedSpeechHandled: () => {},
+        onRegionEnter: () => {},
+        onRegionLeave: () => {},
+        onInputHoverChange: () => {},
+        onInputFocusChange: () => {},
+        onSubmitText: async () => null,
+        onAttachFile: () => {},
+        onPrimaryClick: () => {},
+      });
+
+      const submitPromise = handlePrimaryAction("submit");
+      await flushAsyncEffects();
+
+      taskUpdatedListener?.({
+        task_id: "task-screen-status-race",
+        session_id: null,
+        status: "waiting_auth",
+      });
+
+      resolveSubmit?.({
+        task: {
+          task_id: "task-screen-status-race",
+          status: "processing",
+        },
+        bubble_message: null,
+        delivery_result: null,
+      });
+
+      await submitPromise;
+      await flushAsyncEffects();
+    },
+  );
+
+  assert.match(coordinatorSource, /const queuedTaskUpdatedNotificationsRef = useRef\(new Map<string, QueuedTaskUpdatedNotification>\(\)\);/);
+  assert.equal(reactRuntime.getVisualState(), "waiting_auth");
+});
+
 test("shell-ball ignores untracked approval.pending notifications without a pending submit", async () => {
   let approvalPendingListener: ((payload: {
     task_id: string;
