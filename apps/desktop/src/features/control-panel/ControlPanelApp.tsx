@@ -2,7 +2,8 @@
  * ControlPanelApp renders the desktop settings surface with a sidebar-driven
  * layout while preserving the existing draft, inspection, and save flows.
  */
-import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Window } from "@tauri-apps/api/window";
 import {
   BrainCircuit,
   CircleHelp,
@@ -24,8 +25,18 @@ import {
   type ControlPanelData,
   type ControlPanelSaveResult,
 } from "@/services/controlPanelService";
+import { loadSettings } from "@/services/settingsService";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { buildDesktopOnboardingPresentation } from "@/features/onboarding/onboardingGeometry";
+import {
+  advanceDesktopOnboarding,
+  setDesktopOnboardingPresentation,
+  startDesktopOnboarding,
+} from "@/features/onboarding/onboardingService";
+import { useDesktopOnboardingActions } from "@/features/onboarding/useDesktopOnboardingActions";
+import { useDesktopOnboardingSession } from "@/features/onboarding/useDesktopOnboardingSession";
 import { requestCurrentDesktopWindowClose, startCurrentDesktopWindowDragging } from "@/platform/desktopWindowFrame";
+import { showShellBallWindow } from "@/platform/shellBallWindowController";
 import "./controlPanel.css";
 
 type ControlPanelSectionId = "general" | "desktop" | "memory" | "automation" | "models";
@@ -56,6 +67,7 @@ type SidebarItemProps = {
 
 type SettingsCardProps = {
   children: ReactNode;
+  className?: string;
   description?: string;
   title: string;
 };
@@ -257,7 +269,6 @@ const NAVIGATION_GROUPS: NavigationGroup[] = [
  *
  * @param applyMode Backend apply mode returned by the settings snapshot.
  * @param needRestart Whether the current change set requires an app restart.
- * @param source Control-panel data source mode.
  * @returns User-facing save feedback copy.
  */
 function getApplyModeCopy(applyMode: string, needRestart: boolean) {
@@ -270,6 +281,51 @@ function getApplyModeCopy(applyMode: string, needRestart: boolean) {
   }
 
   return "设置已即时生效。";
+}
+
+function buildLocalInspectorFallback(settings: ControlPanelData["settings"]): ControlPanelData["inspector"] {
+  return {
+    task_sources: settings.task_automation.task_sources,
+    inspection_interval: settings.task_automation.inspection_interval,
+    inspect_on_file_change: settings.task_automation.inspect_on_file_change,
+    inspect_on_startup: settings.task_automation.inspect_on_startup,
+    remind_before_deadline: settings.task_automation.remind_before_deadline,
+    remind_when_stale: settings.task_automation.remind_when_stale,
+  };
+}
+
+/**
+ * Keeps the control-panel shell renderable when the RPC bootstrap fails by
+ * falling back to the last persisted local snapshot under an explicit error banner.
+ */
+function buildLocalControlPanelSnapshot(): ControlPanelData {
+  const settings = loadSettings().settings;
+
+  return {
+    settings,
+    inspector: buildLocalInspectorFallback(settings),
+    providerApiKeyInput: "",
+    securitySummary: {
+      security_status: "execution_error",
+      pending_authorizations: 0,
+      latest_restore_point: null,
+      token_cost_summary: {
+        current_task_tokens: 0,
+        current_task_cost: 0,
+        today_tokens: 0,
+        today_cost: 0,
+        single_task_limit: 0,
+        daily_limit: 0,
+        budget_auto_downgrade: settings.models.budget_auto_downgrade,
+      },
+    },
+    source: "rpc",
+    warnings: [],
+  };
+}
+
+function shouldSurfaceRpcErrorBanner(message: string) {
+  return message.includes("暂时不可用") || message.includes("重新获取最新配置失败");
 }
 
 function resolveControlPanelAppearance(
@@ -320,9 +376,9 @@ function SidebarItem({ active, item, onSelect }: SidebarItemProps) {
   );
 }
 
-function SettingsCard({ children, description, title }: SettingsCardProps) {
+function SettingsCard({ children, className, description, title }: SettingsCardProps) {
   return (
-    <section className="control-panel-shell__card">
+    <section className={className ? `control-panel-shell__card ${className}` : "control-panel-shell__card"}>
       <div className="control-panel-shell__card-header">
         <div className="control-panel-shell__title-row">
           <Heading as="h2" size="4" className="control-panel-shell__card-title">
@@ -491,6 +547,8 @@ function applyControlPanelSaveResult(base: ControlPanelData, result: ControlPane
  * @returns The desktop control panel window.
  */
 export function ControlPanelApp() {
+  const onboardingSession = useDesktopOnboardingSession();
+  const autoAdvancedControlPanelStepRef = useRef(false);
   const [activeSection, setActiveSection] = useState<ControlPanelSectionId>("general");
   const [panelData, setPanelData] = useState<ControlPanelData | null>(null);
   const [draft, setDraft] = useState<ControlPanelData | null>(null);
@@ -547,7 +605,10 @@ export function ControlPanelApp() {
           return;
         }
 
+        const fallbackData = buildLocalControlPanelSnapshot();
         setLoadError(error instanceof Error ? error.message : "控制面板加载失败。");
+        setPanelData((current) => current ?? fallbackData);
+        setDraft((current) => current ?? fallbackData);
       }
     })();
 
@@ -561,12 +622,76 @@ export function ControlPanelApp() {
 
     try {
       const nextData = await loadControlPanelData();
+      setLoadError(null);
       setPanelData(nextData);
       setDraft(nextData);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "控制面板加载失败。");
     }
   };
+
+  useEffect(() => {
+    if (onboardingSession?.isOpen !== true) {
+      autoAdvancedControlPanelStepRef.current = false;
+      return;
+    }
+
+    if (onboardingSession.step === "tray_hint" && !autoAdvancedControlPanelStepRef.current) {
+      autoAdvancedControlPanelStepRef.current = true;
+      setActiveSection("models");
+      void Window.getByLabel("dashboard").then((windowHandle) => {
+        void windowHandle?.close();
+      });
+      void advanceDesktopOnboarding("control_panel_api_key");
+      return;
+    }
+
+    if (onboardingSession.step === "control_panel_api_key") {
+      autoAdvancedControlPanelStepRef.current = true;
+      setActiveSection("models");
+    }
+  }, [onboardingSession]);
+
+  useDesktopOnboardingActions(
+    "control-panel",
+    (action) => {
+      if (action.type === "close_control_panel") {
+        void requestCurrentDesktopWindowClose();
+      }
+    },
+  );
+
+  useEffect(() => {
+    if (onboardingSession?.isOpen !== true) {
+      return;
+    }
+
+    if (onboardingSession.step === "control_panel_api_key" && draft?.settings.models.provider_api_key_configured) {
+      void advanceDesktopOnboarding("done");
+    }
+  }, [draft?.settings.models.provider_api_key_configured, onboardingSession]);
+
+  useEffect(() => {
+    if (
+      onboardingSession?.isOpen !== true ||
+      (onboardingSession.step !== "control_panel_api_key" && onboardingSession.step !== "done")
+    ) {
+      return;
+    }
+
+    void (async () => {
+      const presentation = await buildDesktopOnboardingPresentation({
+        anchors: [],
+        placement: onboardingSession.step === "control_panel_api_key" ? "top-right" : "center",
+        step: onboardingSession.step,
+        windowLabel: "control-panel",
+      });
+
+      if (presentation !== null) {
+        await setDesktopOnboardingPresentation(presentation);
+      }
+    })();
+  }, [onboardingSession]);
 
   if (!draft || !panelData) {
     return (
@@ -594,6 +719,7 @@ export function ControlPanelApp() {
   const providerApiKeyStatus = draft.settings.models.provider_api_key_configured ? "已配置" : "未配置";
   const resolvedAppearance = resolveControlPanelAppearance(draft.settings.general.theme_mode, systemAppearance);
   const providerApiKeyHint = "通过 JSON-RPC `agent.settings.update` 提交；只写入后端 Stronghold，不会回显明文。";
+  const hasRpcLoadError = loadError !== null;
 
   const saveStateValue = hasChanges ? <StatusPill tone="pending">待保存</StatusPill> : <StatusPill tone="synced">已同步</StatusPill>;
 
@@ -631,6 +757,14 @@ export function ControlPanelApp() {
     setSaveFeedback("已恢复为上次载入的设置快照。");
   };
 
+  const handleReplayOnboarding = () => {
+    void (async () => {
+      await showShellBallWindow("ball");
+      await startDesktopOnboarding("manual", "control-panel");
+      await requestCurrentDesktopWindowClose();
+    })();
+  };
+
   const handleSave = async () => {
     if (!hasChanges || isRunningInspection) {
       return;
@@ -644,6 +778,7 @@ export function ControlPanelApp() {
       });
       const nextPanelData = applyControlPanelSaveResult(panelData, result);
       const nextDraft = applyControlPanelSaveResult(draft, result);
+      setLoadError(null);
       setPanelData(nextPanelData);
       setDraft(nextDraft);
       setSaveFeedback(getApplyModeCopy(result.applyMode, result.needRestart));
@@ -655,7 +790,11 @@ export function ControlPanelApp() {
         setDraft(nextDraft);
       }
 
-      setSaveFeedback(error instanceof Error ? error.message : "保存控制面板设置失败。");
+      const errorMessage = error instanceof Error ? error.message : "保存控制面板设置失败。";
+      if (shouldSurfaceRpcErrorBanner(errorMessage)) {
+        setLoadError(errorMessage);
+      }
+      setSaveFeedback(errorMessage);
     } finally {
       setIsSaving(false);
     }
@@ -1140,7 +1279,8 @@ export function ControlPanelApp() {
       case "models":
         return (
           <>
-            <SettingsCard title="模型路由" description="配置 provider、接口地址和默认模型。">
+            <div>
+              <SettingsCard title="模型路由" description="配置 provider、接口地址和默认模型。">
               <ControlLine label="Provider" hint="当前任务默认使用的模型提供商。">
                 <TextField.Root
                   className="control-panel-shell__input"
@@ -1219,21 +1359,33 @@ export function ControlPanelApp() {
                   }))
                 }
               />
-            </SettingsCard>
+              </SettingsCard>
+            </div>
 
             <SettingsCard title="安全与预算摘要" description="查看当前安全状态、授权数量与预算限制。">
               <InfoRow label="当前模型" value={draft.settings.models.model} />
               <InfoRow label="API Key 状态" value={providerApiKeyStatus} />
-              <InfoRow label="安全状态" value={draft.securitySummary.security_status} />
-              <InfoRow label="待确认授权" value={draft.securitySummary.pending_authorizations} />
-              <InfoRow label="今日成本" value={`¥${draft.securitySummary.token_cost_summary.today_cost.toFixed(2)}`} />
+              <InfoRow label="安全状态" value={hasRpcLoadError ? "暂不可用" : draft.securitySummary.security_status} />
+              <InfoRow label="待确认授权" value={hasRpcLoadError ? "暂不可用" : draft.securitySummary.pending_authorizations} />
+              <InfoRow
+                label="今日成本"
+                value={hasRpcLoadError ? "暂不可用" : `¥${draft.securitySummary.token_cost_summary.today_cost.toFixed(2)}`}
+              />
               <InfoRow
                 label="单任务上限"
-                value={`${draft.securitySummary.token_cost_summary.single_task_limit.toLocaleString("zh-CN")} tokens`}
+                value={
+                  hasRpcLoadError
+                    ? "暂不可用"
+                    : `${draft.securitySummary.token_cost_summary.single_task_limit.toLocaleString("zh-CN")} tokens`
+                }
               />
               <InfoRow
                 label="当日上限"
-                value={`${draft.securitySummary.token_cost_summary.daily_limit.toLocaleString("zh-CN")} tokens`}
+                value={
+                  hasRpcLoadError
+                    ? "暂不可用"
+                    : `${draft.securitySummary.token_cost_summary.daily_limit.toLocaleString("zh-CN")} tokens`
+                }
               />
             </SettingsCard>
           </>
@@ -1298,6 +1450,30 @@ export function ControlPanelApp() {
 
         <section className="control-panel-shell__content">
           <header className="control-panel-shell__hero">
+            {hasRpcLoadError ? (
+              <section className="control-panel-shell__error-banner" aria-live="polite">
+                <div className="control-panel-shell__error-banner-copy">
+                  <Text as="p" size="2" weight="medium" className="control-panel-shell__error-banner-title">
+                    设置服务连接失败
+                  </Text>
+                  <Text as="p" size="2" className="control-panel-shell__error-banner-text">
+                    {loadError}
+                  </Text>
+                  <Text as="p" size="1" className="control-panel-shell__error-banner-note">
+                    当前仍展示上一次成功同步的本地快照，重新连接后请刷新页面以回显正式设置。
+                  </Text>
+                </div>
+
+                <Button
+                  className="control-panel-shell__button control-panel-shell__button--secondary"
+                  variant="soft"
+                  onClick={() => void handleReload()}
+                >
+                  重新加载
+                </Button>
+              </section>
+            ) : null}
+
             <div className="control-panel-shell__hero-heading">
               <Text as="p" size="1" className="control-panel-shell__eyebrow">
                 {activeMeta.group}
@@ -1331,6 +1507,15 @@ export function ControlPanelApp() {
             </div>
 
             <div className="control-panel-shell__action-buttons">
+              <Button
+                className="control-panel-shell__button control-panel-shell__button--ghost"
+                variant="soft"
+                color="gray"
+                onClick={handleReplayOnboarding}
+                disabled={isSaving || isRunningInspection}
+              >
+                重新查看新手引导
+              </Button>
               <Button
                 className="control-panel-shell__button control-panel-shell__button--secondary"
                 variant="soft"
