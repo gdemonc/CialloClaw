@@ -10,7 +10,6 @@
     "beforeBuildCommand": "corepack pnpm build"
   },
   "bundle": {
-<<<<<<< feat/desktop-packaging-foundation
     "active": true,
     "targets": ["nsis", "msi"],
     "externalBin": ["bin/cialloclaw-service"],
@@ -26,15 +25,6 @@
         "language": "zh-CN"
       }
     }
-=======
-    "icon": [
-      "icons/icon.png",
-      "icons/icon.ico"
-    ],
-    "externalBin": [
-      "binaries/local-service"
-    ]
->>>>>>> main
   },
   "app": {
     "windows": [
