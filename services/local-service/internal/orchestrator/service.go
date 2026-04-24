@@ -7431,7 +7431,7 @@ func (s *Service) failExecutionTask(task runengine.TaskRecord, taskIntent map[st
 	auditAction := "execute_task"
 	auditTarget := impactScopeTarget(impactScope, targetPathFromIntent(taskIntent))
 	auditResult := "failed"
-	failureCode, failureCategory := classifyExecutionFailure(task, err)
+	failureCode, failureCategory := classifyScreenFailure(task, err)
 	if errors.Is(err, execution.ErrRecoveryPointPrepareFailed) {
 		securityStatus = "execution_error"
 		stepName = "recovery_prepare_failed"
@@ -7466,16 +7466,6 @@ func (s *Service) failExecutionTask(task runengine.TaskRecord, taskIntent map[st
 	return updatedTask, bubble
 }
 
-// classifyExecutionFailure keeps task-facing runtime summaries and governance
-// metadata aligned with the formal protocol error names without exposing raw
-// provider or worker errors as long-term UI contracts.
-func classifyExecutionFailure(task runengine.TaskRecord, err error) (string, string) {
-	if failureCode, failureCategory := classifyScreenFailure(task, err); failureCode != "" || failureCategory != "" {
-		return failureCode, failureCategory
-	}
-	return classifyModelFailure(err)
-}
-
 // classifyScreenFailure keeps screen-task runtime summaries and governance
 // metadata aligned with the formal protocol error names while still exposing a
 // task-facing failure category for UI grouping.
@@ -7508,46 +7498,10 @@ func classifyScreenFailure(task runengine.TaskRecord, err error) (string, string
 	}
 }
 
-// classifyModelFailure normalizes formal model-provider failures into stable
-// protocol codes so task detail and runtime summaries can expose one canonical
-// failure contract instead of transport-specific error strings.
-func classifyModelFailure(err error) (string, string) {
-	switch {
-	case errors.Is(err, model.ErrModelProviderUnsupported):
-		return "MODEL_PROVIDER_NOT_FOUND", "model_provider"
-	case errors.Is(err, model.ErrModelProviderRequired):
-		return "MODEL_PROVIDER_NOT_FOUND", "model_provider"
-	case model.IsProviderRuntimeUnavailable(err):
-		return "MODEL_RUNTIME_UNAVAILABLE", "model_runtime"
-	case errors.Is(err, model.ErrToolCallingNotSupported):
-		return "MODEL_NOT_ALLOWED", "model_capability"
-	case errors.Is(err, model.ErrOpenAIEndpointRequired), errors.Is(err, model.ErrOpenAIModelIDRequired), errors.Is(err, model.ErrOpenAIHTTPStatus):
-		return "MODEL_NOT_ALLOWED", "model_configuration"
-	case errors.Is(err, tools.ErrToolOutputInvalid):
-		return "TOOL_OUTPUT_INVALID", "model_output"
-	case errors.Is(err, model.ErrClientNotConfigured), errors.Is(err, model.ErrOpenAIAPIKeyRequired), errors.Is(err, model.ErrSecretSourceFailed), errors.Is(err, model.ErrSecretNotFound), errors.Is(err, storage.ErrSecretNotFound), errors.Is(err, storage.ErrStrongholdUnavailable), errors.Is(err, storage.ErrSecretStoreAccessFailed):
-		return "STRONGHOLD_ACCESS_FAILED", "model_credentials"
-	default:
-		return "", ""
-	}
-}
-
 func executionFailureBubble(err error) string {
 	switch {
 	case errors.Is(err, execution.ErrRecoveryPointPrepareFailed):
 		return "执行失败：执行前恢复点创建失败，请稍后重试。"
-	case errors.Is(err, model.ErrClientNotConfigured), errors.Is(err, model.ErrOpenAIAPIKeyRequired), errors.Is(err, model.ErrSecretSourceFailed), errors.Is(err, model.ErrSecretNotFound), errors.Is(err, storage.ErrSecretNotFound), errors.Is(err, storage.ErrStrongholdUnavailable), errors.Is(err, storage.ErrSecretStoreAccessFailed):
-		return "执行失败：当前模型凭证未配置或不可访问，请先完成模型设置后重试。"
-	case errors.Is(err, model.ErrModelProviderRequired), errors.Is(err, model.ErrModelProviderUnsupported):
-		return "执行失败：当前模型提供方未登记，请检查模型设置后重试。"
-	case model.IsProviderRuntimeUnavailable(err):
-		return "执行失败：当前模型服务暂时不可用，请稍后重试。"
-	case errors.Is(err, model.ErrToolCallingNotSupported):
-		return "执行失败：当前模型不支持所需的工具调用能力，请调整模型设置后重试。"
-	case errors.Is(err, model.ErrOpenAIEndpointRequired), errors.Is(err, model.ErrOpenAIModelIDRequired), errors.Is(err, model.ErrOpenAIHTTPStatus):
-		return "执行失败：当前模型配置不完整或请求被提供方拒绝，请检查模型设置后重试。"
-	case errors.Is(err, tools.ErrToolOutputInvalid):
-		return "执行失败：当前模型返回结果不完整，请稍后重试。"
 	case errors.Is(err, tools.ErrWorkspaceBoundaryDenied):
 		return "执行失败：目标超出工作区边界，已阻止本次操作。"
 	case errors.Is(err, tools.ErrCommandNotAllowed):
@@ -7621,7 +7575,7 @@ func (s *Service) buildBudgetFailureAudit(task runengine.TaskRecord, executionEr
 	if executionErr == nil {
 		return nil
 	}
-	if failureCode, _ := classifyModelFailure(executionErr); failureCode == "" {
+	if !errors.Is(executionErr, model.ErrClientNotConfigured) && !errors.Is(executionErr, model.ErrToolCallingNotSupported) && !errors.Is(executionErr, model.ErrModelProviderUnsupported) && !errors.Is(executionErr, model.ErrSecretNotFound) && !errors.Is(executionErr, model.ErrSecretSourceFailed) {
 		return nil
 	}
 	return map[string]any{
