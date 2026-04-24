@@ -9,6 +9,7 @@ import type {
   AgentNotepadConvertToTaskResult,
   AgentNotepadListParams,
   AgentNotepadListResult,
+  AgentSettingsGetParams,
   AgentNotepadUpdateParams,
   AgentNotepadUpdateResult,
   AgentTaskArtifactListResult,
@@ -309,7 +310,7 @@ function loadDashboardSettingsSnapshotModule(rpcMethods?: {
     return requireFn(modulePath) as {
       loadDashboardSettingsSnapshot: (
         source?: "rpc" | "mock",
-        scope?: "all" | "general" | "floating_ball" | "memory" | "task_automation" | "models",
+        scope?: AgentSettingsGetParams["scope"],
       ) => Promise<{
         source: string;
         settings: {
