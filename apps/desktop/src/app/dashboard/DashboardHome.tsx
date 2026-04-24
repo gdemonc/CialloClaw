@@ -19,7 +19,7 @@ import { setDesktopOnboardingPresentation } from "@/features/onboarding/onboardi
 import { useDesktopOnboardingActions } from "@/features/onboarding/useDesktopOnboardingActions";
 import { useDesktopOnboardingSession } from "@/features/onboarding/useDesktopOnboardingSession";
 import { openControlPanelFromTray } from "@/platform/trayController";
-import { closeDesktopWindow, openOrFocusDesktopWindow } from "@/platform/windowController";
+import { openOrFocusDesktopWindow } from "@/platform/windowController";
 import { cn } from "@/utils/cn";
 import "@/features/shell-ball/shellBall.css";
 import "@/features/dashboard/home/dashboardHome.css";
@@ -162,7 +162,6 @@ export function DashboardHome({
     useCallback((action) => {
       if (action.type === "open_control_panel") {
         void openControlPanelFromTray();
-        void closeDesktopWindow("dashboard");
       }
 
       if (action.type === "open_dashboard") {
