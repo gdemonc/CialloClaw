@@ -235,18 +235,31 @@ fn record_window_switch(context: &ActiveWindowContextPayload) {
 }
 
 fn record_page_switch(context: &ActiveWindowContextPayload) {
-    let fingerprint = format!(
-        "{}|{}|{}",
-        context.app_name,
-        context.title.clone().unwrap_or_default(),
-        context.url.clone().unwrap_or_default()
-    );
+    record_page_switch_internal(context, false);
+}
+
+fn record_page_switch_after_url_refresh(context: &ActiveWindowContextPayload) {
+    record_page_switch_internal(context, true);
+}
+
+fn record_page_switch_internal(
+    context: &ActiveWindowContextPayload,
+    prefer_lightweight_match: bool,
+) {
+    let fingerprint = create_page_switch_fingerprint(context);
+    let lightweight_fingerprint = prefer_lightweight_match
+        .then(|| create_page_switch_lightweight_fingerprint(context));
 
     if let Ok(mut activity_state) = WINDOW_CONTEXT_ACTIVITY_STATE.lock() {
         if activity_state
             .last_page_fingerprint
             .as_deref()
-            .is_some_and(|current| current != fingerprint.as_str())
+            .is_some_and(|current| {
+                current != fingerprint.as_str()
+                    && lightweight_fingerprint
+                        .as_deref()
+                        .map_or(true, |lightweight| current != lightweight)
+            })
         {
             activity_state.page_switch_count =
                 activity_state.page_switch_count.saturating_add(1);
@@ -254,6 +267,25 @@ fn record_page_switch(context: &ActiveWindowContextPayload) {
 
         activity_state.last_page_fingerprint = Some(fingerprint);
     }
+}
+
+fn create_page_switch_fingerprint(context: &ActiveWindowContextPayload) -> String {
+    format!(
+        "{}|{}|{}",
+        context.app_name,
+        context.title.clone().unwrap_or_default(),
+        context.url.clone().unwrap_or_default()
+    )
+}
+
+fn create_page_switch_lightweight_fingerprint(
+    context: &ActiveWindowContextPayload,
+) -> String {
+    format!(
+        "{}|{}|",
+        context.app_name,
+        context.title.clone().unwrap_or_default()
+    )
 }
 
 fn cache_window_context(hwnd: HWND, context: &ActiveWindowContextPayload) {
@@ -288,7 +320,7 @@ fn read_cached_window_context_with_url() -> Option<ActiveWindowContextPayload> {
     }
 
     let context = read_window_context_for_hwnd(hwnd);
-    record_page_switch(&context);
+    record_page_switch_after_url_refresh(&context);
     cache_window_context(hwnd, &context);
     Some(with_window_context_activity_counts(context))
 }
@@ -405,7 +437,7 @@ fn schedule_window_context_url_refresh(hwnd: HWND, context: &ActiveWindowContext
         let url = read_url_for_window_context(hwnd, &context);
         let mut next_context = context.clone();
         next_context.url = url;
-        record_page_switch(&next_context);
+        record_page_switch_after_url_refresh(&next_context);
         cache_window_context(hwnd, &next_context);
 
         if let Ok(mut state) = WINDOW_CONTEXT_URL_REFRESH_STATE.lock() {

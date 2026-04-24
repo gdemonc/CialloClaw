@@ -1,4 +1,4 @@
-import type { ApprovalDecision, ApprovalRequest, BubbleMessage, DeliveryResult, InputContext } from "@cialloclaw/protocol";
+import type { ApprovalDecision, ApprovalRequest, BubbleMessage, DeliveryResult, InputContext, TaskUpdatedNotification } from "@cialloclaw/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { respondSecurityDetailed } from "@/rpc/methods";
@@ -84,6 +84,8 @@ type QueuedDeliveryReadyNotification = {
   deliveryResult: DeliveryResult;
   taskId: string;
 };
+
+type QueuedTaskUpdatedNotification = TaskUpdatedNotification;
 
 type ShellBallTaskOutputServiceModule = {
   openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source?: "rpc" | "mock") => Promise<unknown>;
@@ -716,6 +718,10 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   // Keep them task-scoped until the submit result binds the formal task id to
   // this shell-ball turn, then replay them into the local bubble timeline.
   const queuedApprovalPendingNotificationsRef = useRef(new Map<string, QueuedApprovalPendingNotification[]>());
+  // Fast task status updates can also win that race. Buffer the latest status
+  // per task id so shell-ball still reflects waiting_auth/processing as soon as
+  // the formal task id becomes known locally.
+  const queuedTaskUpdatedNotificationsRef = useRef(new Map<string, QueuedTaskUpdatedNotification>());
   // Delivery notifications can also arrive before the submit response exposes
   // the formal task id locally. Buffer them with the same task-scoped replay
   // path so shell-ball still shows the result bubble and open flow.
@@ -865,12 +871,25 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
     void autoOpenShellBallDeliveryResultRef.current(input.taskId, input.deliveryResult);
   }, []);
 
-  const registerShellBallTask = useCallback((taskId: string, turnIndex?: number) => {
+  const registerShellBallTask = useCallback((
+    taskId: string,
+    turnIndex?: number,
+    fallbackStatus?: QueuedTaskUpdatedNotification["status"],
+  ) => {
     shellBallTaskIdsRef.current.add(taskId);
     activeShellBallTaskIdRef.current = taskId;
 
     if (turnIndex !== undefined) {
       shellBallTaskTurnIndexRef.current.set(taskId, turnIndex);
+    }
+
+    const queuedTaskUpdatedNotification = queuedTaskUpdatedNotificationsRef.current.get(taskId);
+    queuedTaskUpdatedNotificationsRef.current.delete(taskId);
+
+    if (queuedTaskUpdatedNotification !== undefined) {
+      syncShellBallVisualStateFromTaskStatus(queuedTaskUpdatedNotification.status);
+    } else if (fallbackStatus !== undefined) {
+      syncShellBallVisualStateFromTaskStatus(fallbackStatus);
     }
 
     const queuedNotifications = queuedApprovalPendingNotificationsRef.current.get(taskId) ?? [];
@@ -902,6 +921,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
 
       if (pendingShellBallTaskRegistrationsRef.current === 0) {
         queuedApprovalPendingNotificationsRef.current.clear();
+        queuedTaskUpdatedNotificationsRef.current.clear();
         queuedDeliveryReadyNotificationsRef.current.clear();
       }
     };
@@ -1121,7 +1141,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         return;
       }
 
-      registerShellBallTask(result.task.task_id, turnIndex);
+      registerShellBallTask(result.task.task_id, turnIndex, result.task.status);
       setBubbleItems((currentItems) =>
         replaceShellBallPendingBubble(
           currentItems,
@@ -1205,7 +1225,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         return;
       }
 
-        registerShellBallTask(result.task.task_id, turnIndex);
+      registerShellBallTask(result.task.task_id, turnIndex, result.task.status);
       setBubbleItems((currentItems) => {
         const nextItems = currentItems.map((item) =>
           item.bubble.bubble_id === userBubbleItem.bubble.bubble_id
@@ -1312,7 +1332,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         return;
       }
 
-      registerShellBallTask(result.task.task_id, turnIndex);
+      registerShellBallTask(result.task.task_id, turnIndex, result.task.status);
       setBubbleItems((currentItems) => {
         const nextItems = currentItems.map((item) =>
           item.bubble.bubble_id === userBubbleItem.bubble.bubble_id
@@ -1628,7 +1648,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         remember_rule: false,
       });
 
-      registerShellBallTask(response.data.task.task_id, turnIndex);
+      registerShellBallTask(response.data.task.task_id, turnIndex, response.data.task.status);
       syncShellBallVisualStateFromTaskStatus(response.data.task.status);
 
       setBubbleItems((currentItems) =>
@@ -1742,7 +1762,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
           return;
         }
 
-        registerShellBallTask(result.task.task_id, turnIndex);
+        registerShellBallTask(result.task.task_id, turnIndex, result.task.status);
         setBubbleItems((currentItems) => {
           const nextItems = currentItems.map((item) =>
             item.bubble.bubble_id === userBubbleItem.bubble.bubble_id
@@ -1793,6 +1813,11 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   useEffect(() => {
     const clearTaskSubscription = subscribeTaskUpdated((payload) => {
       if (!shellBallTaskIdsRef.current.has(payload.task_id)) {
+        if (pendingShellBallTaskRegistrationsRef.current === 0) {
+          return;
+        }
+
+        queuedTaskUpdatedNotificationsRef.current.set(payload.task_id, payload);
         return;
       }
 
@@ -1927,7 +1952,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         });
 
         syncShellBallVisualStateFromTaskStatus(result.task.status);
-        registerShellBallTask(result.task.task_id, turnIndex);
+        registerShellBallTask(result.task.task_id, turnIndex, result.task.status);
 
         setBubbleItems((currentItems) =>
           sortShellBallBubbleItemsByTimestamp([
@@ -2100,7 +2125,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
           const immediateResult = await handlersRef.current.onSubmitText();
 
           if (isShellBallInputSubmitResult(immediateResult)) {
-            registerShellBallTask(immediateResult.task.task_id);
+            registerShellBallTask(immediateResult.task.task_id, undefined, immediateResult.task.status);
             void autoOpenShellBallDeliveryResult(immediateResult.task.task_id, immediateResult.delivery_result);
           }
 
@@ -2153,7 +2178,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         }
 
         if (isShellBallInputSubmitResult(result)) {
-          registerShellBallTask(result.task.task_id, turnIndex);
+          registerShellBallTask(result.task.task_id, turnIndex, result.task.status);
           setBubbleItems((currentItems) => {
             const nextItems = currentItems.map((item) =>
               item.bubble.bubble_id === userBubbleItem.bubble.bubble_id
