@@ -1198,7 +1198,8 @@ export function NotePage() {
   return (
     <main className="dashboard-page note-preview-page" style={pageStyle}>
       <>
-        <header className="dashboard-page__topbar">
+        <section className="note-preview-page__frame">
+          <div className="note-preview-page__page-nav">
             <Link className="dashboard-page__home-link" to={resolveDashboardRoutePath("home")}>
               <ArrowLeft className="h-4 w-4" />
               返回首页
@@ -1211,9 +1212,7 @@ export function NotePage() {
                 </NavLink>
               ))}
             </nav>
-        </header>
-
-        <section className="note-preview-page__frame">
+          </div>
           <section className={cn("note-preview-page__workspace", !drawerOpen && "is-drawer-collapsed")}>
             <section className={cn("note-preview-page__board", isBoardDropTarget && "is-drop-target")}>
               <div aria-hidden="true" className="note-preview-page__board-scene" />
