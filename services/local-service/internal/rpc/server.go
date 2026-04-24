@@ -262,12 +262,25 @@ func setDebugCORSOrigin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	host := strings.ToLower(parsed.Hostname())
-	if host != "localhost" && host != "127.0.0.1" {
+	// Packaged Tauri webviews do not use a plain localhost origin on every
+	// platform. We still keep this debug HTTP surface loopback-only by allowing
+	// localhost and reserved *.localhost hosts such as tauri.localhost.
+	if !isAllowedDebugOriginHost(host) {
 		return
 	}
 
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Vary", "Origin")
+}
+
+func isAllowedDebugOriginHost(host string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(host))
+	switch normalized {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return strings.HasSuffix(normalized, ".localhost")
+	}
 }
 
 // handleStreamConn serves JSON-RPC requests on a long-lived stream and then
