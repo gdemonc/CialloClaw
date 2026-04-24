@@ -194,7 +194,6 @@ export function OnboardingWindow() {
           targetWindow: "dashboard",
           type: "open_control_panel",
         });
-        void advanceDesktopOnboarding("control_panel_api_key");
         return;
       case "control_panel_api_key":
         void advanceDesktopOnboarding("done");
