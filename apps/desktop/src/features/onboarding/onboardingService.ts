@@ -270,9 +270,11 @@ export async function startDesktopOnboarding(
     preferredWindowLabel ??
     (currentWindowLabel === "dashboard" || currentWindowLabel === "control-panel" ? currentWindowLabel : "shell-ball");
   const welcomePresentation = await buildDefaultWelcomePresentation(windowLabel);
+
   if (welcomePresentation !== null) {
     await setDesktopOnboardingPresentation(welcomePresentation);
   }
+
   return session;
 }
 

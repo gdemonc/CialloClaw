@@ -1108,10 +1108,13 @@ unsafe fn update_onboarding_native_tracking() {
     set_forward_mouse_messages(hwnd, should_track);
 
     if !should_track {
-        set_window_ignore_cursor_events(hwnd, false);
+        // Keep the onboarding window click-through until a concrete native
+        // interactive region is registered so replayed or still-initializing
+        // guide windows never trap pointer input on Windows.
+        set_window_ignore_cursor_events(hwnd, true);
         if let Ok(mut state) = ONBOARDING_INTERACTIVE_STATE.lock() {
             if state.hwnd == Some(hwnd_value) {
-                state.current_ignore = Some(false);
+                state.current_ignore = Some(true);
             }
         }
     }
@@ -1127,11 +1130,17 @@ unsafe extern "system" fn mousemove_forward(
         return CallNextHookEx(None, n_code, w_param, l_param);
     }
 
-    if w_param.0 as u32 == WM_MOUSEMOVE {
+    let message = w_param.0 as u32;
+
+    if matches!(message, WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP) {
         let point = (*(l_param.0 as *const MSLLHOOKSTRUCT)).pt;
 
         sync_shell_ball_native_hit_testing(point);
         sync_onboarding_native_hit_testing(point);
+
+        if message != WM_MOUSEMOVE {
+            return CallNextHookEx(None, n_code, w_param, l_param);
+        }
 
         let forwarding_windows = match FORWARDING_WINDOWS.lock() {
             Ok(guard) => guard,
@@ -1207,6 +1216,38 @@ fn onboarding_set_interactive_regions(
     _window: tauri::Window,
     _regions: Vec<ShellBallInteractiveRect>,
 ) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn onboarding_reset_native_tracking() -> Result<(), String> {
+    let snapshot = ONBOARDING_INTERACTIVE_STATE
+        .lock()
+        .map_err(|_| "onboarding interactive state lock poisoned".to_string())?
+        .clone();
+
+    if let Some(hwnd_value) = snapshot.hwnd {
+        unsafe {
+            let hwnd = HWND(hwnd_value as _);
+            set_forward_mouse_messages(hwnd, false);
+            set_window_ignore_cursor_events(hwnd, true);
+        }
+    }
+
+    let mut state = ONBOARDING_INTERACTIVE_STATE
+        .lock()
+        .map_err(|_| "onboarding interactive state lock poisoned".to_string())?;
+    state.hwnd = None;
+    state.regions.clear();
+    state.current_ignore = None;
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn onboarding_reset_native_tracking() -> Result<(), String> {
     Ok(())
 }
 
@@ -1403,6 +1444,7 @@ fn main() {
             shell_ball_get_mouse_position,
             shell_ball_set_interactive_regions,
             onboarding_set_interactive_regions,
+            onboarding_reset_native_tracking,
             shell_ball_set_press_lock,
             desktop_get_mouse_activity_snapshot,
             desktop_capture_screenshot,

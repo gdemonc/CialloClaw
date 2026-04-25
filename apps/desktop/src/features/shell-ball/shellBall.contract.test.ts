@@ -6833,6 +6833,36 @@ test("desktop tauri setup enables mouse activity tracking for dwell context", ()
   assert.doesNotMatch(activitySource, /println!\("mouse activity at /);
 });
 
+test("desktop tauri mouse hook syncs hit-testing on move and click", () => {
+  const mainSource = readFileSync(resolve(desktopRoot, "src-tauri/src/main.rs"), "utf8");
+
+  assert.match(mainSource, /matches!\(message, WM_MOUSEMOVE \| WM_LBUTTONDOWN \| WM_LBUTTONUP\)/);
+  assert.match(mainSource, /sync_shell_ball_native_hit_testing\(point\);/);
+  assert.match(mainSource, /sync_onboarding_native_hit_testing\(point\);/);
+});
+
+test("onboarding controller keeps a destroy-on-close overlay window", () => {
+  const controllerSource = readFileSync(resolve(desktopRoot, "src/platform/onboardingWindowController.ts"), "utf8");
+  const onboardingServiceSource = readFileSync(resolve(desktopRoot, "src/features/onboarding/onboardingService.ts"), "utf8");
+  const onboardingWindowSource = readFileSync(resolve(desktopRoot, "src/features/onboarding/OnboardingWindow.tsx"), "utf8");
+  const onboardingPlatformSource = readFileSync(resolve(desktopRoot, "src/platform/onboardingWindow.ts"), "utf8");
+  const onboardingEventsSource = readFileSync(resolve(desktopRoot, "src/features/onboarding/onboarding.events.ts"), "utf8");
+
+  assert.match(controllerSource, /await onboardingWindow\.setIgnoreCursorEvents\(true\);/);
+  assert.match(controllerSource, /onboardingWindow\.once\("tauri:\/\/created"/);
+  assert.match(controllerSource, /onboardingWindow\.once\("tauri:\/\/error"/);
+  assert.match(controllerSource, /setSize\(new LogicalSize\(frame\.width, frame\.height\)\)/);
+  assert.match(controllerSource, /await resetOnboardingNativeTracking\(\);/);
+  assert.match(controllerSource, /await onboardingWindow\.destroy\(\);/);
+  assert.doesNotMatch(controllerSource, /resolveOnboardingCardWindowFrame/);
+  assert.match(onboardingServiceSource, /await syncOnboardingWindowFrame\(presentation\.monitorFrame, \{/);
+  assert.doesNotMatch(onboardingServiceSource, /windowReady/);
+  assert.match(onboardingWindowSource, /setOnboardingInteractiveRegions\(/);
+  assert.match(onboardingWindowSource, /desktop-onboarding-window__card--\$\{activePresentation\.placement\}/);
+  assert.match(onboardingPlatformSource, /export async function resetOnboardingNativeTracking\(\)/);
+  assert.doesNotMatch(onboardingEventsSource, /windowReady/);
+});
+
 test("shell-ball file drops queue pending attachments instead of starting a task immediately", () => {
   const coordinatorSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"), "utf8");
   const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");

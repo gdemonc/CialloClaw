@@ -1,4 +1,5 @@
 import { LogicalPosition, LogicalSize, Window } from "@tauri-apps/api/window";
+import { resetOnboardingNativeTracking } from "./onboardingWindow";
 
 export const ONBOARDING_WINDOW_LABEL = "onboarding";
 
@@ -35,7 +36,31 @@ async function getOrCreateOnboardingWindow() {
     height: 720,
   } as const;
 
-  return new Window(ONBOARDING_WINDOW_LABEL, onboardingWindowOptions);
+  const onboardingWindow = new Window(ONBOARDING_WINDOW_LABEL, onboardingWindowOptions);
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const settle = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      callback();
+    };
+
+    onboardingWindow.once("tauri://created", () => {
+      settle(resolve);
+    });
+
+    onboardingWindow.once("tauri://error", (event) => {
+      const payload = typeof event.payload === "string" ? event.payload : "failed to create onboarding window";
+      settle(() => reject(new Error(payload)));
+    });
+  });
+
+  return onboardingWindow;
 }
 
 /**
@@ -50,6 +75,10 @@ export async function syncOnboardingWindowFrame(
   options: SyncOnboardingWindowFrameOptions = {},
 ) {
   const onboardingWindow = await getOrCreateOnboardingWindow();
+  // The fullscreen onboarding host must start in native click-through mode so a
+  // freshly created replay window never blocks the monitor before React reports
+  // the card hotspot rectangles.
+  await onboardingWindow.setIgnoreCursorEvents(true);
   await onboardingWindow.setPosition(new LogicalPosition(frame.x, frame.y));
   await onboardingWindow.setSize(new LogicalSize(frame.width, frame.height));
   await onboardingWindow.setFocusable(true);
@@ -67,5 +96,8 @@ export async function hideOnboardingWindow() {
     return;
   }
 
+  // Clear the native forwarding hook and stale hotspot cache before destroying
+  // the overlay window so later replay sessions recreate a clean host state.
+  await resetOnboardingNativeTracking();
   await onboardingWindow.destroy();
 }

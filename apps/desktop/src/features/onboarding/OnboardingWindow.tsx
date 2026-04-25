@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button, Heading, Text } from "@radix-ui/themes";
-import { cn } from "@/utils/cn";
-import { setOnboardingInteractiveRegions } from "@/platform/onboardingWindow";
 import {
   advanceDesktopOnboarding,
   completeDesktopOnboarding,
@@ -10,6 +8,8 @@ import {
   skipDesktopOnboarding,
   requestDesktopOnboardingAction,
 } from "./onboardingService";
+import { setOnboardingInteractiveRegions } from "@/platform/onboardingWindow";
+import { cn } from "@/utils/cn";
 import { useDesktopOnboardingPresentation } from "./useDesktopOnboardingPresentation";
 import { useDesktopOnboardingSession } from "./useDesktopOnboardingSession";
 import "./onboarding.css";

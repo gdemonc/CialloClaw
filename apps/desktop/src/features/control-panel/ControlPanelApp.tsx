@@ -758,9 +758,13 @@ export function ControlPanelApp() {
 
   const handleReplayOnboarding = () => {
     void (async () => {
-      await showShellBallWindow("ball");
-      await startDesktopOnboarding("manual", "control-panel");
-      await requestCurrentDesktopWindowClose();
+      try {
+        await showShellBallWindow("ball");
+        await startDesktopOnboarding("manual", "control-panel");
+        await requestCurrentDesktopWindowClose();
+      } catch (error) {
+        console.warn("control-panel onboarding replay failed", error);
+      }
     })();
   };
 

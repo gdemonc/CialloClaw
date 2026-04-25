@@ -19,3 +19,11 @@ export async function setOnboardingInteractiveRegions(regions: OnboardingInterac
     regions,
   });
 }
+
+/**
+ * Clears native onboarding hit-testing state before the dedicated overlay
+ * window is destroyed so replay sessions always boot from a clean cursor map.
+ */
+export async function resetOnboardingNativeTracking() {
+  await invoke("onboarding_reset_native_tracking");
+}
