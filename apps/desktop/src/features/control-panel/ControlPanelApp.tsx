@@ -765,13 +765,14 @@ export function ControlPanelApp() {
   };
 
   const handleSave = async () => {
-    if (!hasChanges || isRunningInspection) {
+    if (!hasChanges) {
       return;
     }
 
     setIsSaving(true);
     try {
       const result = await saveControlPanelData(draft, {
+        confirmedInspector: panelData.inspector,
         saveInspector: inspectorDirty,
         saveSettings: settingsDirty,
       });
@@ -816,6 +817,7 @@ export function ControlPanelApp() {
       setIsRunningInspection(false);
     }
   };
+  void handleRunInspection;
 
   const renderSectionContent = () => {
     switch (activeSection) {
@@ -1514,14 +1516,6 @@ export function ControlPanelApp() {
                 disabled={isSaving || isRunningInspection}
               >
                 重新查看新手引导
-              </Button>
-              <Button
-                className="control-panel-shell__button control-panel-shell__button--secondary"
-                variant="soft"
-                onClick={() => void handleRunInspection()}
-                disabled={isRunningInspection || isSaving}
-              >
-                {isRunningInspection ? "巡检执行中…" : "立即巡检"}
               </Button>
 
               <Button

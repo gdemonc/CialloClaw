@@ -45,6 +45,7 @@ export type ControlPanelSaveResult = {
 };
 
 export type ControlPanelSaveOptions = {
+  confirmedInspector?: AgentTaskInspectorConfigGetResult;
   saveInspector?: boolean;
   saveSettings?: boolean;
   timeoutMs?: number;
@@ -146,12 +147,6 @@ function mergeProtocolSettings(
             },
           }
         : base.task_automation,
-      data_log: patch.data_log
-        ? {
-            ...base.data_log,
-            ...patch.data_log,
-          }
-        : base.data_log,
       models: patch.models
         ? {
             ...base.models,
@@ -314,6 +309,7 @@ export async function saveControlPanelData(
   data: ControlPanelData,
   options: ControlPanelSaveOptions = {},
 ): Promise<ControlPanelSaveResult> {
+  const confirmedInspector = options.confirmedInspector ?? data.inspector;
   const saveSettingsRequested = options.saveSettings ?? true;
   const saveInspectorRequested = options.saveInspector ?? true;
   const timeoutMs = options.timeoutMs ?? CONTROL_PANEL_RPC_TIMEOUT_MS;
@@ -329,7 +325,7 @@ export async function saveControlPanelData(
   }
 
   let applyMode: ApplyMode = "immediate";
-  let effectiveInspector = data.inspector;
+  let effectiveInspector = confirmedInspector;
   let effectiveSettings = data.settings;
   let needRestart = false;
   let savedInspector = false;
@@ -345,7 +341,9 @@ export async function saveControlPanelData(
       needRestart = settingsResult.need_restart;
       savedSettings = true;
       updatedKeys.push(...settingsResult.updated_keys);
-      saveSettings({ settings: effectiveSettings });
+      if (!saveInspectorRequested) {
+        saveSettings({ settings: effectiveSettings });
+      }
     }
 
     if (saveInspectorRequested) {
@@ -362,6 +360,7 @@ export async function saveControlPanelData(
         saveSettings({ settings: effectiveSettings });
       } catch (error) {
         if (savedSettings) {
+          saveSettings({ settings: effectiveSettings });
           throw new ControlPanelSaveError(
             `通用设置已保存，但巡检设置保存失败：${error instanceof Error ? error.message : "请重试。"}`,
             buildControlPanelSaveResult(effectiveSettings, effectiveInspector, "rpc", {
