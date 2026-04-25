@@ -1,5 +1,11 @@
 import { Window, getCurrentWindow, monitorFromPoint } from "@tauri-apps/api/window";
-import { hideOnboardingWindow, syncOnboardingWindowFrame } from "@/platform/onboardingWindowController";
+import {
+  destroyOnboardingWindow,
+  showOnboardingWindow,
+  syncOnboardingWindowFrame,
+  waitForOnboardingCardReady,
+  waitForOnboardingWindowReady,
+} from "@/platform/onboardingWindowController";
 import { shellBallWindowLabels } from "@/platform/shellBallWindowController";
 import { loadStoredValue, removeStoredValue, saveStoredValue } from "@/platform/storage";
 import { desktopOnboardingEvents, desktopOnboardingLocalEvents } from "./onboarding.events";
@@ -53,9 +59,15 @@ export type DesktopOnboardingActionRequest = {
   type: "open_control_panel" | "open_dashboard" | "show_shell_ball" | "close_dashboard" | "close_control_panel";
 };
 
+export type DesktopOnboardingLoadingState = {
+  message: string;
+  windowLabel: "shell-ball" | "dashboard" | "control-panel";
+};
+
 const DESKTOP_ONBOARDING_STATUS_KEY = "cialloclaw.desktop.onboarding.status";
 const DESKTOP_ONBOARDING_SESSION_KEY = "cialloclaw.desktop.onboarding.session";
 const DESKTOP_ONBOARDING_PRESENTATION_KEY = "cialloclaw.desktop.onboarding.presentation";
+const DESKTOP_ONBOARDING_READY_TIMEOUT_MS = 6_000;
 
 const DESKTOP_ONBOARDING_WINDOW_LABELS = [
   shellBallWindowLabels.ball,
@@ -63,6 +75,8 @@ const DESKTOP_ONBOARDING_WINDOW_LABELS = [
   "control-panel",
   "onboarding",
 ] as const;
+
+let desktopOnboardingLoadingState: DesktopOnboardingLoadingState | null = null;
 
 async function buildDefaultWelcomePresentation(windowLabel: DesktopOnboardingPresentation["windowLabel"]) {
   const currentWindow = getCurrentWindow();
@@ -124,6 +138,14 @@ function dispatchLocalActionRequested(action: DesktopOnboardingActionRequest) {
   );
 }
 
+function dispatchLocalLoadingChanged(loadingState: DesktopOnboardingLoadingState | null) {
+  window.dispatchEvent(
+    new CustomEvent<DesktopOnboardingLoadingState | null>(desktopOnboardingLocalEvents.loadingChanged, {
+      detail: loadingState,
+    }),
+  );
+}
+
 async function broadcastSession(session: DesktopOnboardingSession | null) {
   dispatchLocalSessionChanged(session);
 
@@ -172,6 +194,30 @@ async function broadcastPresentation(presentation: DesktopOnboardingPresentation
   );
 }
 
+async function broadcastLoading(loadingState: DesktopOnboardingLoadingState | null) {
+  dispatchLocalLoadingChanged(loadingState);
+
+  const currentWindowLabel = getCurrentWindow().label;
+  await Promise.all(
+    DESKTOP_ONBOARDING_WINDOW_LABELS.map(async (label) => {
+      if (label === currentWindowLabel) {
+        return;
+      }
+
+      try {
+        const targetWindow = await Window.getByLabel(label);
+        if (targetWindow === null) {
+          return;
+        }
+
+        await targetWindow.emit(desktopOnboardingEvents.loadingChanged, loadingState);
+      } catch (error) {
+        console.warn("desktop onboarding loading sync failed", error);
+      }
+    }),
+  );
+}
+
 export async function requestDesktopOnboardingAction(action: DesktopOnboardingActionRequest) {
   dispatchLocalActionRequested(action);
 
@@ -215,9 +261,18 @@ export function loadDesktopOnboardingPresentation() {
   return loadStoredValue<DesktopOnboardingPresentation>(DESKTOP_ONBOARDING_PRESENTATION_KEY);
 }
 
+export function loadDesktopOnboardingLoadingState() {
+  return desktopOnboardingLoadingState;
+}
+
 export function shouldAutoStartDesktopOnboarding() {
   const status = loadDesktopOnboardingStatus();
   return !status.completed && !status.skipped;
+}
+
+export async function setDesktopOnboardingLoadingState(loadingState: DesktopOnboardingLoadingState | null) {
+  desktopOnboardingLoadingState = loadingState;
+  await broadcastLoading(loadingState);
 }
 
 export async function setDesktopOnboardingSession(session: DesktopOnboardingSession | null) {
@@ -234,7 +289,7 @@ export async function setDesktopOnboardingSession(session: DesktopOnboardingSess
 export async function setDesktopOnboardingPresentation(presentation: DesktopOnboardingPresentation | null) {
   if (presentation === null) {
     removeStoredValue(DESKTOP_ONBOARDING_PRESENTATION_KEY);
-    await hideOnboardingWindow();
+    await destroyOnboardingWindow();
   } else {
     saveStoredValue(DESKTOP_ONBOARDING_PRESENTATION_KEY, presentation);
     await syncOnboardingWindowFrame(presentation.monitorFrame, {
@@ -264,15 +319,42 @@ export async function startDesktopOnboarding(
     started_at: now,
   };
 
-  await setDesktopOnboardingSession(session);
   const currentWindowLabel = getCurrentWindow().label;
   const windowLabel: DesktopOnboardingPresentation["windowLabel"] =
     preferredWindowLabel ??
     (currentWindowLabel === "dashboard" || currentWindowLabel === "control-panel" ? currentWindowLabel : "shell-ball");
   const welcomePresentation = await buildDefaultWelcomePresentation(windowLabel);
-  if (welcomePresentation !== null) {
-    await setDesktopOnboardingPresentation(welcomePresentation);
+
+  await setDesktopOnboardingLoadingState({
+    message: "正在打开引导...",
+    windowLabel,
+  });
+
+  try {
+    await setDesktopOnboardingSession(session);
+
+    if (welcomePresentation !== null) {
+      await syncOnboardingWindowFrame(welcomePresentation.monitorFrame, {
+        alwaysOnTop: true,
+      });
+      await waitForOnboardingWindowReady(DESKTOP_ONBOARDING_READY_TIMEOUT_MS);
+      await broadcastSession(session);
+      await setDesktopOnboardingPresentation(welcomePresentation);
+      await waitForOnboardingCardReady(DESKTOP_ONBOARDING_READY_TIMEOUT_MS);
+      await showOnboardingWindow();
+    }
+  } catch (error) {
+    console.warn("desktop onboarding launch failed", error);
+    removeStoredValue(DESKTOP_ONBOARDING_SESSION_KEY);
+    removeStoredValue(DESKTOP_ONBOARDING_PRESENTATION_KEY);
+    await destroyOnboardingWindow();
+    await broadcastSession(null);
+    await broadcastPresentation(null);
+    return null;
+  } finally {
+    await setDesktopOnboardingLoadingState(null);
   }
+
   return session;
 }
 

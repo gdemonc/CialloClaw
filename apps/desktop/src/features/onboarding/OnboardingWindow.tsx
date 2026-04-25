@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button, Heading, Text } from "@radix-ui/themes";
 import { cn } from "@/utils/cn";
 import { setOnboardingInteractiveRegions } from "@/platform/onboardingWindow";
+import { desktopOnboardingEvents } from "./onboarding.events";
 import {
   advanceDesktopOnboarding,
   completeDesktopOnboarding,
@@ -100,6 +101,11 @@ export function OnboardingWindow() {
   const copy = useMemo(() => (session ? getOnboardingCopy(session.step) : null), [session]);
 
   useEffect(() => {
+    const currentWindow = getCurrentWindow();
+    void currentWindow.emit(desktopOnboardingEvents.ready);
+  }, []);
+
+  useEffect(() => {
     if (presentation !== null) {
       setStagedPresentation(presentation);
       return;
@@ -157,6 +163,7 @@ export function OnboardingWindow() {
           height: Math.max(1, Math.round((rect.height + interactivePadding * 2) * scaleFactor)),
         },
       ]);
+      await getCurrentWindow().emit(desktopOnboardingEvents.cardReady);
     })();
 
     return () => {
