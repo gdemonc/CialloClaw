@@ -6848,11 +6848,12 @@ test("onboarding controller keeps a destroy-on-close overlay window", () => {
   const onboardingPlatformSource = readFileSync(resolve(desktopRoot, "src/platform/onboardingWindow.ts"), "utf8");
   const onboardingEventsSource = readFileSync(resolve(desktopRoot, "src/features/onboarding/onboarding.events.ts"), "utf8");
 
-  assert.match(controllerSource, /await onboardingWindow\.setIgnoreCursorEvents\(true\);/);
+  assert.match(controllerSource, /function supportsOnboardingNativeHitTesting\(\)/);
+  assert.match(controllerSource, /if \(supportsOnboardingNativeHitTesting\(\)\) \{\s+await onboardingWindow\.setIgnoreCursorEvents\(true\);/);
   assert.match(controllerSource, /onboardingWindow\.once\("tauri:\/\/created"/);
   assert.match(controllerSource, /onboardingWindow\.once\("tauri:\/\/error"/);
   assert.match(controllerSource, /setSize\(new LogicalSize\(frame\.width, frame\.height\)\)/);
-  assert.match(controllerSource, /await resetOnboardingNativeTracking\(\);/);
+  assert.match(controllerSource, /if \(supportsOnboardingNativeHitTesting\(\)\) \{\s+await resetOnboardingNativeTracking\(\);/);
   assert.match(controllerSource, /await onboardingWindow\.destroy\(\);/);
   assert.doesNotMatch(controllerSource, /resolveOnboardingCardWindowFrame/);
   assert.match(onboardingServiceSource, /await syncOnboardingWindowFrame\(presentation\.monitorFrame, \{/);
