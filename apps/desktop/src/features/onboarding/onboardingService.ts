@@ -331,17 +331,17 @@ export async function startDesktopOnboarding(
   });
 
   try {
-    await setDesktopOnboardingSession(session);
-
     if (welcomePresentation !== null) {
       await syncOnboardingWindowFrame(welcomePresentation.monitorFrame, {
         alwaysOnTop: true,
       });
       await waitForOnboardingWindowReady(DESKTOP_ONBOARDING_READY_TIMEOUT_MS);
-      await broadcastSession(session);
+      await setDesktopOnboardingSession(session);
       await setDesktopOnboardingPresentation(welcomePresentation);
       await waitForOnboardingCardReady(DESKTOP_ONBOARDING_READY_TIMEOUT_MS);
       await showOnboardingWindow();
+    } else {
+      await setDesktopOnboardingSession(session);
     }
   } catch (error) {
     console.warn("desktop onboarding launch failed", error);

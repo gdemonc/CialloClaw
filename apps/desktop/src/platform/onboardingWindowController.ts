@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { LogicalPosition, LogicalSize, Window } from "@tauri-apps/api/window";
 import { desktopOnboardingEvents } from "@/features/onboarding/onboarding.events";
 import { resetOnboardingInteractiveState, setOnboardingIgnoreCursorEvents } from "./onboardingWindow";
@@ -17,6 +18,25 @@ type SyncOnboardingWindowFrameOptions = {
 
 let onboardingWindowHandle: Window | null = null;
 let onboardingWindowPromise: Promise<Window> | null = null;
+
+async function waitForOnboardingWindowHandle(timeoutMs: number) {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const windowHandle = await Window.getByLabel(ONBOARDING_WINDOW_LABEL);
+
+    if (windowHandle !== null) {
+      onboardingWindowHandle = windowHandle;
+      return windowHandle;
+    }
+
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 50);
+    });
+  }
+
+  throw new Error("Timed out waiting for onboarding window handle.");
+}
 
 async function waitForOnboardingWindowEvent(eventName: string, timeoutMs: number) {
   const onboardingWindow = await getOrCreateOnboardingWindow();
@@ -73,23 +93,8 @@ async function getOrCreateOnboardingWindow() {
       return existingWindow;
     }
 
-    const onboardingWindowOptions = {
-      title: "CialloClaw Onboarding",
-      url: "onboarding.html",
-      decorations: false,
-      transparent: true,
-      alwaysOnTop: true,
-      resizable: false,
-      skipTaskbar: true,
-      shadow: false,
-      visible: false,
-      focus: false,
-      width: 1280,
-      height: 720,
-    } as const;
-
-    const createdWindow = new Window(ONBOARDING_WINDOW_LABEL, onboardingWindowOptions);
-    onboardingWindowHandle = createdWindow;
+    await invoke("desktop_open_or_focus_onboarding");
+    const createdWindow = await waitForOnboardingWindowHandle(6_000);
     await resetOnboardingInteractiveState();
     await setOnboardingIgnoreCursorEvents(true);
     return createdWindow;

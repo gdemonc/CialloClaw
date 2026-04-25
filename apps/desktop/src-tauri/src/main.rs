@@ -60,6 +60,7 @@ const TRAY_MENU_QUIT_ID: &str = "quit-app";
 const LOCAL_PATH_SETTINGS_CLIENT_TIME: &str = "1970-01-01T00:00:00Z";
 static LOCAL_PATH_SETTINGS_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
 static CONTROL_PANEL_WINDOW_CREATION_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static ONBOARDING_WINDOW_CREATION_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 macro_rules! makelparam {
@@ -485,6 +486,51 @@ fn open_or_focus_control_panel_window(app: &tauri::AppHandle) {
 #[tauri::command]
 fn desktop_open_or_focus_control_panel(app: tauri::AppHandle) -> Result<(), String> {
     open_or_focus_control_panel_window(&app);
+    Ok(())
+}
+
+fn ensure_onboarding_window(app: &tauri::AppHandle) {
+    if app.get_webview_window(ONBOARDING_WINDOW_LABEL).is_some() {
+        return;
+    }
+
+    if ONBOARDING_WINDOW_CREATION_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let create_result = WebviewWindowBuilder::new(
+            &handle,
+            ONBOARDING_WINDOW_LABEL,
+            WebviewUrl::App("onboarding.html".into()),
+        )
+        .title("CialloClaw Onboarding")
+        .inner_size(1280.0, 860.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .resizable(false)
+        .skip_taskbar(true)
+        .shadow(false)
+        .visible(false)
+        .focused(false)
+        .build();
+
+        ONBOARDING_WINDOW_CREATION_IN_PROGRESS.store(false, Ordering::SeqCst);
+
+        if let Err(error) = create_result {
+            eprintln!("failed to create onboarding window: {error}");
+        }
+    });
+}
+
+#[tauri::command]
+fn desktop_open_or_focus_onboarding(app: tauri::AppHandle) -> Result<(), String> {
+    ensure_onboarding_window(&app);
     Ok(())
 }
 
@@ -1462,6 +1508,7 @@ fn main() {
             desktop_capture_screenshot,
             desktop_get_active_window_context,
             desktop_open_or_focus_control_panel,
+            desktop_open_or_focus_onboarding,
             desktop_open_local_path,
             desktop_reveal_local_path,
             pick_shell_ball_files,

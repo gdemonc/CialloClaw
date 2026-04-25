@@ -102,7 +102,23 @@ export function OnboardingWindow() {
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
-    void currentWindow.emit(desktopOnboardingEvents.ready);
+    let disposed = false;
+
+    const announceReady = () => {
+      if (disposed) {
+        return;
+      }
+
+      void currentWindow.emit(desktopOnboardingEvents.ready);
+    };
+
+    announceReady();
+    const intervalHandle = window.setInterval(announceReady, 250);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalHandle);
+    };
   }, []);
 
   useEffect(() => {
