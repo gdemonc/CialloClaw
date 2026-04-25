@@ -14,6 +14,10 @@ type SyncOnboardingWindowFrameOptions = {
   alwaysOnTop?: boolean;
 };
 
+function supportsOnboardingNativeHitTesting() {
+  return typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+}
+
 async function getOrCreateOnboardingWindow() {
   const existingWindow = await Window.getByLabel(ONBOARDING_WINDOW_LABEL);
 
@@ -75,10 +79,12 @@ export async function syncOnboardingWindowFrame(
   options: SyncOnboardingWindowFrameOptions = {},
 ) {
   const onboardingWindow = await getOrCreateOnboardingWindow();
-  // The fullscreen onboarding host must start in native click-through mode so a
-  // freshly created replay window never blocks the monitor before React reports
-  // the card hotspot rectangles.
-  await onboardingWindow.setIgnoreCursorEvents(true);
+  // Only Windows currently restores the card hotspot via native hit-testing.
+  // Other platforms must keep normal pointer handling or the replay overlay
+  // becomes permanently click-through.
+  if (supportsOnboardingNativeHitTesting()) {
+    await onboardingWindow.setIgnoreCursorEvents(true);
+  }
   await onboardingWindow.setPosition(new LogicalPosition(frame.x, frame.y));
   await onboardingWindow.setSize(new LogicalSize(frame.width, frame.height));
   await onboardingWindow.setFocusable(true);
@@ -98,6 +104,8 @@ export async function hideOnboardingWindow() {
 
   // Clear the native forwarding hook and stale hotspot cache before destroying
   // the overlay window so later replay sessions recreate a clean host state.
-  await resetOnboardingNativeTracking();
+  if (supportsOnboardingNativeHitTesting()) {
+    await resetOnboardingNativeTracking();
+  }
   await onboardingWindow.destroy();
 }
