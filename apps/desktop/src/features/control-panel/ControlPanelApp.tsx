@@ -30,10 +30,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { buildDesktopOnboardingPresentation } from "@/features/onboarding/onboardingGeometry";
 import {
   advanceDesktopOnboarding,
+  setDesktopOnboardingLoadingState,
   setDesktopOnboardingPresentation,
   startDesktopOnboarding,
 } from "@/features/onboarding/onboardingService";
 import { useDesktopOnboardingActions } from "@/features/onboarding/useDesktopOnboardingActions";
+import { useDesktopOnboardingLoading } from "@/features/onboarding/useDesktopOnboardingLoading";
 import { useDesktopOnboardingSession } from "@/features/onboarding/useDesktopOnboardingSession";
 import { requestCurrentDesktopWindowClose, startCurrentDesktopWindowDragging } from "@/platform/desktopWindowFrame";
 import { showShellBallWindow } from "@/platform/shellBallWindowController";
@@ -547,6 +549,7 @@ function applyControlPanelSaveResult(base: ControlPanelData, result: ControlPane
  */
 export function ControlPanelApp() {
   const onboardingSession = useDesktopOnboardingSession();
+  const onboardingLoading = useDesktopOnboardingLoading("control-panel");
   const autoAdvancedControlPanelStepRef = useRef(false);
   const [activeSection, setActiveSection] = useState<ControlPanelSectionId>("general");
   const [panelData, setPanelData] = useState<ControlPanelData | null>(null);
@@ -759,6 +762,10 @@ export function ControlPanelApp() {
   const handleReplayOnboarding = () => {
     void (async () => {
       await showShellBallWindow("ball");
+      await setDesktopOnboardingLoadingState({
+        message: "正在打开引导...",
+        windowLabel: "control-panel",
+      });
       await startDesktopOnboarding("manual", "control-panel");
       await requestCurrentDesktopWindowClose();
     })();
@@ -1488,6 +1495,11 @@ export function ControlPanelApp() {
           <div className="control-panel-shell__action-bar">
             <div className="control-panel-shell__action-statuses">
               {saveStateValue}
+              {onboardingLoading ? (
+                <Text as="p" size="2" className="control-panel-shell__action-feedback" aria-live="polite">
+                  {onboardingLoading.message}
+                </Text>
+              ) : null}
               {draft.warnings && draft.warnings.length > 0 ? (
                 <Text as="p" size="2" color="amber" className="control-panel-shell__action-feedback" aria-live="polite">
                   {draft.warnings[0]}
