@@ -43,8 +43,8 @@ func TestSettingsUpdateMarksModelChangesNextTaskEffectiveAndReloadsRuntimeModel(
 	}
 }
 
-func TestSettingsUpdateKeepsUnsupportedProvidersAsPlaceholderRuntimeConfig(t *testing.T) {
-	service, _ := newTestServiceWithExecution(t, "settings unsupported provider")
+func TestSettingsUpdateRoutesArbitraryProviderAliasesThroughOpenAIResponsesRuntime(t *testing.T) {
+	service, _ := newTestServiceWithExecution(t, "settings arbitrary provider alias")
 
 	result, err := service.SettingsUpdate(map[string]any{
 		"models": map[string]any{
@@ -57,15 +57,20 @@ func TestSettingsUpdateKeepsUnsupportedProvidersAsPlaceholderRuntimeConfig(t *te
 		t.Fatalf("settings update failed: %v", err)
 	}
 	if result["apply_mode"] != "next_task_effective" || result["need_restart"] != false {
-		t.Fatalf("expected unsupported provider update to stay next_task_effective, got %+v", result)
+		t.Fatalf("expected arbitrary provider alias update to stay next_task_effective, got %+v", result)
 	}
 	runtimeModel := service.currentModel()
 	if runtimeModel == nil {
-		t.Fatal("expected placeholder runtime model to be installed")
+		t.Fatal("expected runtime model to stay installed")
 	}
 	configSnapshot := runtimeModel.RuntimeConfig()
-	if configSnapshot.Provider != "anthropic" || configSnapshot.Endpoint != "https://example.invalid/v1/messages" || configSnapshot.ModelID != "claude-3-7-sonnet" {
-		t.Fatalf("expected placeholder runtime model to preserve unsupported provider settings, got %+v", configSnapshot)
+	if configSnapshot.Provider != model.OpenAIResponsesProvider || configSnapshot.Endpoint != "https://example.invalid/v1/messages" || configSnapshot.ModelID != "claude-3-7-sonnet" {
+		t.Fatalf("expected arbitrary provider alias to normalize into openai runtime config, got %+v", configSnapshot)
+	}
+	runtimeSettings := service.runEngine.Settings()
+	models := runtimeSettings["models"].(map[string]any)
+	if models["provider"] != "anthropic" {
+		t.Fatalf("expected persisted settings provider to keep original alias, got %+v", models)
 	}
 }
 

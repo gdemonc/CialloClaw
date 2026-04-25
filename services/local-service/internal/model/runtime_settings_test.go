@@ -15,7 +15,8 @@ func TestCanonicalProviderNameNormalizesKnownAliases(t *testing.T) {
 		" Z_AI ":                OpenAIResponsesProvider,
 		"zai":                   OpenAIResponsesProvider,
 		OpenAIResponsesProvider: OpenAIResponsesProvider,
-		"anthropic":             "anthropic",
+		"anthropic":             OpenAIResponsesProvider,
+		"custom_gateway":        OpenAIResponsesProvider,
 		"":                      "",
 	}
 	for input, want := range tests {

@@ -62,8 +62,6 @@ const CONTROL_PANEL_INSPECTOR_UPDATED_KEYS = [
   "task_automation.remind_when_stale",
 ];
 
-const CONTROL_PANEL_SUPPORTED_MODEL_PROVIDERS = new Set(["openai", "openai_responses", "z-ai", "z_ai", "zai"]);
-
 /**
  * ControlPanelSaveError reports a save failure while optionally carrying the
  * already-applied subset so the UI can preserve successful groups.
@@ -208,11 +206,7 @@ function buildControlPanelSaveWarnings(
     return [];
   }
 
-  if (CONTROL_PANEL_SUPPORTED_MODEL_PROVIDERS.has(normalizedProvider)) {
-    return [];
-  }
-
-  return ["API Key 已保存，但当前 provider 名暂不受支持；请改用 openai / openai_responses。"];
+  return [];
 }
 
 function buildInspectorUpdatePayload(input: ControlPanelData) {

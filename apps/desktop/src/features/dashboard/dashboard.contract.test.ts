@@ -2018,7 +2018,7 @@ test("control panel saves full floating-ball ownership through the real rpc sett
   }
 });
 
-test("control-panel save keeps z-ai aliases on the supported OpenAI-compatible route", async () => {
+test("control-panel save keeps arbitrary provider aliases on the supported OpenAI-compatible route", async () => {
   const strongholdStatus = {
     backend: "stronghold",
     available: true,
@@ -2110,7 +2110,7 @@ test("control-panel save keeps z-ai aliases on the supported OpenAI-compatible r
         };
       };
 
-      assert.equal(request.models.provider, "z-ai");
+      assert.equal(request.models.provider, "anthropic");
       assert.equal(request.models.api_key, "saved-secret-key");
 
       remoteSettings = {
@@ -2177,9 +2177,9 @@ test("control-panel save keeps z-ai aliases on the supported OpenAI-compatible r
           ...initialData.settings,
           models: {
             ...initialData.settings.models,
-            provider: "z-ai",
+            provider: "anthropic",
             base_url: "https://api.qnaigc.com/v1",
-            model: "z-ai/glm-5",
+            model: "claude-3-7-sonnet",
           },
         },
       },

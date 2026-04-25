@@ -7005,7 +7005,7 @@ func TestServiceBudgetAutoDowngradeSwitchesWorkspaceDeliveryToBubble(t *testing.
 	}
 }
 
-func TestServiceBudgetAutoDowngradeProviderUnavailableDisablesExpensiveTools(t *testing.T) {
+func TestServiceBudgetAutoDowngradeNoLongerFlagsArbitraryProviderAliasesUnavailable(t *testing.T) {
 	service, _ := newTestServiceWithExecution(t, "executor-backed provider unavailable")
 	if _, err := service.SettingsUpdate(map[string]any{
 		"models": map[string]any{
@@ -7032,18 +7032,8 @@ func TestServiceBudgetAutoDowngradeProviderUnavailableDisablesExpensiveTools(t *
 		UpdatedAt:         time.Now().UTC(),
 	}
 	decision := service.evaluateBudgetAutoDowngrade(task, task.Intent)
-	if !decision.Applied || decision.TriggerReason != "provider_unavailable" {
-		t.Fatalf("expected provider unavailable downgrade decision, got %+v", decision)
-	}
-	updatedTask, updatedSnapshot, updatedIntent := service.applyBudgetAutoDowngrade(task, contextsvc.TaskContextSnapshot{Text: strings.Repeat("provider unavailable ", 20)}, task.Intent, decision)
-	if updatedTask.PreferredDelivery != "bubble" || updatedTask.FallbackDelivery != "bubble" {
-		t.Fatalf("expected provider unavailable downgrade to force bubble delivery, got task=%+v", updatedTask)
-	}
-	if mapValue(updatedIntent, "arguments")["disable_tool_calls"] != true {
-		t.Fatalf("expected provider unavailable downgrade to disable expensive tool calls, got %+v", updatedIntent)
-	}
-	if len(updatedSnapshot.Text) == 0 {
-		t.Fatalf("expected snapshot text to survive downgrade mutation, got %+v", updatedSnapshot)
+	if decision.Applied || decision.TriggerReason != "" {
+		t.Fatalf("expected arbitrary provider alias to stay on the openai-compatible route, got %+v", decision)
 	}
 }
 
@@ -11083,22 +11073,25 @@ func TestSettingsUpdatePersistsSecretForRequestedProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings update failed: %v", err)
 	}
-	stored, err := service.storage.SecretStore().GetSecret(context.Background(), "model", "anthropic_api_key")
+	stored, err := service.storage.SecretStore().GetSecret(context.Background(), "model", model.OpenAIResponsesProvider+"_api_key")
 	if err != nil {
-		t.Fatalf("expected anthropic secret to be stored, got %v", err)
+		t.Fatalf("expected canonical provider secret to be stored, got %v", err)
 	}
 	if stored.Value != "anthropic-secret-key" {
-		t.Fatalf("unexpected stored anthropic secret: %+v", stored)
+		t.Fatalf("unexpected stored canonical secret: %+v", stored)
 	}
 	if result["apply_mode"] != "next_task_effective" || result["need_restart"] != false {
 		t.Fatalf("expected provider secret update to be next_task_effective, got %+v", result)
 	}
-	if service.currentModel() == nil || service.currentModel().Provider() != "anthropic" {
+	if service.currentModel() == nil || service.currentModel().Provider() != model.OpenAIResponsesProvider {
 		t.Fatalf("expected runtime model provider to switch for future tasks, got %+v", service.currentModel())
 	}
+	if defaultProvider != model.OpenAIResponsesProvider {
+		t.Fatalf("expected default provider to stay canonical, got %q", defaultProvider)
+	}
 	_, err = service.storage.SecretStore().GetSecret(context.Background(), "model", defaultProvider+"_api_key")
-	if !errors.Is(err, storage.ErrSecretNotFound) {
-		t.Fatalf("expected default provider secret to remain unset, got %v", err)
+	if err != nil {
+		t.Fatalf("expected alias save to reuse canonical provider secret, got %v", err)
 	}
 	result, err = service.SettingsGet(map[string]any{"scope": "models"})
 	if err != nil {
