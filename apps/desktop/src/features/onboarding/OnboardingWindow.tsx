@@ -163,9 +163,11 @@ export function OnboardingWindow() {
       return;
     }
 
+    let disposed = false;
+
     void (async () => {
       const rect = cardRef.current?.getBoundingClientRect();
-      if (!rect) {
+      if (!rect || disposed) {
         return;
       }
 
@@ -182,7 +184,17 @@ export function OnboardingWindow() {
       await getCurrentWindow().emit(desktopOnboardingEvents.cardReady);
     })();
 
+    const intervalHandle = window.setInterval(() => {
+      if (disposed) {
+        return;
+      }
+
+      void getCurrentWindow().emit(desktopOnboardingEvents.cardReady);
+    }, 250);
+
     return () => {
+      disposed = true;
+      window.clearInterval(intervalHandle);
       void setOnboardingInteractiveRegions([]);
     };
   }, [activePresentation, session]);
