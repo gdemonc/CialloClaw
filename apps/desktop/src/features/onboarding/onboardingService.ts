@@ -26,6 +26,7 @@ export type DesktopOnboardingStatus = {
 
 export type DesktopOnboardingSession = {
   isOpen: boolean;
+  runtime_boot_id?: string;
   source: DesktopOnboardingSource;
   step: DesktopOnboardingStep;
   started_at: string;
@@ -56,6 +57,7 @@ export type DesktopOnboardingActionRequest = {
 const DESKTOP_ONBOARDING_STATUS_KEY = "cialloclaw.desktop.onboarding.status";
 const DESKTOP_ONBOARDING_SESSION_KEY = "cialloclaw.desktop.onboarding.session";
 const DESKTOP_ONBOARDING_PRESENTATION_KEY = "cialloclaw.desktop.onboarding.presentation";
+const DESKTOP_ONBOARDING_RUNTIME_BOOT_ID_KEY = "cialloclaw.desktop.onboarding.runtime_boot_id";
 
 const DESKTOP_ONBOARDING_WINDOW_LABELS = [
   shellBallWindowLabels.ball,
@@ -215,6 +217,22 @@ export function loadDesktopOnboardingPresentation() {
   return loadStoredValue<DesktopOnboardingPresentation>(DESKTOP_ONBOARDING_PRESENTATION_KEY);
 }
 
+export function loadDesktopOnboardingRuntimeBootId() {
+  return loadStoredValue<string>(DESKTOP_ONBOARDING_RUNTIME_BOOT_ID_KEY);
+}
+
+/**
+ * Rotates the shared desktop-process runtime marker so persisted onboarding
+ * sessions can be recognized as stale after a cold restart.
+ *
+ * @returns The runtime marker for the current desktop process.
+ */
+export function refreshDesktopOnboardingRuntimeBootId() {
+  const runtimeBootId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  saveStoredValue(DESKTOP_ONBOARDING_RUNTIME_BOOT_ID_KEY, runtimeBootId);
+  return runtimeBootId;
+}
+
 export function shouldAutoStartDesktopOnboarding() {
   const status = loadDesktopOnboardingStatus();
   return !status.completed && !status.skipped;
@@ -264,6 +282,7 @@ export async function startDesktopOnboarding(
 ) {
   const now = new Date().toISOString();
   const status = loadDesktopOnboardingStatus();
+  const runtimeBootId = loadDesktopOnboardingRuntimeBootId() ?? refreshDesktopOnboardingRuntimeBootId();
 
   saveDesktopOnboardingStatus({
     ...status,
@@ -272,6 +291,7 @@ export async function startDesktopOnboarding(
 
   const session: DesktopOnboardingSession = {
     isOpen: true,
+    runtime_boot_id: runtimeBootId,
     source,
     step: "welcome",
     started_at: now,

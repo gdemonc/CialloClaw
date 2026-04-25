@@ -43,6 +43,7 @@ import { buildDesktopOnboardingPresentation } from "@/features/onboarding/onboar
 import {
   advanceDesktopOnboarding,
   loadDesktopOnboardingSession,
+  refreshDesktopOnboardingRuntimeBootId,
   resetDesktopOnboardingRuntimeState,
   setDesktopOnboardingPresentation,
   shouldAutoStartDesktopOnboarding,
@@ -460,13 +461,14 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
 
     let cancelled = false;
 
+    const runtimeBootId = refreshDesktopOnboardingRuntimeBootId();
     const storedSession = loadDesktopOnboardingSession();
 
-    // Cold starts should not resume a stale cross-window onboarding step from a
-    // previous desktop process, but manual replays still need the fresh welcome
-    // session to survive when shell-ball is created on demand.
+    // Cold starts must drop any persisted onboarding session that was created by
+    // an older desktop process. Manual replays in the current process inherit
+    // the fresh runtime marker and remain eligible across window opens.
     const initializeOnboardingRuntime = async () => {
-      if (storedSession?.isOpen === true && storedSession.step !== "welcome") {
+      if (storedSession?.isOpen === true && storedSession.runtime_boot_id !== runtimeBootId) {
         await resetDesktopOnboardingRuntimeState();
       }
 

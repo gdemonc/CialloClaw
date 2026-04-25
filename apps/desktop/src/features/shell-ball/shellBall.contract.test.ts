@@ -6850,10 +6850,14 @@ test("desktop onboarding replay keeps the transparent host click-through until c
   assert.match(onboardingWindowSource, /!cardRef\.current \|\| !session \|\| !activePresentation \|\| !hasSettledPresentation/);
   assert.match(onboardingWindowSource, /void setOnboardingInteractiveRegions\(\[\]\);/);
   assert.match(onboardingServiceSource, /export async function resetDesktopOnboardingRuntimeState\(\) \{/);
+  assert.match(onboardingServiceSource, /const DESKTOP_ONBOARDING_RUNTIME_BOOT_ID_KEY = "cialloclaw\.desktop\.onboarding\.runtime_boot_id";/);
+  assert.match(onboardingServiceSource, /export function refreshDesktopOnboardingRuntimeBootId\(\) \{/);
   assert.match(onboardingServiceSource, /removeStoredValue\(DESKTOP_ONBOARDING_SESSION_KEY\);/);
   assert.match(onboardingServiceSource, /removeStoredValue\(DESKTOP_ONBOARDING_PRESENTATION_KEY\);/);
+  assert.match(onboardingServiceSource, /runtime_boot_id: runtimeBootId,/);
+  assert.match(shellBallAppSource, /const runtimeBootId = refreshDesktopOnboardingRuntimeBootId\(\);/);
   assert.match(shellBallAppSource, /const storedSession = loadDesktopOnboardingSession\(\);/);
-  assert.match(shellBallAppSource, /if \(storedSession\?\.isOpen === true && storedSession\.step !== "welcome"\) \{/);
+  assert.match(shellBallAppSource, /if \(storedSession\?\.isOpen === true && storedSession\.runtime_boot_id !== runtimeBootId\) \{/);
   assert.match(shellBallAppSource, /resetDesktopOnboardingRuntimeState/);
   assert.match(shellBallAppSource, /const \[onboardingRuntimeReady, setOnboardingRuntimeReady\] = useState/);
   assert.match(shellBallAppSource, /if \(!onboardingRuntimeReady\) \{/);
