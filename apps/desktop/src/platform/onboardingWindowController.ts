@@ -52,6 +52,13 @@ export async function syncOnboardingWindowFrame(
   const onboardingWindow = await getOrCreateOnboardingWindow();
   await onboardingWindow.setPosition(new LogicalPosition(frame.x, frame.y));
   await onboardingWindow.setSize(new LogicalSize(frame.width, frame.height));
+  // Keep the transparent onboarding host click-through until the overlay webview
+  // reports its real card hotspot regions. This prevents replaying onboarding
+  // from briefly blocking the whole monitor while the window boots.
+  await onboardingWindow.setIgnoreCursorEvents(true);
+  // The overlay must stay focusable so its own buttons remain clickable once the
+  // native hotspot regions are restored. We avoid explicit focusing here, so the
+  // business window still keeps control until the user interacts with the guide.
   await onboardingWindow.setFocusable(true);
   await onboardingWindow.setAlwaysOnTop(options.alwaysOnTop ?? true);
   await onboardingWindow.show();

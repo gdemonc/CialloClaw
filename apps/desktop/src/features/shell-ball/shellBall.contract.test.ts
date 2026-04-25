@@ -6833,6 +6833,32 @@ test("desktop tauri setup enables mouse activity tracking for dwell context", ()
   assert.doesNotMatch(activitySource, /println!\("mouse activity at /);
 });
 
+test("desktop onboarding replay keeps the transparent host click-through until card regions load", () => {
+  const mainSource = readFileSync(resolve(desktopRoot, "src-tauri/src/main.rs"), "utf8");
+  const controllerSource = readFileSync(resolve(desktopRoot, "src/platform/onboardingWindowController.ts"), "utf8");
+  const onboardingWindowSource = readFileSync(resolve(desktopRoot, "src/features/onboarding/OnboardingWindow.tsx"), "utf8");
+  const onboardingServiceSource = readFileSync(resolve(desktopRoot, "src/features/onboarding/onboardingService.ts"), "utf8");
+  const shellBallAppSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/ShellBallApp.tsx"), "utf8");
+
+  assert.match(controllerSource, /setIgnoreCursorEvents\(true\);[\s\S]*setFocusable\(true\);[\s\S]*show\(\);/);
+  assert.match(
+    mainSource,
+    /if !should_track \{[\s\S]*set_window_ignore_cursor_events\(hwnd, true\);[\s\S]*state\.current_ignore = Some\(true\);/,
+  );
+  assert.match(mainSource, /let should_sync_hit_testing = matches!\([\s\S]*WM_LBUTTONDOWN[\s\S]*WM_RBUTTONDOWN[\s\S]*WM_MOUSEWHEEL/);
+  assert.match(onboardingWindowSource, /const hasSettledPresentation = session !== null && presentation\?\.step === session\.step;/);
+  assert.match(onboardingWindowSource, /!cardRef\.current \|\| !session \|\| !activePresentation \|\| !hasSettledPresentation/);
+  assert.match(onboardingWindowSource, /void setOnboardingInteractiveRegions\(\[\]\);/);
+  assert.match(onboardingServiceSource, /export async function resetDesktopOnboardingRuntimeState\(\) \{/);
+  assert.match(onboardingServiceSource, /removeStoredValue\(DESKTOP_ONBOARDING_SESSION_KEY\);/);
+  assert.match(onboardingServiceSource, /removeStoredValue\(DESKTOP_ONBOARDING_PRESENTATION_KEY\);/);
+  assert.match(shellBallAppSource, /const storedSession = loadDesktopOnboardingSession\(\);/);
+  assert.match(shellBallAppSource, /if \(storedSession\?\.isOpen === true && storedSession\.step !== "welcome"\) \{/);
+  assert.match(shellBallAppSource, /resetDesktopOnboardingRuntimeState/);
+  assert.match(shellBallAppSource, /const \[onboardingRuntimeReady, setOnboardingRuntimeReady\] = useState/);
+  assert.match(shellBallAppSource, /if \(!onboardingRuntimeReady\) \{/);
+});
+
 test("shell-ball file drops queue pending attachments instead of starting a task immediately", () => {
   const coordinatorSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"), "utf8");
   const interactionSource = readFileSync(resolve(desktopRoot, "src/features/shell-ball/useShellBallInteraction.ts"), "utf8");

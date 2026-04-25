@@ -1108,10 +1108,13 @@ unsafe fn update_onboarding_native_tracking() {
     set_forward_mouse_messages(hwnd, should_track);
 
     if !should_track {
-        set_window_ignore_cursor_events(hwnd, false);
+        // The transparent onboarding host must stay click-through until React
+        // registers a real interactive card region. Otherwise a replayed guide
+        // can block the whole monitor before the overlay finishes mounting.
+        set_window_ignore_cursor_events(hwnd, true);
         if let Ok(mut state) = ONBOARDING_INTERACTIVE_STATE.lock() {
             if state.hwnd == Some(hwnd_value) {
-                state.current_ignore = Some(false);
+                state.current_ignore = Some(true);
             }
         }
     }
@@ -1127,39 +1130,55 @@ unsafe extern "system" fn mousemove_forward(
         return CallNextHookEx(None, n_code, w_param, l_param);
     }
 
-    if w_param.0 as u32 == WM_MOUSEMOVE {
+    let message = w_param.0 as u32;
+    let should_sync_hit_testing = matches!(
+        message,
+        WM_MOUSEMOVE
+            | WM_LBUTTONDOWN
+            | WM_LBUTTONUP
+            | WM_RBUTTONDOWN
+            | WM_RBUTTONUP
+            | WM_MBUTTONDOWN
+            | WM_MBUTTONUP
+            | WM_MOUSEWHEEL
+            | WM_MOUSEHWHEEL
+    );
+
+    if should_sync_hit_testing {
         let point = (*(l_param.0 as *const MSLLHOOKSTRUCT)).pt;
 
         sync_shell_ball_native_hit_testing(point);
         sync_onboarding_native_hit_testing(point);
 
-        let forwarding_windows = match FORWARDING_WINDOWS.lock() {
-            Ok(guard) => guard,
-            Err(_) => return CallNextHookEx(None, n_code, w_param, l_param),
-        };
-
-        for &hwnd in forwarding_windows.iter() {
-            let hwnd = HWND(hwnd as _);
-            let mut client_rect = RECT {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
+        if message == WM_MOUSEMOVE {
+            let forwarding_windows = match FORWARDING_WINDOWS.lock() {
+                Ok(guard) => guard,
+                Err(_) => return CallNextHookEx(None, n_code, w_param, l_param),
             };
 
-            if GetClientRect(hwnd, &mut client_rect).is_err() {
-                continue;
-            }
+            for &hwnd in forwarding_windows.iter() {
+                let hwnd = HWND(hwnd as _);
+                let mut client_rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
 
-            let mut client_point = point;
-            if !ScreenToClient(hwnd, &mut client_point).as_bool() {
-                continue;
-            }
+                if GetClientRect(hwnd, &mut client_rect).is_err() {
+                    continue;
+                }
 
-            if PtInRect(&client_rect, client_point).as_bool() {
-                let w = Some(WPARAM(1));
-                let l = Some(LPARAM(makelparam!(client_point.x, client_point.y)));
-                SendMessageW(hwnd, WM_MOUSEMOVE, w, l);
+                let mut client_point = point;
+                if !ScreenToClient(hwnd, &mut client_point).as_bool() {
+                    continue;
+                }
+
+                if PtInRect(&client_rect, client_point).as_bool() {
+                    let w = Some(WPARAM(1));
+                    let l = Some(LPARAM(makelparam!(client_point.x, client_point.y)));
+                    SendMessageW(hwnd, WM_MOUSEMOVE, w, l);
+                }
             }
         }
     }

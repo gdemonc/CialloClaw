@@ -42,6 +42,8 @@ import { openOrFocusDesktopWindow } from "../../platform/windowController";
 import { buildDesktopOnboardingPresentation } from "@/features/onboarding/onboardingGeometry";
 import {
   advanceDesktopOnboarding,
+  loadDesktopOnboardingSession,
+  resetDesktopOnboardingRuntimeState,
   setDesktopOnboardingPresentation,
   shouldAutoStartDesktopOnboarding,
   startDesktopOnboarding,
@@ -231,6 +233,7 @@ async function animateShellBallDashboardWindow(input: {
 export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
   void isDev;
   const onboardingSession = useDesktopOnboardingSession();
+  const [onboardingRuntimeReady, setOnboardingRuntimeReady] = useState(() => getCurrentWindow().label !== shellBallWindowLabels.ball);
   const {
     visualState,
     inputValue,
@@ -455,6 +458,39 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
       return;
     }
 
+    let cancelled = false;
+
+    const storedSession = loadDesktopOnboardingSession();
+
+    // Cold starts should not resume a stale cross-window onboarding step from a
+    // previous desktop process, but manual replays still need the fresh welcome
+    // session to survive when shell-ball is created on demand.
+    const initializeOnboardingRuntime = async () => {
+      if (storedSession?.isOpen === true && storedSession.step !== "welcome") {
+        await resetDesktopOnboardingRuntimeState();
+      }
+
+      if (!cancelled) {
+        setOnboardingRuntimeReady(true);
+      }
+    };
+
+    void initializeOnboardingRuntime();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (getCurrentWindow().label !== shellBallWindowLabels.ball) {
+      return;
+    }
+
+    if (!onboardingRuntimeReady) {
+      return;
+    }
+
     if (!shouldAutoStartDesktopOnboarding()) {
       return;
     }
@@ -464,7 +500,7 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
     }
 
     void startDesktopOnboarding("first_launch");
-  }, [onboardingSession]);
+  }, [onboardingRuntimeReady, onboardingSession]);
 
   useDesktopOnboardingActions(
     "shell-ball",

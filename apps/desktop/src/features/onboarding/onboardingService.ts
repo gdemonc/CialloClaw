@@ -220,6 +220,19 @@ export function shouldAutoStartDesktopOnboarding() {
   return !status.completed && !status.skipped;
 }
 
+/**
+ * Clears the transient onboarding session/presentation cache without touching
+ * the durable completed/skipped status. This is used on a cold desktop boot so
+ * the app never resumes an old mid-guide step from a previous process.
+ */
+export async function resetDesktopOnboardingRuntimeState() {
+  removeStoredValue(DESKTOP_ONBOARDING_SESSION_KEY);
+  removeStoredValue(DESKTOP_ONBOARDING_PRESENTATION_KEY);
+  await hideOnboardingWindow();
+  await broadcastSession(null);
+  await broadcastPresentation(null);
+}
+
 export async function setDesktopOnboardingSession(session: DesktopOnboardingSession | null) {
   if (session === null) {
     removeStoredValue(DESKTOP_ONBOARDING_SESSION_KEY);

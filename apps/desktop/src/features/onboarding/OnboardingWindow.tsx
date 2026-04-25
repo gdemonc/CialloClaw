@@ -98,6 +98,7 @@ export function OnboardingWindow() {
   const presentation = useDesktopOnboardingPresentation();
   const [stagedPresentation, setStagedPresentation] = useState<DesktopOnboardingPresentation | null>(null);
   const copy = useMemo(() => (session ? getOnboardingCopy(session.step) : null), [session]);
+  const hasSettledPresentation = session !== null && presentation?.step === session.step;
 
   useEffect(() => {
     if (presentation !== null) {
@@ -136,7 +137,10 @@ export function OnboardingWindow() {
   }, [presentation, session, stagedPresentation]);
 
   useLayoutEffect(() => {
-    if (!cardRef.current || !session || !activePresentation) {
+    if (!cardRef.current || !session || !activePresentation || !hasSettledPresentation) {
+      // Cross-window steps can briefly reuse stale staged geometry while the next
+      // business window is still opening. Keep the overlay fully click-through
+      // until the current step has published a fresh presentation payload.
       void setOnboardingInteractiveRegions([]);
       return;
     }
@@ -162,7 +166,7 @@ export function OnboardingWindow() {
     return () => {
       void setOnboardingInteractiveRegions([]);
     };
-  }, [activePresentation, session]);
+  }, [activePresentation, hasSettledPresentation, session]);
 
   if (!session || !copy || !activePresentation) {
     return <main className="desktop-onboarding-window" />;
