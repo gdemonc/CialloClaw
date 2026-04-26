@@ -254,26 +254,26 @@ export interface SettingsSnapshot {
       task_sources: string[];
       remind_before_deadline: boolean;
       remind_when_stale: boolean;
-    };
-    models: {
-      provider: string;
-      credentials: {
-        budget_auto_downgrade: boolean;
-        provider_api_key_configured: boolean;
-        base_url: string;
-        model: string;
-        stronghold: StrongholdStatus;
-      };
-    };
-    data_log?: {
-      provider: string;
-      budget_auto_downgrade: boolean;
-      provider_api_key_configured: boolean;
-      stronghold: StrongholdStatus;
-      base_url?: string;
-      model?: string;
-    };
-  };
+	    };
+	    models: {
+	      provider: string;
+	      credentials: {
+	        budget_auto_downgrade: boolean;
+	        provider_api_key_configured: boolean;
+	        base_url: string;
+	        model: string;
+	        stronghold: StrongholdStatus;
+	      };
+	    };
+	    data_log?: {
+	      provider: string;
+	      budget_auto_downgrade: boolean;
+	      provider_api_key_configured: boolean;
+	      stronghold: StrongholdStatus;
+	      base_url?: string;
+	      model?: string;
+	    };
+	  };
 }
 
 export interface Citation {
