@@ -1697,6 +1697,19 @@ func TestExecuteFallsBackWhenModelFails(t *testing.T) {
 	}
 }
 
+func TestGenerateOutputWithPromptRejectsFallbackWithoutBudgetDowngrade(t *testing.T) {
+	service, _ := newTestExecutionServiceWithModelClient(t, &stubModelClient{output: "   "})
+	_, err := service.generateOutputWithPrompt(context.Background(), Request{
+		TaskID:      "task_empty_model_output",
+		RunID:       "run_empty_model_output",
+		Intent:      map[string]any{"name": "summarize", "arguments": map[string]any{}},
+		ResultTitle: "Empty model output",
+	}, "Please summarize this content.")
+	if !errors.Is(err, tools.ErrToolOutputInvalid) {
+		t.Fatalf("expected empty model output to surface TOOL_OUTPUT_INVALID, got %v", err)
+	}
+}
+
 func TestScreenCapabilitySnapshotReportsWiringState(t *testing.T) {
 	service, _ := newTestExecutionService(t, "screen capability probe")
 	snapshot := service.ScreenCapabilitySnapshot()

@@ -8,6 +8,7 @@ import (
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/model"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/orchestrator"
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/storage"
+	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
 )
 
 // registerHandlers binds stable agent.* JSON-RPC methods to orchestrator entry
@@ -373,7 +374,23 @@ func wrapOrchestratorResult(data any, err error) (any, *rpcError) {
 			TraceID: "trace_model_provider_not_found",
 		}
 	}
-	if errors.Is(err, model.ErrClientNotConfigured) || errors.Is(err, model.ErrToolCallingNotSupported) || errors.Is(err, model.ErrOpenAIAPIKeyRequired) || errors.Is(err, model.ErrOpenAIEndpointRequired) || errors.Is(err, model.ErrOpenAIModelIDRequired) || errors.Is(err, model.ErrOpenAIHTTPStatus) || errors.Is(err, model.ErrOpenAIRequestFailed) || errors.Is(err, model.ErrOpenAIRequestTimeout) || errors.Is(err, model.ErrOpenAIResponseInvalid) || errors.Is(err, model.ErrSecretSourceFailed) {
+	if errors.Is(err, tools.ErrToolOutputInvalid) {
+		return nil, &rpcError{
+			Code:    1003004,
+			Message: "TOOL_OUTPUT_INVALID",
+			Detail:  err.Error(),
+			TraceID: "trace_tool_output_invalid",
+		}
+	}
+	if model.IsProviderRuntimeUnavailable(err) {
+		return nil, &rpcError{
+			Code:    1008003,
+			Message: "MODEL_RUNTIME_UNAVAILABLE",
+			Detail:  err.Error(),
+			TraceID: "trace_model_runtime_unavailable",
+		}
+	}
+	if errors.Is(err, model.ErrClientNotConfigured) || errors.Is(err, model.ErrToolCallingNotSupported) || errors.Is(err, model.ErrOpenAIAPIKeyRequired) || errors.Is(err, model.ErrOpenAIEndpointRequired) || errors.Is(err, model.ErrOpenAIModelIDRequired) || errors.Is(err, model.ErrSecretSourceFailed) {
 		return nil, &rpcError{
 			Code:    1008002,
 			Message: "MODEL_NOT_ALLOWED",

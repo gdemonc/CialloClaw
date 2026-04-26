@@ -1869,6 +1869,9 @@ func (s *Service) generateOutputWithPrompt(ctx context.Context, request Request,
 	if err != nil {
 		return generationTrace{}, fmt.Errorf("generate text: %w", err)
 	}
+	if boolValue(toolResult.RawOutput, "fallback") && stringValue(toolResult.RawOutput, "fallback_reason", "") == tools.ErrToolOutputInvalid.Error() {
+		return generationTrace{}, fmt.Errorf("%w: generate_text content is missing", tools.ErrToolOutputInvalid)
+	}
 	if boolValue(toolResult.RawOutput, "fallback") && boolValue(request.BudgetDowngrade, "applied") {
 		auditRecord := mapValue(toolResult.RawOutput, "audit_record")
 		failureReason := stringValue(toolResult.RawOutput, "fallback_reason", model.ErrClientNotConfigured.Error())
@@ -3139,6 +3142,7 @@ func (s *Service) toolExecutionContext(workspacePath string, request Request) *t
 	workspacePath = firstNonEmpty(strings.TrimSpace(workspacePath), s.workspace)
 	approvedOperation := firstNonEmpty(strings.TrimSpace(request.ApprovedOperation), stringValue(request.Intent, "name", ""))
 	approvedTargetObject := firstNonEmpty(strings.TrimSpace(request.ApprovedTargetObject), approvedTargetObject(request.Intent, s.workspace))
+	modelService := s.currentModel()
 	return &tools.ToolExecuteContext{
 		TaskID:               request.TaskID,
 		RunID:                request.RunID,
@@ -3151,7 +3155,7 @@ func (s *Service) toolExecutionContext(workspacePath string, request Request) *t
 		Playwright:           s.playwright,
 		OCR:                  s.ocr,
 		Media:                s.media,
-		Model:                s.model,
+		Model:                modelService,
 	}
 }
 
@@ -3306,7 +3310,7 @@ func (s *Service) attachExtensionAssets(ctx context.Context, result *Result, req
 	if currentRefs, err := s.extensionAssets.CurrentExecutionAssets(ctx); err == nil {
 		refs = append(refs, currentRefs...)
 	}
-	refs = append(refs, supplementalExecutionBoundaryAssets(request, *result, s.model)...)
+	refs = append(refs, supplementalExecutionBoundaryAssets(request, *result, s.currentModel())...)
 	capabilities := append(capabilityNamesFromToolCalls(result.ToolCalls), directCapabilities...)
 	if pluginRefs, err := s.extensionAssets.PluginAssetsForCapabilities(ctx, capabilities); err == nil {
 		refs = append(refs, pluginRefs...)

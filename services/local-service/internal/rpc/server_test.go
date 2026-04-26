@@ -1357,6 +1357,31 @@ func TestDispatchMapsModelConfigurationErrors(t *testing.T) {
 	}
 }
 
+func TestDispatchMapsModelRuntimeUnavailableErrors(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, model.ErrOpenAIRequestTimeout)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1008003 || rpcErr.Message != "MODEL_RUNTIME_UNAVAILABLE" {
+		t.Fatalf("expected MODEL_RUNTIME_UNAVAILABLE mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+
+	_, rpcErr = wrapOrchestratorResult(nil, &model.OpenAIHTTPStatusError{StatusCode: 503, Message: "upstream unavailable"})
+	if rpcErr == nil || rpcErr.Code != 1008003 {
+		t.Fatalf("expected 5xx provider failure to map as runtime unavailable, got %+v", rpcErr)
+	}
+}
+
+func TestDispatchMapsToolOutputInvalidExplicitly(t *testing.T) {
+	_, rpcErr := wrapOrchestratorResult(nil, tools.ErrToolOutputInvalid)
+	if rpcErr == nil {
+		t.Fatal("expected rpc error")
+	}
+	if rpcErr.Code != 1003004 || rpcErr.Message != "TOOL_OUTPUT_INVALID" {
+		t.Fatalf("expected TOOL_OUTPUT_INVALID mapping, got code=%d message=%s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
 func TestHandlerWrappersCoverRecommendationInspectorDashboardAndSecurityMethods(t *testing.T) {
 	server := newTestServer()
 	handlerCalls := []struct {

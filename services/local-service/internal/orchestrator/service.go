@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -89,6 +90,12 @@ type budgetDowngradeDecision struct {
 	DegradeActions []string
 	Summary        string
 	Trace          map[string]any
+}
+
+type modelSecretRollback struct {
+	provider string
+	record   storage.SecretRecord
+	existed  bool
 }
 
 // NewService wires the main orchestration dependencies.
@@ -2813,14 +2820,25 @@ func (s *Service) SettingsGet(params map[string]any) (map[string]any, error) {
 // settings patch plus apply-mode metadata.
 func (s *Service) SettingsUpdate(params map[string]any) (map[string]any, error) {
 	normalizedParams := normalizeSettingsUpdateParams(params)
+	previewSettings, updatedKeys, applyMode, needRestart, err := s.previewSettingsUpdate(normalizedParams)
+	if err != nil {
+		return nil, err
+	}
 	modelSecretTouched := false
 	secretUpdatedKeys := make([]string, 0, 2)
+	rollbacks := make([]modelSecretRollback, 0, 2)
+	previousModel := s.currentModel()
 	if models := cloneMap(mapValue(normalizedParams, "models")); len(models) > 0 {
 		if deleteAPIKey := boolValue(models, "delete_api_key", false); deleteAPIKey {
 			provider := s.providerForSettingsUpdate(models)
+			rollback, rollbackErr := s.captureModelSecretRollback(provider)
+			if rollbackErr != nil {
+				return nil, rollbackErr
+			}
 			if err := s.deleteModelSecret(provider); err != nil {
 				return nil, err
 			}
+			rollbacks = append(rollbacks, rollback)
 			delete(models, "delete_api_key")
 			normalizedParams["models"] = models
 			modelSecretTouched = true
@@ -2828,17 +2846,32 @@ func (s *Service) SettingsUpdate(params map[string]any) (map[string]any, error) 
 		}
 		if apiKey := stringValue(models, "api_key", ""); apiKey != "" {
 			provider := s.providerForSettingsUpdate(models)
+			rollback, rollbackErr := s.captureModelSecretRollback(provider)
+			if rollbackErr != nil {
+				return nil, rollbackErr
+			}
 			if err := s.persistModelSecret(provider, apiKey); err != nil {
 				return nil, err
 			}
+			rollbacks = append(rollbacks, rollback)
 			delete(models, "api_key")
 			normalizedParams["models"] = models
 			modelSecretTouched = true
 			secretUpdatedKeys = append(secretUpdatedKeys, "models.api_key")
 		}
 	}
+	if modelSettingsTouched(updatedKeys) {
+		applyMode = "next_task_effective"
+		needRestart = false
+		if err := s.reloadRuntimeModelForSettings(previewSettings); err != nil {
+			s.rollbackModelSecretMutations(rollbacks)
+			return nil, err
+		}
+	}
 	effectiveSettings, updatedKeys, applyMode, needRestart, err := s.runEngine.UpdateSettings(normalizedParams)
 	if err != nil {
+		s.ReplaceModel(previousModel)
+		s.rollbackModelSecretMutations(rollbacks)
 		return nil, err
 	}
 	if modelSecretTouched {
@@ -2855,19 +2888,32 @@ func (s *Service) SettingsUpdate(params map[string]any) (map[string]any, error) 
 	}
 	effectiveSettings = outwardSettingsUpdatePatch(effectiveSettings)
 	updatedKeys = outwardSettingsUpdateKeys(updatedKeys, secretUpdatedKeys)
-	if modelSettingsTouched(updatedKeys) {
-		applyMode = "next_task_effective"
-		needRestart = false
-		if err := s.reloadRuntimeModelFromSettings(); err != nil {
-			return nil, err
-		}
-	}
 	return map[string]any{
 		"updated_keys":       updatedKeys,
 		"effective_settings": effectiveSettings,
 		"apply_mode":         applyMode,
 		"need_restart":       needRestart,
 	}, nil
+}
+
+// previewSettingsUpdate computes the future settings snapshot without mutating
+// runengine state so SettingsUpdate can validate runtime model reloads before
+// persisting a next-task-effective model route.
+func (s *Service) previewSettingsUpdate(values map[string]any) (map[string]any, []string, string, bool, error) {
+	if s == nil || s.runEngine == nil {
+		return nil, nil, "", false, nil
+	}
+	currentSettings := s.runEngine.Settings()
+	nextSettings := cloneMap(currentSettings)
+	if nextSettings == nil {
+		nextSettings = map[string]any{}
+	}
+	previewPatch := cloneMap(values)
+	mergeSettingsPreview(nextSettings, previewPatch)
+	updatedKeys := settingsPatchPathsFromPreview(previewPatch)
+	applyMode := previewApplyMode(currentSettings, previewPatch, updatedKeys)
+	needRestart := previewNeedsRestart(currentSettings, previewPatch)
+	return normalizeSettingsSnapshot(nextSettings), updatedKeys, applyMode, needRestart, nil
 }
 
 func (s *Service) executeScreenAnalysisAfterApproval(task runengine.TaskRecord, pendingExecution map[string]any) (runengine.TaskRecord, map[string]any, map[string]any, error) {
@@ -3702,6 +3748,125 @@ func (s *Service) deleteModelSecret(provider string) error {
 		return normalizedErr
 	}
 	return nil
+}
+
+func (s *Service) captureModelSecretRollback(provider string) (modelSecretRollback, error) {
+	resolvedProvider := model.CanonicalProviderName(firstNonEmptyString(strings.TrimSpace(provider), s.defaultSettingsProvider()))
+	rollback := modelSecretRollback{provider: resolvedProvider}
+	if s.storage == nil || s.storage.SecretStore() == nil || resolvedProvider == "" {
+		return rollback, nil
+	}
+	record, err := s.storage.SecretStore().GetSecret(context.Background(), "model", resolvedProvider+"_api_key")
+	if err == nil {
+		rollback.record = record
+		rollback.existed = true
+		return rollback, nil
+	}
+	normalizedErr := storage.NormalizeSecretStoreError(err)
+	if errors.Is(normalizedErr, storage.ErrSecretNotFound) {
+		return rollback, nil
+	}
+	if errors.Is(normalizedErr, storage.ErrStrongholdAccessFailed) {
+		return rollback, ErrStrongholdAccessFailed
+	}
+	return rollback, normalizedErr
+}
+
+func (s *Service) rollbackModelSecretMutations(rollbacks []modelSecretRollback) {
+	for index := len(rollbacks) - 1; index >= 0; index-- {
+		rollback := rollbacks[index]
+		if rollback.provider == "" || s == nil || s.storage == nil || s.storage.SecretStore() == nil {
+			continue
+		}
+		if rollback.existed {
+			_ = s.storage.SecretStore().PutSecret(context.Background(), rollback.record)
+			continue
+		}
+		_ = s.storage.SecretStore().DeleteSecret(context.Background(), "model", rollback.provider+"_api_key")
+	}
+}
+
+func (s *Service) reloadRuntimeModelForSettings(settings map[string]any) error {
+	if s == nil || s.runEngine == nil {
+		return nil
+	}
+	resolvedConfig := model.RuntimeConfigFromSettings(s.currentModelConfig(), settings)
+	modelService, err := model.NewServiceFromConfig(model.ServiceConfig{
+		ModelConfig:  resolvedConfig,
+		SecretSource: model.NewStaticSecretSource(s.storage),
+	})
+	if err != nil {
+		if shouldFallbackRuntimeModelReload(err) {
+			modelService = model.NewService(resolvedConfig)
+		} else {
+			return err
+		}
+	}
+	s.ReplaceModel(modelService)
+	return nil
+}
+
+func settingsPatchPathsFromPreview(patch map[string]any) []string {
+	if len(patch) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(patch))
+	for key := range patch {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	paths := make([]string, 0, len(keys))
+	for _, key := range keys {
+		nextPrefix := key
+		if nested, ok := patch[key].(map[string]any); ok && len(nested) > 0 {
+			for _, child := range settingsPatchPathsFromPreview(nested) {
+				paths = append(paths, nextPrefix+"."+child)
+			}
+			continue
+		}
+		paths = append(paths, nextPrefix)
+	}
+	return paths
+}
+
+func mergeSettingsPreview(target map[string]any, patch map[string]any) {
+	for key, value := range patch {
+		patchMap, ok := value.(map[string]any)
+		if ok {
+			currentMap, currentOK := target[key].(map[string]any)
+			if !currentOK {
+				currentMap = map[string]any{}
+			}
+			mergeSettingsPreview(currentMap, patchMap)
+			target[key] = currentMap
+			continue
+		}
+		target[key] = value
+	}
+}
+
+func previewNeedsRestart(currentSettings, patch map[string]any) bool {
+	generalPatch := cloneMap(mapValue(patch, "general"))
+	if len(generalPatch) == 0 {
+		return false
+	}
+	nextLanguage, ok := generalPatch["language"]
+	if !ok {
+		return false
+	}
+	currentGeneral := cloneMap(mapValue(currentSettings, "general"))
+	currentLanguage, hasCurrentLanguage := currentGeneral["language"]
+	return !hasCurrentLanguage || !reflect.DeepEqual(currentLanguage, nextLanguage)
+}
+
+func previewApplyMode(currentSettings, patch map[string]any, updatedKeys []string) string {
+	if previewNeedsRestart(currentSettings, patch) {
+		return "restart_required"
+	}
+	if modelSettingsTouched(updatedKeys) {
+		return "next_task_effective"
+	}
+	return "immediate"
 }
 
 func strongholdStatusFromStorage(store *storage.Service) map[string]any {
