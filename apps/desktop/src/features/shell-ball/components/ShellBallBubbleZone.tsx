@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { ShellBallBubbleItem } from "../shellBall.bubble";
 import type { ShellBallVisualState } from "../shellBall.types";
-import { ShellBallBubbleMessage as ShellBallBubbleMessageView } from "./ShellBallBubbleMessage";
+import { ShellBallBubbleList } from "./ShellBallBubbleList";
 
 type ShellBallBubbleZoneProps = {
   visualState: ShellBallVisualState;
   bubbleItems?: ShellBallBubbleItem[];
+  onActivateBubble?: (bubbleId: string) => void;
   onDeleteBubble?: (bubbleId: string) => void;
   onPinBubble?: (bubbleId: string) => void;
   onAllowApprovalBubble?: (bubbleId: string) => void;
@@ -15,6 +16,7 @@ type ShellBallBubbleZoneProps = {
 export function ShellBallBubbleZone({
   visualState,
   bubbleItems = [],
+  onActivateBubble,
   onDeleteBubble,
   onPinBubble,
   onAllowApprovalBubble,
@@ -78,24 +80,14 @@ export function ShellBallBubbleZone({
         data-shell-ball-interactive="true"
         onScroll={syncAutoScrollState}
       >
-        <div className="shell-ball-bubble-zone__spacer" aria-hidden="true" />
-        {bubbleItems.map((item) => (
-          <div
-            key={item.bubble.bubble_id}
-            className="shell-ball-bubble-zone__message-entry"
-            data-freshness={item.desktop.freshnessHint ?? "stale"}
-            data-motion={item.desktop.motionHint ?? "settle"}
-          >
-            <ShellBallBubbleMessageView
-              item={item}
-              onDelete={onDeleteBubble}
-              onPin={onPinBubble}
-              onAllowApproval={onAllowApprovalBubble}
-              onDenyApproval={onDenyApprovalBubble}
-            />
-          </div>
-        ))}
-        <div className="shell-ball-bubble-zone__bottom-anchor" aria-hidden="true" />
+        <ShellBallBubbleList
+          bubbleItems={bubbleItems}
+          onActivateBubble={onActivateBubble}
+          onDeleteBubble={onDeleteBubble}
+          onPinBubble={onPinBubble}
+          onAllowApprovalBubble={onAllowApprovalBubble}
+          onDenyApprovalBubble={onDenyApprovalBubble}
+        />
       </div>
     </section>
   );

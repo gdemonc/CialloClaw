@@ -962,6 +962,9 @@ export function ShellBallApp({ isDev = false }: ShellBallAppProps) {
                 <ShellBallBubbleZone
                   visualState={snapshot.visualState}
                   bubbleItems={visibleBubbleItems}
+                  onActivateBubble={(bubbleId) => {
+                    handleCoordinatorBubbleAction({ action: "pin", bubbleId, source: "bubble" });
+                  }}
                   onAllowApprovalBubble={(bubbleId) => {
                     handleCoordinatorBubbleAction({ action: "allow_approval", bubbleId, source: "bubble" });
                   }}

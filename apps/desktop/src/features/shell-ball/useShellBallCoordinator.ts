@@ -698,6 +698,14 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
       }),
     [bubbleItems, bubbleVisibilityPhase, helpersVisible, input.inputFocused, input.inputValue, input.pendingFiles, input.regionActive, input.visualState, input.voiceHintMode, input.voicePreview, inputHovered],
   );
+  const pinnedBubbleWindowSyncKey = useMemo(
+    () => snapshot.bubbleItems
+      .filter((item) => item.bubble.pinned)
+      .map((item) => item.bubble.bubble_id)
+      .sort()
+      .join("|"),
+    [snapshot.bubbleItems],
+  );
   const snapshotRef = useRef(snapshot);
   const bubbleItemsRef = useRef(bubbleItems);
   const bubbleVisibilityPhaseRef = useRef<ShellBallBubbleVisibilityPhase>(bubbleVisibilityPhase);
@@ -1537,6 +1545,19 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   syncPinnedBubbleWindowAnchorRef.current = syncPinnedBubbleWindowAnchor;
   syncAnchoredPinnedBubbleWindowsRef.current = syncAnchoredPinnedBubbleWindows;
 
+  useEffect(() => {
+    const currentWindow = getCurrentWindow();
+
+    if (currentWindow.label !== shellBallWindowLabels.ball || pinnedBubbleWindowSyncKey === "") {
+      return;
+    }
+
+    // Pinning first lands in local React state. Re-syncing from the committed
+    // pinned-bubble snapshot keeps the dedicated helper window bound to the
+    // same bubble item that already left the inline region.
+    void syncAnchoredPinnedBubbleWindows();
+  }, [pinnedBubbleWindowSyncKey, syncAnchoredPinnedBubbleWindows]);
+
   const handleCoordinatorInputFocusChange = useCallback((focused: boolean) => {
     inputFocusedRef.current = focused;
 
@@ -1892,13 +1913,18 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
       .filter((item) => item.bubble.pinned)
       .map((item) => getShellBallPinnedBubbleWindowLabel(item.bubble.bubble_id));
 
+    // Pinned bubble windows opt out of the inline bubble-region fade lifecycle.
+    // Keep them visible whenever helper windows are active, even if the last
+    // unpinned bubble has already left the inline region.
+    const pinnedBubbleWindowsVisible = helpersVisible;
+
     void Promise.all([
       ...pinnedBubbleLabels.map((label) => emitSnapshotToLabel(label)),
       ...latestSnapshot.bubbleItems
         .filter((item) => item.bubble.pinned)
-        .map((item) => setShellBallPinnedBubbleWindowVisible(item.bubble.bubble_id, latestSnapshot.visibility.bubble)),
+        .map((item) => setShellBallPinnedBubbleWindowVisible(item.bubble.bubble_id, pinnedBubbleWindowsVisible)),
     ]);
-  }, [snapshot]);
+  }, [helpersVisible, snapshot]);
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();

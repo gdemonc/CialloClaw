@@ -45,7 +45,11 @@ import { getShellBallMascotPointerPhaseAction } from "./components/ShellBallMasc
 import { shouldSuppressShellBallMascotHotspotGestures } from "./components/ShellBallMascot";
 import { extractShellBallDroppedText, resolveShellBallTextDropEffect, ShellBallSurface, shouldAcceptShellBallTextDrop } from "./ShellBallSurface";
 import { shouldShowShellBallDemoSwitcher } from "./shellBall.dev";
-import { shellBallWindowLabels, shellBallWindowPermissions } from "../../platform/shellBallWindowController";
+import {
+  clampShellBallPinnedBubbleWindowPosition,
+  shellBallWindowLabels,
+  shellBallWindowPermissions,
+} from "../../platform/shellBallWindowController";
 import {
   ShellBallInputBar,
 } from "./components/ShellBallInputBar";
@@ -937,6 +941,26 @@ test("shell-ball pinned window labels and capabilities stay deterministic", () =
   assert.equal(generatedCapabilitySchema.default.windows.includes("shell-ball-bubble-pinned-*"), true);
   assert.deepEqual(generatedCapabilitySchema["control-panel-destroy"].windows, ["control-panel"]);
   assert.deepEqual(generatedCapabilitySchema["control-panel-destroy"].permissions, ["core:window:allow-destroy"]);
+});
+
+test("shell-ball pinned window positions stay inside the visible work area", () => {
+  assert.deepEqual(
+    clampShellBallPinnedBubbleWindowPosition({
+      position: { x: 872, y: -24 },
+      size: { width: 320, height: 220 },
+      bounds: { minX: 12, minY: 12, maxX: 1000, maxY: 700 },
+    }),
+    { x: 680, y: 12 },
+  );
+
+  assert.deepEqual(
+    clampShellBallPinnedBubbleWindowPosition({
+      position: { x: 84, y: 120 },
+      size: { width: 320, height: 220 },
+      bounds: { minX: 12, minY: 12, maxX: 1000, maxY: 700 },
+    }),
+    { x: 84, y: 120 },
+  );
 });
 
 test("shell-ball window controller caches helper handles for drag-time updates", () => {
@@ -3627,8 +3651,8 @@ test("shell-ball bubble zone keeps the latest message visible on feed updates", 
         return refs.shift() as { current: T };
       },
     },
-    "./ShellBallBubbleMessage": {
-      ShellBallBubbleMessage(): null {
+    "./ShellBallBubbleList": {
+      ShellBallBubbleList(): null {
         return null;
       },
     },
@@ -3759,6 +3783,37 @@ test("shell-ball bubble zone renders per-bubble pin and delete controls", () => 
   assert.match(markup, /shell-ball-bubble-message__delete-control/g);
   assert.equal(markup.match(/data-bubble-action="pin"/g)?.length, 2);
   assert.equal(markup.match(/data-bubble-action="delete"/g)?.length, 2);
+});
+
+test("shell-ball bubble zone exposes clickable bubble activators when popup callbacks exist", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ShellBallBubbleZone, {
+      visualState: "processing",
+      bubbleItems: [
+        {
+          bubble: {
+            bubble_id: "msg-agent-popup-1",
+            task_id: "task-agent-popup-1",
+            type: "status",
+            text: "Pop this into a focused popup.",
+            pinned: false,
+            hidden: false,
+            created_at: "2026-04-26T11:02:00.000Z",
+          },
+          role: "agent",
+          desktop: {
+            lifecycleState: "visible",
+          },
+        },
+      ] satisfies ShellBallBubbleItem[],
+      onActivateBubble() {},
+      onDeleteBubble() {},
+      onPinBubble() {},
+    }),
+  );
+
+  assert.match(markup, /data-bubble-activatable="true"/);
+  assert.match(markup, /tabindex="0"/i);
 });
 
 test("shell-ball pending-approval bubbles render inline allow and deny controls", () => {
@@ -4446,6 +4501,144 @@ test("shell-ball detached bubble actions close pinned windows and delete detache
 
   assert.deepEqual(closeCalls, ["msg-detached-1", "msg-detached-1"]);
   assert.deepEqual(bubbleItemsState.map((item) => item.bubble.bubble_id), ["msg-detached-2"]);
+});
+
+test("shell-ball pinning keeps the dedicated pinned bubble window visible after the inline bubble list empties", async () => {
+  const listeners = new Map<string, (event: { payload: unknown }) => void>();
+  const openCalls: Array<{ bubbleId: string }> = [];
+  const visibleCalls: Array<{ bubbleId: string; visible: boolean }> = [];
+  const reactRuntime = createImmediateShellBallReactRuntime([
+    {
+      bubble: {
+        bubble_id: "msg-pin-visibility-1",
+        task_id: "task-pin-visibility-1",
+        type: "status",
+        text: "Keep this visible when pinned.",
+        pinned: false,
+        hidden: false,
+        created_at: "2026-04-11T10:12:00.000Z",
+      },
+      role: "agent",
+      desktop: {
+        lifecycleState: "visible",
+      },
+    },
+  ]);
+
+  await withSourceModuleRuntime(
+    resolve(desktopRoot, "src/features/shell-ball/useShellBallCoordinator.ts"),
+    {
+      react: reactRuntime.react,
+      "@tauri-apps/api/window": {
+        getCurrentWindow() {
+          return {
+            label: shellBallWindowLabels.ball,
+            listen(eventName: string, callback: (event: { payload: unknown }) => void) {
+              listeners.set(eventName, callback);
+              return Promise.resolve(() => {});
+            },
+            onMoved() {
+              return Promise.resolve(() => {});
+            },
+            onResized() {
+              return Promise.resolve(() => {});
+            },
+            outerPosition() {
+              return Promise.resolve({ toLogical: () => ({ x: 0, y: 0 }) });
+            },
+            outerSize() {
+              return Promise.resolve({ toLogical: () => ({ width: 124, height: 104 }) });
+            },
+            scaleFactor() {
+              return Promise.resolve(1);
+            },
+          };
+        },
+      },
+      "@/rpc/subscriptions": {
+        subscribeApprovalPending() {
+          return () => {};
+        },
+        subscribeDeliveryReady() {
+          return () => {};
+        },
+        subscribeTaskUpdated() {
+          return () => {};
+        },
+      },
+      "../../platform/shellBallWindowController": {
+        SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME: { width: 240, height: 140 },
+        closeShellBallPinnedBubbleWindow() {
+          return Promise.resolve();
+        },
+        emitToShellBallWindowLabel() {
+          return Promise.resolve();
+        },
+        getShellBallPinnedBubbleIdFromLabel(): string | null {
+          return null;
+        },
+        getShellBallPinnedBubbleWindowAnchor() {
+          return { x: 12, y: 18 };
+        },
+        getShellBallPinnedBubbleWindowLabel(bubbleId: string) {
+          return `shell-ball-bubble-pinned-${bubbleId}`;
+        },
+        openShellBallPinnedBubbleWindow(input: { bubbleId: string }) {
+          openCalls.push({ bubbleId: input.bubbleId });
+          return Promise.resolve(`shell-ball-bubble-pinned-${input.bubbleId}`);
+        },
+        setShellBallPinnedBubbleWindowVisible(bubbleId: string, visible: boolean) {
+          visibleCalls.push({ bubbleId, visible });
+          return Promise.resolve();
+        },
+        shellBallWindowLabels,
+      },
+      "./useShellBallWindowMetrics": {
+        getShellBallBubbleAnchor() {
+          return { x: 20, y: 24 };
+        },
+      },
+    },
+    async (moduleExports) => {
+      const { useShellBallCoordinator } = moduleExports as {
+        useShellBallCoordinator: typeof import("./useShellBallCoordinator").useShellBallCoordinator;
+      };
+
+      const baseInput: Parameters<typeof useShellBallCoordinator>[0] = {
+        visualState: "hover_input" as const,
+        regionActive: false,
+        inputValue: "",
+        inputFocused: false,
+        finalizedSpeechPayload: null,
+        voicePreview: null,
+        voiceHintMode: "hidden" as const,
+        setInputValue: () => {},
+        onFinalizedSpeechHandled: () => {},
+        onRegionEnter: () => {},
+        onRegionLeave: () => {},
+        onInputHoverChange: () => {},
+        onInputFocusChange: () => {},
+        onSubmitText: (): null => null,
+        onAttachFile: () => {},
+        onPrimaryClick: () => {},
+      };
+
+      const { handleBubbleAction } = useShellBallCoordinator(baseInput);
+      handleBubbleAction({ action: "pin", bubbleId: "msg-pin-visibility-1", source: "bubble" });
+      await flushAsyncEffects();
+      await flushAsyncEffects();
+
+      useShellBallCoordinator(baseInput);
+      await flushAsyncEffects();
+    },
+  );
+
+  assert.deepEqual(openCalls, [{ bubbleId: "msg-pin-visibility-1" }]);
+  assert.deepEqual(visibleCalls, [{ bubbleId: "msg-pin-visibility-1", visible: true }]);
+  assert.deepEqual(
+    reactRuntime.getBubbleItems().map((item) => ({ bubbleId: item.bubble.bubble_id, pinned: item.bubble.pinned })),
+    [{ bubbleId: "msg-pin-visibility-1", pinned: true }],
+  );
 });
 
 test("shell-ball submit auto-opens formal delivery results through the shared desktop flow", async () => {
@@ -6245,7 +6438,7 @@ test("shell-ball pinned bubble windows render one coordinator-owned pinned item 
     {
       react: require("react"),
       "./useShellBallCoordinator": {
-        useShellBallHelperWindowSnapshot() {
+        useShellBallPinnedBubbleSnapshot() {
           return helperSnapshot;
         },
         emitShellBallBubbleAction(action: string, bubbleId: string, source?: string) {
@@ -6275,7 +6468,9 @@ test("shell-ball pinned bubble windows render one coordinator-owned pinned item 
 
   assert.match(markup, /Keep this pinned\./);
   assert.doesNotMatch(markup, /Leave this in the region\./);
-  assert.match(markup, /Unpin/);
+  assert.match(markup, /shell-ball-bubble-message--agent/);
+  assert.match(markup, /shell-ball-bubble-message__drag-handle/);
+  assert.match(markup, /Close/);
   assert.match(markup, /Delete/);
 });
 
@@ -6289,9 +6484,13 @@ test("shell-ball detached pinned window contract stays anchored before drag and 
 
   assert.match(pinnedWindowSource, /startShellBallWindowDragging/);
   assert.match(pinnedWindowSource, /setFollowsShellBallGeometry\(false\)/);
+  assert.match(pinnedWindowSource, /createPortal/);
+  assert.match(pinnedWindowSource, /ShellBallIndependentBubbleWindow/);
   assert.match(syncSource, /pinnedWindowReady/);
   assert.match(coordinatorSource, /openShellBallPinnedBubbleWindow/);
   assert.match(coordinatorSource, /closeShellBallPinnedBubbleWindow/);
+  assert.match(coordinatorSource, /const pinnedBubbleWindowSyncKey = useMemo/);
+  assert.match(coordinatorSource, /void syncAnchoredPinnedBubbleWindows\(\);/);
   assert.match(coordinatorSource, /shellBallWindowSyncEvents\.pinnedWindowReady/);
 });
 

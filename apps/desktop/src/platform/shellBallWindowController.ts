@@ -1,5 +1,5 @@
 import { LogicalPosition, LogicalSize, type Position, type Size } from "@tauri-apps/api/dpi";
-import { Window, getCurrentWindow } from "@tauri-apps/api/window";
+import { Window, getCurrentWindow, monitorFromPoint } from "@tauri-apps/api/window";
 
 export const shellBallWindowLabels = Object.freeze({
   ball: "shell-ball",
@@ -11,11 +11,12 @@ export const shellBallWindowLabels = Object.freeze({
 export const shellBallPinnedBubbleWindowLabelPrefix = "shell-ball-bubble-pinned-";
 
 export const SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME = Object.freeze({
-  width: 270,
-  height: 105,
+  width: 320,
+  height: 220,
 });
 
 export const SHELL_BALL_PINNED_BUBBLE_WINDOW_ANCHOR_OFFSET_PX = 18;
+export const SHELL_BALL_PINNED_BUBBLE_WINDOW_SAFE_MARGIN_PX = 12;
 
 export const shellBallWindowPermissions = Object.freeze([
   "core:window:allow-show",
@@ -59,6 +60,71 @@ export function getShellBallPinnedBubbleWindowAnchor(input: {
     x: input.bubbleAnchor.x + SHELL_BALL_PINNED_BUBBLE_WINDOW_ANCHOR_OFFSET_PX,
     y: input.bubbleAnchor.y + SHELL_BALL_PINNED_BUBBLE_WINDOW_ANCHOR_OFFSET_PX,
   };
+}
+
+/**
+ * Keeps detached pinned bubble windows inside the current monitor work area so
+ * pinning near the screen edge does not push the helper out of sight.
+ *
+ * This is a desktop-only geometry guard. It does not affect formal bubble
+ * state and only clamps the local helper window frame.
+ */
+export function clampShellBallPinnedBubbleWindowPosition(input: {
+  position: {
+    x: number;
+    y: number;
+  };
+  size: {
+    width: number;
+    height: number;
+  };
+  bounds: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  };
+}) {
+  const maxX = Math.max(input.bounds.minX, input.bounds.maxX - input.size.width);
+  const maxY = Math.max(input.bounds.minY, input.bounds.maxY - input.size.height);
+
+  return {
+    x: Math.min(Math.max(Math.round(input.position.x), input.bounds.minX), maxX),
+    y: Math.min(Math.max(Math.round(input.position.y), input.bounds.minY), maxY),
+  };
+}
+
+async function resolveShellBallPinnedBubbleWindowPosition(input: {
+  position: {
+    x: number;
+    y: number;
+  };
+  size: {
+    width: number;
+    height: number;
+  };
+}) {
+  const currentWindow = getCurrentWindow();
+  const outerPosition = await currentWindow.outerPosition();
+  const monitor = await monitorFromPoint(outerPosition.x, outerPosition.y);
+
+  if (monitor === null) {
+    return input.position;
+  }
+
+  const logicalPosition = monitor.workArea.position.toLogical(monitor.scaleFactor);
+  const logicalSize = monitor.workArea.size.toLogical(monitor.scaleFactor);
+
+  return clampShellBallPinnedBubbleWindowPosition({
+    position: input.position,
+    size: input.size,
+    bounds: {
+      minX: logicalPosition.x + SHELL_BALL_PINNED_BUBBLE_WINDOW_SAFE_MARGIN_PX,
+      minY: logicalPosition.y + SHELL_BALL_PINNED_BUBBLE_WINDOW_SAFE_MARGIN_PX,
+      maxX: logicalPosition.x + logicalSize.width - SHELL_BALL_PINNED_BUBBLE_WINDOW_SAFE_MARGIN_PX,
+      maxY: logicalPosition.y + logicalSize.height - SHELL_BALL_PINNED_BUBBLE_WINDOW_SAFE_MARGIN_PX,
+    },
+  });
 }
 
 export function getShellBallCurrentWindow() {
@@ -148,10 +214,14 @@ export async function openShellBallPinnedBubbleWindow(input: {
 }) {
   const label = getShellBallPinnedBubbleWindowLabel(input.bubbleId);
   const size = input.size ?? SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME;
+  const clampedPosition = await resolveShellBallPinnedBubbleWindowPosition({
+    position: input.position,
+    size,
+  });
   const existingWindow = await getShellBallWindowByLabel(label);
 
   if (existingWindow !== null) {
-    await existingWindow.setPosition(createShellBallLogicalPosition(input.position.x, input.position.y));
+    await existingWindow.setPosition(createShellBallLogicalPosition(clampedPosition.x, clampedPosition.y));
     await existingWindow.setSize(createShellBallLogicalSize(size.width, size.height));
     await existingWindow.show();
     return label;
@@ -160,8 +230,8 @@ export async function openShellBallPinnedBubbleWindow(input: {
   const pinnedWindowOptions = {
     title: "CialloClaw Shell Ball Bubble",
     url: "shell-ball-bubble-pinned.html",
-    x: input.position.x,
-    y: input.position.y,
+    x: clampedPosition.x,
+    y: clampedPosition.y,
     width: size.width,
     height: size.height,
     focus: false,
