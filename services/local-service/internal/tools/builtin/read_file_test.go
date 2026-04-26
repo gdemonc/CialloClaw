@@ -5,10 +5,14 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/cialloclaw/cialloclaw/services/local-service/internal/tools"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 type stubReadFilePlatform struct {
@@ -110,6 +114,56 @@ func TestReadFileToolDetectsMarkdownMimeType(t *testing.T) {
 	}
 }
 
+func TestReadFileToolDecodesWorkspaceTextEncodings(t *testing.T) {
+	workspace := filepath.Clean("D:/workspace")
+	platform := newStubReadFilePlatform(workspace)
+	gb18030Path := filepath.Join(workspace, "notes", "legacy.txt")
+	gb18030Content, _, err := transform.Bytes(simplifiedchinese.GB18030.NewEncoder(), []byte("修复乱码"))
+	if err != nil {
+		t.Fatalf("GB18030 encode failed: %v", err)
+	}
+	platform.files[gb18030Path] = gb18030Content
+	utf16Path := filepath.Join(workspace, "notes", "utf16.txt")
+	platform.files[utf16Path] = utf16LEWithBOM("统一提示")
+	tool := NewReadFileTool()
+
+	gbResult, err := tool.Execute(context.Background(), &tools.ToolExecuteContext{WorkspacePath: workspace, Platform: platform}, map[string]any{"path": gb18030Path})
+	if err != nil {
+		t.Fatalf("Execute returned error for GB18030 file: %v", err)
+	}
+	if gbResult.RawOutput["content"] != "修复乱码" || gbResult.RawOutput["text_encoding"] != "gb18030" {
+		t.Fatalf("expected decoded GB18030 output, got %+v", gbResult.RawOutput)
+	}
+
+	utf16Result, err := tool.Execute(context.Background(), &tools.ToolExecuteContext{WorkspacePath: workspace, Platform: platform}, map[string]any{"path": utf16Path})
+	if err != nil {
+		t.Fatalf("Execute returned error for UTF-16 file: %v", err)
+	}
+	if utf16Result.RawOutput["content"] != "统一提示" || utf16Result.RawOutput["text_encoding"] != "utf-16le" {
+		t.Fatalf("expected decoded UTF-16 output, got %+v", utf16Result.RawOutput)
+	}
+}
+
+func TestReadFileToolReturnsExplicitMessageForUnsafeText(t *testing.T) {
+	workspace := filepath.Clean("D:/workspace")
+	platform := newStubReadFilePlatform(workspace)
+	target := filepath.Join(workspace, "notes", "unsafe.txt")
+	platform.files[target] = []byte{0x00, 0x01, 0x02, 0xFF}
+	tool := NewReadFileTool()
+
+	result, err := tool.Execute(context.Background(), &tools.ToolExecuteContext{WorkspacePath: workspace, Platform: platform}, map[string]any{"path": target})
+	if err != nil {
+		t.Fatalf("Execute should return an explicit tool result instead of an execution error: %v", err)
+	}
+	if content, _ := result.RawOutput["content"].(string); content != "" {
+		t.Fatalf("expected unsafe content to stay empty, got %q", content)
+	}
+	preview, _ := result.SummaryOutput["content_preview"].(string)
+	if !strings.Contains(preview, "UTF-8") || strings.ContainsRune(preview, '\uFFFD') {
+		t.Fatalf("expected explicit decode warning without replacement characters, got %q", preview)
+	}
+}
+
 func TestReadFileToolRejectsOutsideWorkspace(t *testing.T) {
 	workspace := filepath.Clean("D:/workspace")
 	platform := newStubReadFilePlatform(workspace)
@@ -155,4 +209,13 @@ func TestReadFileToolRejectsOversizedFile(t *testing.T) {
 	if !errors.Is(err, tools.ErrToolExecutionFailed) {
 		t.Fatalf("expected ErrToolExecutionFailed for oversized file, got %v", err)
 	}
+}
+
+func utf16LEWithBOM(value string) []byte {
+	units := utf16.Encode([]rune(value))
+	result := []byte{0xFF, 0xFE}
+	for _, unit := range units {
+		result = append(result, byte(unit), byte(unit>>8))
+	}
+	return result
 }
