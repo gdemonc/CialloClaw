@@ -92,7 +92,7 @@ async function getOrCreateOnboardingWindow() {
     }
 
     await invoke("desktop_open_or_focus_onboarding");
-    const createdWindow = await waitForOnboardingWindowHandle(6_000);
+    const createdWindow = await waitForOnboardingWindowHandle(10_000);
     await resetOnboardingInteractiveState();
     await setOnboardingIgnoreCursorEvents(true);
     return createdWindow;

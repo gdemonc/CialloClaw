@@ -67,7 +67,7 @@ export type DesktopOnboardingLoadingState = {
 const DESKTOP_ONBOARDING_STATUS_KEY = "cialloclaw.desktop.onboarding.status";
 const DESKTOP_ONBOARDING_SESSION_KEY = "cialloclaw.desktop.onboarding.session";
 const DESKTOP_ONBOARDING_PRESENTATION_KEY = "cialloclaw.desktop.onboarding.presentation";
-const DESKTOP_ONBOARDING_READY_TIMEOUT_MS = 6_000;
+const DESKTOP_ONBOARDING_READY_TIMEOUT_MS = 10_000;
 
 const DESKTOP_ONBOARDING_WINDOW_LABELS = [
   shellBallWindowLabels.ball,
