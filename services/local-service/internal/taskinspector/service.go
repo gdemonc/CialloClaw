@@ -59,13 +59,13 @@ func NewService(fileSystem platform.FileSystemAdapter) *Service {
 // Run executes one minimum real inspection.
 func (s *Service) Run(input RunInput) RunResult {
 	sources := resolveSources(input.TargetSources, input.Config)
-	sourceSynced := len(sources) > 0 && s.fileSystem != nil
-	parsedFiles, parsedNotepadItems := s.inspectSources(sources)
+	parsedFiles, parsedNotepadItems, sourcesReady := s.inspectSources(sources)
+	// Source sync replaces downstream notepad state, so keep the previous
+	// snapshot unless every configured source was read and decoded safely.
+	sourceSynced := len(sources) > 0 && s.fileSystem != nil && sourcesReady
 	resolvedNotepadItems := cloneMapSlice(input.NotepadItems)
 	if sourceSynced {
 		resolvedNotepadItems = cloneMapSlice(parsedNotepadItems)
-	} else if len(parsedNotepadItems) > 0 {
-		resolvedNotepadItems = parsedNotepadItems
 	}
 	fileItems := countOpenNotepadItems(parsedNotepadItems)
 	dueToday, overdue := countDueBuckets(resolvedNotepadItems, s.now())
@@ -87,23 +87,31 @@ func (s *Service) Run(input RunInput) RunResult {
 	}
 }
 
-func (s *Service) inspectSources(sources []string) (int, []map[string]any) {
+func (s *Service) inspectSources(sources []string) (int, []map[string]any, bool) {
 	if s.fileSystem == nil || len(sources) == 0 {
-		return 0, nil
+		return 0, nil, false
 	}
 
 	parsedFiles := 0
 	identifiedItems := make([]map[string]any, 0)
 	seenFiles := map[string]struct{}{}
+	visitedRoot := false
+	sourcesReady := true
 
 	for _, source := range sources {
 		root := sourceToFSPath(source)
 		if root == "" {
+			sourcesReady = false
 			continue
 		}
+		visitedRoot = true
 
-		_ = fs.WalkDir(s.fileSystem, root, func(currentPath string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil || entry == nil || entry.IsDir() {
+		walkErr := fs.WalkDir(s.fileSystem, root, func(currentPath string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				sourcesReady = false
+				return nil
+			}
+			if entry == nil || entry.IsDir() {
 				return nil
 			}
 			if _, seen := seenFiles[currentPath]; seen {
@@ -112,19 +120,24 @@ func (s *Service) inspectSources(sources []string) (int, []map[string]any) {
 			seenFiles[currentPath] = struct{}{}
 			content, err := fs.ReadFile(s.fileSystem, currentPath)
 			if err != nil {
+				sourcesReady = false
 				return nil
 			}
 			decoded, err := textdecode.Decode(content)
 			if err != nil {
+				sourcesReady = false
 				return nil
 			}
 			parsedFiles++
 			identifiedItems = append(identifiedItems, parseNotepadItemsFromMarkdown(sourcePathFromFSPath(currentPath), decoded.Text, s.now())...)
 			return nil
 		})
+		if walkErr != nil {
+			sourcesReady = false
+		}
 	}
 
-	return parsedFiles, identifiedItems
+	return parsedFiles, identifiedItems, visitedRoot && sourcesReady
 }
 
 func resolveSources(targetSources []string, config map[string]any) []string {
