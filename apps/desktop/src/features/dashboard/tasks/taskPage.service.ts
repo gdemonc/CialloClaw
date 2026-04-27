@@ -91,36 +91,6 @@ function getTaskListSortBy(group: TaskListGroup) {
   return group === "finished" ? "finished_at" : "updated_at";
 }
 
-function createFallbackTaskDetail(task: Task): AgentTaskDetailGetResult {
-  return {
-    approval_request: null,
-    audit_record: null,
-    artifacts: [],
-    authorization_record: null,
-    citations: [],
-    delivery_result: null,
-    mirror_references: [],
-    runtime_summary: {
-      active_steering_count: 0,
-      events_count: 0,
-      latest_failure_code: null,
-      latest_failure_category: null,
-      latest_failure_summary: null,
-      latest_event_type: null,
-      loop_stop_reason: null,
-      observation_signals: [],
-    },
-    security_summary: {
-      latest_restore_point: null,
-      pending_authorizations: 0,
-      risk_level: task.risk_level,
-      security_status: "normal",
-    },
-    task,
-    timeline: [],
-  };
-}
-
 function parseTaskEventPayload(event: TaskEvent): Record<string, unknown> | null {
   const source = event.payload_json.trim();
   if (!source) {
@@ -314,16 +284,6 @@ export function normalizeTaskDetailResult(detail: AgentTaskDetailGetResult): Age
     },
     task: detail.task,
     timeline,
-  };
-}
-
-export function buildFallbackTaskDetailData(item: TaskListItem): TaskDetailData {
-  return {
-    detailWarningMessage: null,
-    detail: createFallbackTaskDetail(item.task),
-    experience: item.experience,
-    source: "fallback",
-    task: item.task,
   };
 }
 

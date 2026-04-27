@@ -103,7 +103,7 @@ function loadTaskPageQueryModule() {
       buildDashboardTaskBucketQueryKey: (dataMode: "rpc" | "mock", group: "unfinished" | "finished", limit: number) => unknown;
       buildDashboardTaskDetailQueryKey: (dataMode: "rpc" | "mock", taskId: string) => unknown;
       getDashboardTaskSecurityRefreshPlan: (dataMode: "rpc" | "mock") => unknown;
-      resolveDashboardTaskSafetyOpenPlan: (detailSource: "rpc" | "mock" | "fallback") => unknown;
+      resolveDashboardTaskSafetyOpenPlan: (detailState: "loading" | "error" | "ready") => unknown;
       shouldEnableDashboardTaskDetailQuery: (selectedTaskId: string | null, detailOpen: boolean) => boolean;
       dashboardTaskArtifactQueryPrefix: unknown;
       dashboardTaskBucketQueryPrefix: unknown;
@@ -3129,10 +3129,13 @@ test("SecurityApp keeps snapshot-only approval detail renderable when live cards
 test("TaskPage wiring helpers require real detail for safety focus and keep detail query task-id centric", () => {
   const { resolveDashboardTaskSafetyOpenPlan, shouldEnableDashboardTaskDetailQuery } = loadTaskPageQueryModule();
 
-  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("fallback"), {
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("loading"), {
     shouldRefetchDetail: true,
   });
-  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("rpc"), {
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("error"), {
+    shouldRefetchDetail: true,
+  });
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("ready"), {
     shouldRefetchDetail: false,
   });
   assert.equal(shouldEnableDashboardTaskDetailQuery("task_dashboard_001", true), true);
@@ -3582,10 +3585,9 @@ test("task fallback copy no longer claims backend output actions are missing", (
   assert.doesNotMatch(taskTabsSource, /当前协议尚未提供稳定的 artifact\.open 能力/);
 });
 
-test("task detail normalization rejects string restore points in rpc mode and keeps null approval fallback", () => {
+test("task detail normalization rejects string restore points in rpc mode and keeps runtime summary defaults", () => {
   withDesktopAliasRuntime((requireFn) => {
     const service = requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js")) as {
-      buildFallbackTaskDetailData: (item: { experience: ReturnType<typeof createFallbackExperience>; task: Task }) => { detail: AgentTaskDetailGetResult };
       normalizeTaskDetailResult: (detail: AgentTaskDetailGetResult) => AgentTaskDetailGetResult;
     };
 
@@ -3604,24 +3606,8 @@ test("task detail normalization rejects string restore points in rpc mode and ke
       /restore point/i,
     );
 
-    const fallback = service.buildFallbackTaskDetailData({
-      experience: createFallbackExperience(),
-      task: createTask({ status: "waiting_auth" }),
-    });
-
-    assert.equal(fallback.detail.approval_request, null);
-    assert.deepEqual(fallback.detail.runtime_summary, {
-      active_steering_count: 0,
-      events_count: 0,
-      latest_failure_code: null,
-      latest_failure_category: null,
-      latest_failure_summary: null,
-      latest_event_type: null,
-      loop_stop_reason: null,
-      observation_signals: [],
-    });
-    assert.equal(fallback.detail.security_summary.pending_authorizations, 0);
-    assert.equal(fallback.detail.security_summary.security_status, "normal");
+    const taskServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.service.ts"), "utf8");
+    assert.doesNotMatch(taskServiceSource, /buildFallbackTaskDetailData/);
   });
 });
 
@@ -3899,10 +3885,10 @@ test("note rpc service keeps transport failures visible instead of switching to 
   );
 });
 
-test("TaskDetailPanel defers the entire fallback security summary until formal detail arrives", () => {
+test("TaskDetailPanel defers the security summary until formal detail arrives", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /detailData\.source === "fallback" \|\| detailState !== "ready"/);
+  assert.match(panelSource, /detailState !== "ready" \|\| detail === null/);
   assert.match(panelSource, /等待详情同步后展示风险、授权与恢复点/);
 });
 
@@ -3931,7 +3917,7 @@ test("TaskDetailPanel keeps evidence artifacts scoped to formal citation links",
 test("TaskDetailPanel separates formal delivery from structured evidence metadata", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /const formalDeliveryResult = detail\.delivery_result;/);
+  assert.match(panelSource, /const formalDeliveryResult = detail\?\.delivery_result \?\? null;/);
   assert.match(panelSource, /Formal Delivery/);
   assert.match(panelSource, /该区域只消费正式 `delivery_result`/);
   assert.match(panelSource, /citation\.evidence_role/);
@@ -3942,8 +3928,8 @@ test("TaskDetailPanel separates formal delivery from structured evidence metadat
 test("TaskDetailPanel renders a formal screen governance section only for screen tasks with synced detail", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /const isScreenTask = task\.source_type === "screen_capture" \|\| detail\.task\.intent\?\.name === "screen_analyze"/);
-  assert.match(panelSource, /if \(!isScreenTask \|\| shouldDeferSecuritySummary\) \{/);
+  assert.match(panelSource, /const isScreenTask = task\?\.source_type === "screen_capture" \|\| detail\?\.task\.intent\?\.name === "screen_analyze"/);
+  assert.match(panelSource, /if \(!isScreenTask \|\| shouldDeferSecuritySummary \|\| !runtimeSummary \|\| detail === null\) \{/);
   assert.match(panelSource, /Screen Governance/);
   assert.match(panelSource, /屏幕授权、恢复与失败收口/);
   assert.match(panelSource, /该区域只消费正式 `approval_request`、`authorization_record`、`audit_record`、`recovery_point` 与 `runtime_summary` 字段/);
@@ -4009,28 +3995,3 @@ test("dashboard validators read enum truth sources from protocol exports", () =>
   assert.match(validatorSource, /import\s*\{[^}]*APPROVAL_STATUSES[^}]*RISK_LEVELS[^}]*\}\s*from\s*"@cialloclaw\/protocol"/);
 });
 
-function createFallbackExperience() {
-  return {
-    acceptance: [],
-    assistantState: {
-      hint: "fallback",
-      label: "fallback",
-    },
-    background: "fallback",
-    constraints: [],
-    dueAt: null,
-    goal: "fallback",
-    nextAction: "fallback",
-    noteDraft: "fallback",
-    noteEntries: [],
-    outputs: [],
-    phase: "fallback",
-    priority: "steady" as const,
-    progressHint: "fallback",
-    quickContext: [],
-    recentConversation: [],
-    relatedFiles: [],
-    stepTargets: {},
-    suggestedNext: "fallback",
-  };
-}
