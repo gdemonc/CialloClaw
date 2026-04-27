@@ -134,27 +134,9 @@ func isSafeDecodedText(text string) bool {
 func isLikelyGB18030Text(data []byte, text string) bool {
 	// GB18030 overlaps with other legacy encodings at the byte level. Keep this
 	// fallback conservative so unsupported text is surfaced instead of silently
-	// becoming plausible but wrong workspace content.
-	if looksLikeShiftJISBytes(data) {
-		return false
-	}
-	return containsChineseTextSignal(text)
-}
-
-func containsChineseTextSignal(text string) bool {
-	for _, value := range text {
-		if unicode.In(value, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
-			return false
-		}
-		if unicode.In(value, unicode.Han) || isCJKPunctuation(value) {
-			return true
-		}
-	}
-	return false
-}
-
-func isCJKPunctuation(value rune) bool {
-	return (value >= 0x3000 && value <= 0x303f) || (value >= 0xff00 && value <= 0xffef)
+	// becoming plausible but wrong workspace content. Do not require a Chinese
+	// text signal here: GB18030 can validly encode Latin notes and symbols too.
+	return !looksLikeShiftJISBytes(data)
 }
 
 func looksLikeShiftJISBytes(data []byte) bool {

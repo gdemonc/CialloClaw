@@ -44,6 +44,20 @@ func TestDecodeRejectsAmbiguousShiftJIS(t *testing.T) {
 	}
 }
 
+func TestDecodeSupportsGB18030WithoutChineseSignal(t *testing.T) {
+	gb18030Bytes, _, err := transform.Bytes(simplifiedchinese.GB18030.NewEncoder(), []byte("Résumé: café"))
+	if err != nil {
+		t.Fatalf("GB18030 encode failed: %v", err)
+	}
+	result, err := Decode(gb18030Bytes)
+	if err != nil {
+		t.Fatalf("Decode GB18030 Latin text returned error: %v", err)
+	}
+	if result.Text != "Résumé: café" || result.Encoding != EncodingGB18030 {
+		t.Fatalf("unexpected GB18030 Latin result: %+v", result)
+	}
+}
+
 func TestDecodeSupportsUTF16BOM(t *testing.T) {
 	data := utf16LEWithBOM("修复乱码")
 	result, err := Decode(data)
