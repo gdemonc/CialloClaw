@@ -499,6 +499,11 @@ func TestSourceToFSPathAcceptsWorkspaceAbsolutePaths(t *testing.T) {
 		t.Fatalf("expected absolute source without file system to stay absolute, path=%q err=%v", absWithoutFileSystem, err)
 	}
 
+	_, err = sourceToFSPath(fileSystem, `D:/workspace/notes`)
+	if !errors.Is(err, ErrInspectionSourceOutsideWorkspace) {
+		t.Fatalf("expected foreign drive source to stay outside the workspace boundary, got %v", err)
+	}
+
 	_, err = sourceToFSPath(nil, "/workspace/../outside")
 	if !errors.Is(err, ErrInspectionSourceOutsideWorkspace) {
 		t.Fatalf("expected workspace-relative escape path to be rejected, got %v", err)
@@ -507,11 +512,6 @@ func TestSourceToFSPathAcceptsWorkspaceAbsolutePaths(t *testing.T) {
 	_, err = sourceToFSPath(relErrorAdapter{FileSystemAdapter: fileSystem, failEnsureRoot: true}, absoluteSource)
 	if !errors.Is(err, ErrInspectionSourceOutsideWorkspace) {
 		t.Fatalf("expected workspace-root resolution failure to map to boundary error, got %v", err)
-	}
-
-	_, err = sourceToFSPath(relErrorAdapter{FileSystemAdapter: fileSystem, failRel: true}, absoluteSource)
-	if !errors.Is(err, ErrInspectionSourceOutsideWorkspace) {
-		t.Fatalf("expected relative-path failure to map to boundary error, got %v", err)
 	}
 
 	_, err = sourceToFSPath(fileSystem, filepath.Join(t.TempDir(), "outside"))

@@ -267,24 +267,20 @@ func sourceToFSPath(fileSystem platform.FileSystemAdapter, source string) (strin
 
 	if isAbsoluteTaskSourcePath(source, normalizedSource) {
 		if fileSystem == nil {
-			return filepath.ToSlash(filepath.Clean(source)), nil
-		}
-		safePath, err := fileSystem.EnsureWithinWorkspace(source)
-		if err != nil {
-			return "", ErrInspectionSourceOutsideWorkspace
+			return normalizeAbsoluteTaskSourcePath(source, normalizedSource), nil
 		}
 		workspaceRoot, err := fileSystem.EnsureWithinWorkspace(".")
 		if err != nil {
 			return "", ErrInspectionSourceOutsideWorkspace
 		}
-		relPath, err := fileSystem.Rel(workspaceRoot, safePath)
-		if err != nil {
+		relPath, ok := relativeAbsoluteTaskSourcePath(workspaceRoot, source)
+		if !ok {
 			return "", ErrInspectionSourceOutsideWorkspace
 		}
 		if filepath.Clean(relPath) == "." {
 			return ".", nil
 		}
-		return filepath.ToSlash(filepath.Clean(relPath)), nil
+		return relPath, nil
 	}
 
 	normalized := path.Clean(strings.TrimPrefix(normalizedSource, "/"))
@@ -312,6 +308,52 @@ func isAbsoluteTaskSourcePath(source string, normalizedSource string) bool {
 	}
 	driveLetter := normalizedSource[0]
 	return (driveLetter >= 'a' && driveLetter <= 'z') || (driveLetter >= 'A' && driveLetter <= 'Z')
+}
+
+func normalizeAbsoluteTaskSourcePath(source string, normalizedSource string) string {
+	if strings.HasPrefix(normalizedSource, "//") {
+		trimmed := strings.TrimPrefix(normalizedSource, "//")
+		cleaned := path.Clean("/" + trimmed)
+		return "//" + strings.TrimPrefix(cleaned, "/")
+	}
+	if filepath.IsAbs(source) {
+		return filepath.ToSlash(filepath.Clean(source))
+	}
+	return path.Clean(normalizedSource)
+}
+
+func relativeAbsoluteTaskSourcePath(workspaceRoot string, source string) (string, bool) {
+	normalizedWorkspaceRoot := normalizeAbsoluteTaskSourcePath(workspaceRoot, strings.ReplaceAll(strings.TrimSpace(workspaceRoot), "\\", "/"))
+	normalizedSource := normalizeAbsoluteTaskSourcePath(source, strings.ReplaceAll(strings.TrimSpace(source), "\\", "/"))
+	if normalizedWorkspaceRoot == "" || normalizedSource == "" {
+		return "", false
+	}
+	caseInsensitive := strings.HasPrefix(normalizedWorkspaceRoot, "//") || (len(normalizedWorkspaceRoot) >= 2 && normalizedWorkspaceRoot[1] == ':')
+	if pathsEqualForTaskSource(normalizedSource, normalizedWorkspaceRoot, caseInsensitive) {
+		return ".", true
+	}
+	workspacePrefix := normalizedWorkspaceRoot
+	if !strings.HasSuffix(workspacePrefix, "/") {
+		workspacePrefix += "/"
+	}
+	if !pathHasPrefixForTaskSource(normalizedSource, workspacePrefix, caseInsensitive) {
+		return "", false
+	}
+	return strings.TrimPrefix(normalizedSource, workspacePrefix), true
+}
+
+func pathsEqualForTaskSource(left string, right string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
+}
+
+func pathHasPrefixForTaskSource(value string, prefix string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		return strings.HasPrefix(strings.ToLower(value), strings.ToLower(prefix))
+	}
+	return strings.HasPrefix(value, prefix)
 }
 
 func countChecklistItems(content string) int {
