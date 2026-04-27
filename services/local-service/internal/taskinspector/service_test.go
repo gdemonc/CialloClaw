@@ -199,7 +199,7 @@ func TestServiceRunPreservesNotepadWhenSourceDecodeFails(t *testing.T) {
 	}
 }
 
-func TestServiceRunSkipsNonMarkdownFilesInTaskSources(t *testing.T) {
+func TestServiceRunSkipsBinaryAttachmentsAndKeepsTextSources(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	pathPolicy, err := platform.NewLocalPathPolicy(workspaceRoot)
 	if err != nil {
@@ -210,6 +210,12 @@ func TestServiceRunSkipsNonMarkdownFilesInTaskSources(t *testing.T) {
 		t.Fatalf("MkdirAll returned error: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(workspaceRoot, "todos", "good.md"), []byte("- [ ] source item\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "todos", "notes.txt"), []byte("- [ ] txt item\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "todos", "checklist"), []byte("- [ ] extensionless item\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(workspaceRoot, "todos", "attachment.bin"), []byte{0x00, 0x01, 0x02, 0xff}, 0o644); err != nil {
@@ -226,13 +232,22 @@ func TestServiceRunSkipsNonMarkdownFilesInTaskSources(t *testing.T) {
 	})
 
 	if !result.SourceSynced {
-		t.Fatalf("expected non-markdown attachments to be skipped without blocking source sync")
+		t.Fatalf("expected binary attachments to be skipped without blocking source sync")
 	}
-	if result.Summary["parsed_files"] != 1 {
-		t.Fatalf("expected only markdown source files to be counted, got %+v", result.Summary)
+	if result.Summary["parsed_files"] != 3 {
+		t.Fatalf("expected text source files to be counted, got %+v", result.Summary)
 	}
-	if len(result.NotepadItems) != 1 || result.NotepadItems[0]["title"] != "source item" {
-		t.Fatalf("expected readable markdown source to replace old snapshot, got %+v", result.NotepadItems)
+	if len(result.NotepadItems) != 3 {
+		t.Fatalf("expected readable text sources to replace old snapshot, got %+v", result.NotepadItems)
+	}
+	titles := map[string]bool{}
+	for _, item := range result.NotepadItems {
+		titles[stringValue(item, "title")] = true
+	}
+	for _, title := range []string{"source item", "txt item", "extensionless item"} {
+		if !titles[title] {
+			t.Fatalf("expected parsed title %q in %+v", title, result.NotepadItems)
+		}
 	}
 }
 
@@ -250,11 +265,16 @@ func TestTaskInspectorHelperFunctions(t *testing.T) {
 	if sourceToFSPath("../../etc") != "" {
 		t.Fatalf("expected sourceToFSPath to reject outside-workspace paths")
 	}
-	if !isMarkdownTaskSourceFile("todos/inbox.md") || !isMarkdownTaskSourceFile("todos/inbox.markdown") {
-		t.Fatal("expected markdown task source files to be accepted")
+	for _, path := range []string{"todos/inbox.md", "todos/inbox.markdown", "todos/notes.txt", "todos/checklist"} {
+		if shouldSkipTaskSourceAttachment(path) || shouldSkipUnreadableTaskSourceFile(path) {
+			t.Fatalf("expected text task source file %q to be accepted", path)
+		}
 	}
-	if isMarkdownTaskSourceFile("todos/attachment.bin") {
-		t.Fatal("expected non-markdown files to be skipped")
+	if !shouldSkipTaskSourceAttachment("todos/attachment.bin") {
+		t.Fatal("expected binary attachment to be skipped")
+	}
+	if !isSupportedTextTaskSourceFile("todos/notes.txt") || !isSupportedTextTaskSourceFile("todos/checklist") {
+		t.Fatal("expected supported text source helper to preserve text compatibility")
 	}
 	tags := splitTagList("urgent, weekly, notes")
 	if len(tags) != 3 || tags[1] != "weekly" {

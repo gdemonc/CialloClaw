@@ -118,7 +118,7 @@ func (s *Service) inspectSources(sources []string) (int, []map[string]any, bool)
 				return nil
 			}
 			seenFiles[currentPath] = struct{}{}
-			if !isMarkdownTaskSourceFile(currentPath) {
+			if shouldSkipTaskSourceAttachment(currentPath) {
 				return nil
 			}
 			content, err := fs.ReadFile(s.fileSystem, currentPath)
@@ -128,6 +128,9 @@ func (s *Service) inspectSources(sources []string) (int, []map[string]any, bool)
 			}
 			decoded, err := textdecode.Decode(content)
 			if err != nil {
+				if shouldSkipUnreadableTaskSourceFile(currentPath) {
+					return nil
+				}
 				sourcesReady = false
 				return nil
 			}
@@ -143,12 +146,30 @@ func (s *Service) inspectSources(sources []string) (int, []map[string]any, bool)
 	return parsedFiles, identifiedItems, visitedRoot && sourcesReady
 }
 
-func isMarkdownTaskSourceFile(currentPath string) bool {
+func shouldSkipTaskSourceAttachment(currentPath string) bool {
 	switch strings.ToLower(path.Ext(currentPath)) {
-	case ".md", ".markdown":
+	case ".7z", ".avi", ".bin", ".bmp", ".class", ".dll", ".doc", ".docx", ".dylib", ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg", ".jpg", ".mov", ".mp3", ".mp4", ".pdf", ".png", ".ppt", ".pptx", ".rar", ".so", ".tar", ".wav", ".webp", ".xls", ".xlsx", ".zip":
 		return true
 	default:
 		return false
+	}
+}
+
+func shouldSkipUnreadableTaskSourceFile(currentPath string) bool {
+	switch strings.ToLower(path.Ext(currentPath)) {
+	case "", ".markdown", ".md", ".text", ".txt":
+		return false
+	default:
+		return true
+	}
+}
+
+func isSupportedTextTaskSourceFile(currentPath string) bool {
+	switch strings.ToLower(path.Ext(currentPath)) {
+	case "", ".markdown", ".md", ".text", ".txt":
+		return true
+	default:
+		return !shouldSkipTaskSourceAttachment(currentPath)
 	}
 }
 
