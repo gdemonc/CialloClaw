@@ -118,6 +118,9 @@ func (s *Service) inspectSources(sources []string) (int, []map[string]any, bool)
 				return nil
 			}
 			seenFiles[currentPath] = struct{}{}
+			if !isMarkdownTaskSourceFile(currentPath) {
+				return nil
+			}
 			content, err := fs.ReadFile(s.fileSystem, currentPath)
 			if err != nil {
 				sourcesReady = false
@@ -138,6 +141,15 @@ func (s *Service) inspectSources(sources []string) (int, []map[string]any, bool)
 	}
 
 	return parsedFiles, identifiedItems, visitedRoot && sourcesReady
+}
+
+func isMarkdownTaskSourceFile(currentPath string) bool {
+	switch strings.ToLower(path.Ext(currentPath)) {
+	case ".md", ".markdown":
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveSources(targetSources []string, config map[string]any) []string {

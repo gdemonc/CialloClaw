@@ -199,6 +199,43 @@ func TestServiceRunPreservesNotepadWhenSourceDecodeFails(t *testing.T) {
 	}
 }
 
+func TestServiceRunSkipsNonMarkdownFilesInTaskSources(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	pathPolicy, err := platform.NewLocalPathPolicy(workspaceRoot)
+	if err != nil {
+		t.Fatalf("NewLocalPathPolicy returned error: %v", err)
+	}
+	fileSystem := platform.NewLocalFileSystemAdapter(pathPolicy)
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "todos"), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "todos", "good.md"), []byte("- [ ] source item\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "todos", "attachment.bin"), []byte{0x00, 0x01, 0x02, 0xff}, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	service := NewService(fileSystem)
+	service.now = func() time.Time { return time.Date(2026, 4, 10, 9, 30, 0, 0, time.UTC) }
+	result := service.Run(RunInput{
+		Config: map[string]any{"task_sources": []string{"workspace/todos"}},
+		NotepadItems: []map[string]any{
+			{"item_id": "todo_existing", "title": "old snapshot", "status": "normal"},
+		},
+	})
+
+	if !result.SourceSynced {
+		t.Fatalf("expected non-markdown attachments to be skipped without blocking source sync")
+	}
+	if result.Summary["parsed_files"] != 1 {
+		t.Fatalf("expected only markdown source files to be counted, got %+v", result.Summary)
+	}
+	if len(result.NotepadItems) != 1 || result.NotepadItems[0]["title"] != "source item" {
+		t.Fatalf("expected readable markdown source to replace old snapshot, got %+v", result.NotepadItems)
+	}
+}
+
 func TestTaskInspectorHelperFunctions(t *testing.T) {
 	if countChecklistItems("- [ ] one\n* [x] two\nplain text") != 2 {
 		t.Fatal("expected checklist counter to include open and closed items")
@@ -212,6 +249,12 @@ func TestTaskInspectorHelperFunctions(t *testing.T) {
 	}
 	if sourceToFSPath("../../etc") != "" {
 		t.Fatalf("expected sourceToFSPath to reject outside-workspace paths")
+	}
+	if !isMarkdownTaskSourceFile("todos/inbox.md") || !isMarkdownTaskSourceFile("todos/inbox.markdown") {
+		t.Fatal("expected markdown task source files to be accepted")
+	}
+	if isMarkdownTaskSourceFile("todos/attachment.bin") {
+		t.Fatal("expected non-markdown files to be skipped")
 	}
 	tags := splitTagList("urgent, weekly, notes")
 	if len(tags) != 3 || tags[1] != "weekly" {
