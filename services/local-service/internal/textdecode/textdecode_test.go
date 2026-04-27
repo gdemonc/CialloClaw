@@ -61,6 +61,17 @@ func TestDecodeRejectsUnsafeText(t *testing.T) {
 		t.Fatalf("expected ErrUnsupportedEncoding, got %v", err)
 	}
 
+	for _, data := range [][]byte{
+		[]byte("a\x00b"),
+		[]byte("a\x01b"),
+		[]byte("a\uFFFDb"),
+	} {
+		_, err = Decode(data)
+		if !errors.Is(err, ErrUnsupportedEncoding) {
+			t.Fatalf("expected ErrUnsupportedEncoding for unsafe UTF-8 payload %q, got %v", string(data), err)
+		}
+	}
+
 	gb18030Bytes, _, err := transform.Bytes(simplifiedchinese.GB18030.NewEncoder(), []byte("ok"))
 	if err != nil {
 		t.Fatalf("GB18030 encode failed: %v", err)

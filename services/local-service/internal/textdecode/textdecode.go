@@ -52,7 +52,7 @@ func Decode(data []byte) (Result, error) {
 		return decodeTransform(data, xunicode.UTF16(xunicode.LittleEndian, xunicode.ExpectBOM).NewDecoder(), EncodingUTF16LE)
 	}
 	if utf8.Valid(data) {
-		return Result{Text: string(data), Encoding: EncodingUTF8}, nil
+		return decodeUTF8(data)
 	}
 	if hasBinaryControls(data) {
 		return Result{}, ErrUnsupportedEncoding
@@ -64,7 +64,11 @@ func decodeUTF8(data []byte) (Result, error) {
 	if !utf8.Valid(data) {
 		return Result{}, ErrUnsupportedEncoding
 	}
-	return Result{Text: string(data), Encoding: EncodingUTF8}, nil
+	text := string(data)
+	if !isSafeDecodedText(text) {
+		return Result{}, ErrUnsupportedEncoding
+	}
+	return Result{Text: text, Encoding: EncodingUTF8}, nil
 }
 
 func decodeTransform(data []byte, decoder *encoding.Decoder, encodingName string) (Result, error) {
