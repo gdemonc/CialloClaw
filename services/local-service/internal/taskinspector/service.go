@@ -248,7 +248,8 @@ func sourceToFSPath(fileSystem platform.FileSystemAdapter, source string) (strin
 	if source == "" {
 		return "", nil
 	}
-	trimmedVirtual := strings.TrimPrefix(source, "/")
+	normalizedSource := strings.ReplaceAll(source, "\\", "/")
+	trimmedVirtual := strings.TrimPrefix(normalizedSource, "/")
 	switch trimmedVirtual {
 	case "", "workspace", ".":
 		return ".", nil
@@ -264,7 +265,7 @@ func sourceToFSPath(fileSystem platform.FileSystemAdapter, source string) (strin
 		return normalized, nil
 	}
 
-	if filepath.IsAbs(source) {
+	if isAbsoluteTaskSourcePath(source, normalizedSource) {
 		if fileSystem == nil {
 			return filepath.ToSlash(filepath.Clean(source)), nil
 		}
@@ -286,7 +287,7 @@ func sourceToFSPath(fileSystem platform.FileSystemAdapter, source string) (strin
 		return filepath.ToSlash(filepath.Clean(relPath)), nil
 	}
 
-	normalized := path.Clean(strings.TrimPrefix(source, "/"))
+	normalized := path.Clean(strings.TrimPrefix(normalizedSource, "/"))
 	if normalized == "." {
 		return ".", nil
 	}
@@ -294,6 +295,23 @@ func sourceToFSPath(fileSystem platform.FileSystemAdapter, source string) (strin
 		return "", ErrInspectionSourceOutsideWorkspace
 	}
 	return normalized, nil
+}
+
+// isAbsoluteTaskSourcePath recognizes both native absolute paths for the
+// current GOOS and Windows drive-letter paths so non-Windows tests can still
+// validate Windows-style inspection sources such as D:/todos.
+func isAbsoluteTaskSourcePath(source string, normalizedSource string) bool {
+	if filepath.IsAbs(source) {
+		return true
+	}
+	if strings.HasPrefix(normalizedSource, "//") {
+		return true
+	}
+	if len(normalizedSource) < 3 || normalizedSource[1] != ':' || normalizedSource[2] != '/' {
+		return false
+	}
+	driveLetter := normalizedSource[0]
+	return (driveLetter >= 'a' && driveLetter <= 'z') || (driveLetter >= 'A' && driveLetter <= 'Z')
 }
 
 func countChecklistItems(content string) int {

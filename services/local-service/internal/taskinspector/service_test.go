@@ -192,7 +192,10 @@ func TestServiceRunDecodesLegacyMarkdownSources(t *testing.T) {
 
 	service := NewService(fileSystem)
 	service.now = func() time.Time { return time.Date(2026, 4, 10, 9, 30, 0, 0, time.UTC) }
-	result := service.Run(RunInput{Config: map[string]any{"task_sources": []string{"workspace/todos"}}})
+	result, err := service.Run(RunInput{Config: map[string]any{"task_sources": []string{"workspace/todos"}}})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 
 	if result.Summary["parsed_files"] != 1 || len(result.NotepadItems) != 1 {
 		t.Fatalf("expected legacy markdown source to be parsed, got summary=%+v items=%+v", result.Summary, result.NotepadItems)
@@ -202,7 +205,7 @@ func TestServiceRunDecodesLegacyMarkdownSources(t *testing.T) {
 	}
 }
 
-func TestServiceRunPreservesNotepadWhenSourceDecodeFails(t *testing.T) {
+func TestServiceRunReturnsErrorWhenSourceDecodeFails(t *testing.T) {
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	pathPolicy, err := platform.NewLocalPathPolicy(workspaceRoot)
 	if err != nil {
@@ -221,21 +224,14 @@ func TestServiceRunPreservesNotepadWhenSourceDecodeFails(t *testing.T) {
 
 	service := NewService(fileSystem)
 	service.now = func() time.Time { return time.Date(2026, 4, 10, 9, 30, 0, 0, time.UTC) }
-	result := service.Run(RunInput{
+	_, err = service.Run(RunInput{
 		Config: map[string]any{"task_sources": []string{"workspace/todos"}},
 		NotepadItems: []map[string]any{
 			{"item_id": "todo_existing", "title": "preserve me", "status": "normal"},
 		},
 	})
-
-	if result.SourceSynced {
-		t.Fatalf("expected failed source decode to block source sync")
-	}
-	if result.Summary["parsed_files"] != 1 {
-		t.Fatalf("expected readable source files to still be counted, got %+v", result.Summary)
-	}
-	if len(result.NotepadItems) != 1 || result.NotepadItems[0]["title"] != "preserve me" {
-		t.Fatalf("expected existing notepad items to be preserved, got %+v", result.NotepadItems)
+	if !errors.Is(err, ErrInspectionSourceUnreadable) {
+		t.Fatalf("expected failed task-source decode to map to unreadable source error, got %v", err)
 	}
 }
 
@@ -264,12 +260,15 @@ func TestServiceRunSkipsBinaryAttachmentsAndKeepsTextSources(t *testing.T) {
 
 	service := NewService(fileSystem)
 	service.now = func() time.Time { return time.Date(2026, 4, 10, 9, 30, 0, 0, time.UTC) }
-	result := service.Run(RunInput{
+	result, err := service.Run(RunInput{
 		Config: map[string]any{"task_sources": []string{"workspace/todos"}},
 		NotepadItems: []map[string]any{
 			{"item_id": "todo_existing", "title": "old snapshot", "status": "normal"},
 		},
 	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 
 	if !result.SourceSynced {
 		t.Fatalf("expected binary attachments to be skipped without blocking source sync")
@@ -313,7 +312,10 @@ func TestServiceRunIgnoresUnsupportedTextTaskSourceFiles(t *testing.T) {
 
 	service := NewService(fileSystem)
 	service.now = func() time.Time { return time.Date(2026, 4, 10, 9, 30, 0, 0, time.UTC) }
-	result := service.Run(RunInput{Config: map[string]any{"task_sources": []string{"workspace/todos"}}})
+	result, err := service.Run(RunInput{Config: map[string]any{"task_sources": []string{"workspace/todos"}}})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 
 	if !result.SourceSynced {
 		t.Fatalf("expected supported task source files to sync cleanly, got %+v", result)
@@ -349,6 +351,14 @@ func TestTaskInspectorHelperFunctions(t *testing.T) {
 	rootPath, err := sourceToFSPath(nil, "/")
 	if err != nil || rootPath != "." {
 		t.Fatalf("expected root slash to normalize to dot, got path=%q err=%v", rootPath, err)
+	}
+	drivePath, err := sourceToFSPath(nil, `D:/workspace/notes`)
+	if err != nil || drivePath != `D:/workspace/notes` {
+		t.Fatalf("expected drive-letter source to stay absolute, got path=%q err=%v", drivePath, err)
+	}
+	driveBackslashPath, err := sourceToFSPath(nil, `D:\workspace\notes`)
+	if err != nil || driveBackslashPath != `D:/workspace/notes` {
+		t.Fatalf("expected backslash drive-letter source to normalize to slash form, got path=%q err=%v", driveBackslashPath, err)
 	}
 	_, err = sourceToFSPath(nil, "../../etc")
 	if !errors.Is(err, ErrInspectionSourceOutsideWorkspace) {
