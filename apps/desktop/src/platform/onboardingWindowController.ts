@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalPosition, LogicalSize, Window } from "@tauri-apps/api/window";
+import { LogicalPosition, LogicalSize, Window, getCurrentWindow } from "@tauri-apps/api/window";
 import { desktopOnboardingEvents } from "@/features/onboarding/onboarding.events";
 import { resetOnboardingInteractiveState, setOnboardingIgnoreCursorEvents } from "./onboardingWindow";
 
@@ -44,8 +44,9 @@ async function waitForOnboardingWindowHandle(timeoutMs: number) {
   throw new Error("Timed out waiting for onboarding window handle.");
 }
 
-async function waitForOnboardingWindowEvent(eventName: string, timeoutMs: number) {
+async function waitForOnboardingWindowEvent(eventName: string, requestEventName: string, timeoutMs: number) {
   const onboardingWindow = await ensureOnboardingWindow();
+  const currentWindow = getCurrentWindow();
   let timeoutHandle = 0;
   let disposed = false;
   let resolveEvent: (() => void) | null = null;
@@ -76,6 +77,8 @@ async function waitForOnboardingWindowEvent(eventName: string, timeoutMs: number
     void disposeWindowListener();
     rejectEvent?.(new Error(`Timed out waiting for onboarding event: ${eventName}`));
   }, timeoutMs);
+
+  await currentWindow.emitTo(ONBOARDING_WINDOW_LABEL, requestEventName);
 
   return eventPromise;
 }
@@ -180,14 +183,22 @@ export async function syncOnboardingWindowFrame(
  * and presentation payloads.
  */
 export function waitForOnboardingWindowReady(timeoutMs: number) {
-  return waitForOnboardingWindowEvent(desktopOnboardingEvents.ready, timeoutMs);
+  return waitForOnboardingWindowEvent(
+    desktopOnboardingEvents.ready,
+    desktopOnboardingEvents.readyRequested,
+    timeoutMs,
+  );
 }
 
 /**
  * Waits until the onboarding React app has laid out its first card.
  */
 export function waitForOnboardingCardReady(timeoutMs: number) {
-  return waitForOnboardingWindowEvent(desktopOnboardingEvents.cardReady, timeoutMs);
+  return waitForOnboardingWindowEvent(
+    desktopOnboardingEvents.cardReady,
+    desktopOnboardingEvents.cardReadyRequested,
+    timeoutMs,
+  );
 }
 
 /**

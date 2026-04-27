@@ -98,11 +98,14 @@ export function OnboardingWindow() {
   const session = useDesktopOnboardingSession();
   const presentation = useDesktopOnboardingPresentation();
   const [stagedPresentation, setStagedPresentation] = useState<DesktopOnboardingPresentation | null>(null);
+  const currentWindowRef = useRef(getCurrentWindow());
+  const cardReadyRef = useRef(false);
   const copy = useMemo(() => (session ? getOnboardingCopy(session.step) : null), [session]);
 
   useEffect(() => {
-    const currentWindow = getCurrentWindow();
+    const currentWindow = currentWindowRef.current;
     let disposed = false;
+    let disposeReadyRequestListener: (() => void) | null = null;
 
     const announceReady = () => {
       if (disposed) {
@@ -113,11 +116,23 @@ export function OnboardingWindow() {
     };
 
     announceReady();
-    const intervalHandle = window.setInterval(announceReady, 250);
+
+    void currentWindow
+      .listen(desktopOnboardingEvents.readyRequested, () => {
+        announceReady();
+      })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+
+        disposeReadyRequestListener = unlisten;
+      });
 
     return () => {
       disposed = true;
-      window.clearInterval(intervalHandle);
+      disposeReadyRequestListener?.();
     };
   }, []);
 
@@ -159,28 +174,45 @@ export function OnboardingWindow() {
 
   useLayoutEffect(() => {
     if (!cardRef.current || !session || !activePresentation) {
+      cardReadyRef.current = false;
       return;
     }
 
     let disposed = false;
+    let disposeCardReadyRequestListener: (() => void) | null = null;
 
     const announceCardReady = () => {
       if (disposed || !cardRef.current) {
         return;
       }
 
-      void getCurrentWindow().emit(desktopOnboardingEvents.cardReady);
+      cardReadyRef.current = true;
+      void currentWindowRef.current.emit(desktopOnboardingEvents.cardReady);
     };
 
     announceCardReady();
 
-    const intervalHandle = window.setInterval(() => {
-      announceCardReady();
-    }, 250);
+    void currentWindowRef.current
+      .listen(desktopOnboardingEvents.cardReadyRequested, () => {
+        if (!cardReadyRef.current) {
+          return;
+        }
+
+        announceCardReady();
+      })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+
+        disposeCardReadyRequestListener = unlisten;
+      });
 
     return () => {
       disposed = true;
-      window.clearInterval(intervalHandle);
+      cardReadyRef.current = false;
+      disposeCardReadyRequestListener?.();
     };
   }, [activePresentation, session]);
 
