@@ -37,10 +37,13 @@ function isEmbeddableDashboardResultPageUrl(url: string) {
 export function DashboardResultPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const routeState = readDashboardResultPageLocation({
-    search: location.search,
-    state: location.state,
-  });
+  const routeState = useMemo(
+    () => readDashboardResultPageLocation({
+      search: location.search,
+      state: location.state,
+    }),
+    [location.search, location.state],
+  );
   const resultUrl = routeState?.url ?? null;
   const canOpenExternally = resultUrl ? isAllowedDashboardResultPageUrl(resultUrl) : false;
   const canEmbed = resultUrl ? isEmbeddableDashboardResultPageUrl(resultUrl) : false;

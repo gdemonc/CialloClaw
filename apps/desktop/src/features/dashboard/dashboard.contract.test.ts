@@ -1441,6 +1441,13 @@ test("dashboard result-page navigation helper keeps recoverable route data in bo
         url: "https://example.test/result?page=summary",
       },
     );
+    assert.equal(
+      navigation.readDashboardResultPageLocation({
+        search: persistedRoute.replace("/result", ""),
+        state: null,
+      }),
+      null,
+    );
     assert.deepEqual(navigateCalls, [
       {
         options: {
