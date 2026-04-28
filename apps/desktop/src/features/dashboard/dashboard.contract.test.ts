@@ -611,7 +611,10 @@ type DashboardContractRpcMethodOverrides = {
   applySecurityRestoreDetailed?: (params: unknown) => Promise<unknown>;
   controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
   convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
+  getDashboardModule?: (params: unknown) => Promise<unknown>;
+  getDashboardOverview?: (params: unknown) => Promise<unknown>;
   getMirrorOverviewDetailed?: (params: unknown) => Promise<unknown>;
+  getRecommendations?: (params: unknown) => Promise<unknown>;
   getSecuritySummary?: (params: unknown) => Promise<unknown>;
   getSecuritySummaryDetailed?: (params: unknown) => Promise<unknown>;
   getSettings?: (params: unknown) => Promise<unknown>;
@@ -722,6 +725,15 @@ function withDesktopAliasRuntime<T>(
         getMirrorOverviewDetailed:
           rpcMethods?.getMirrorOverviewDetailed ??
           (() => Promise.reject(new Error("getMirrorOverviewDetailed should not run in dashboard contract tests"))),
+        getDashboardModule:
+          rpcMethods?.getDashboardModule ??
+          (() => Promise.reject(new Error("getDashboardModule should not run in dashboard contract tests"))),
+        getDashboardOverview:
+          rpcMethods?.getDashboardOverview ??
+          (() => Promise.reject(new Error("getDashboardOverview should not run in dashboard contract tests"))),
+        getRecommendations:
+          rpcMethods?.getRecommendations ??
+          (() => Promise.reject(new Error("getRecommendations should not run in dashboard contract tests"))),
         getSecuritySummaryDetailed:
           rpcMethods?.getSecuritySummaryDetailed ??
           (() => Promise.reject(new Error("getSecuritySummaryDetailed should not run in dashboard contract tests"))),
@@ -1293,6 +1305,15 @@ test("safety page stays RPC-only instead of exposing a page-level mock toggle", 
   assert.doesNotMatch(securityAppSource, /loadDashboardDataMode\("safety"\)/);
   assert.doesNotMatch(securityAppSource, /saveDashboardDataMode\("safety"\)/);
   assert.doesNotMatch(securityAppSource, /setDataMode\(/);
+});
+
+test("dashboard root no longer falls back to mock home data when the live query is unavailable", () => {
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
+
+  assert.doesNotMatch(dashboardRootSource, /getDashboardHomeFallbackData/);
+  assert.match(dashboardRootSource, /const dashboardHomeData = dashboardHomeQuery\.data \?\? null;/);
+  assert.match(dashboardRootSource, /DashboardHomeStatusShell/);
+  assert.match(dashboardRootSource, /sequences=\{dashboardHomeData\?\.voiceSequences \?\? \[\]\}/);
 });
 
 test("rpc-only dashboard pages no longer expose mock-only page copy", () => {
@@ -4104,6 +4125,28 @@ test("mirror rpc service keeps transport failures visible instead of switching t
     },
     {
       getMirrorOverviewDetailed: () => Promise.reject(transportError),
+    },
+  );
+});
+
+test("dashboard home rpc service keeps transport failures visible instead of switching to mock orbit data", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadDashboardHomeData: () => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadDashboardHomeData(), /transport is not wired/i);
+    },
+    {
+      getDashboardModule: () => Promise.reject(transportError),
+      getDashboardOverview: () => Promise.reject(transportError),
+      getRecommendations: () => Promise.reject(transportError),
     },
   );
 });
