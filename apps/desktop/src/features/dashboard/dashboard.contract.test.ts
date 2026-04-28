@@ -86,6 +86,7 @@ function loadDashboardResultPageNavigationModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, "src/features/dashboard/shared/dashboardResultPageNavigation.ts")) as {
       buildDashboardResultPageRouteState: (input: { taskId: string | null; title: string | null; url: string }) => unknown;
+      clearDashboardResultPageRecoveryForSearch: (search: string) => void;
       navigateToDashboardResultPage: (navigate: (to: string, options?: { state?: unknown }) => void, input: { taskId: string | null; title: string | null; url: string }) => void;
       readDashboardResultPageLocation: (input: { search: string; state: unknown }) => { taskId: string | null; title: string | null; url: string } | null;
       readDashboardResultPageRouteState: (value: unknown) => { taskId: string | null; title: string | null; url: string } | null;
@@ -1443,6 +1444,7 @@ test("dashboard result-page navigation helper keeps recoverable route data in bo
         url: "https://example.test/result?page=summary",
       },
     );
+    navigation.clearDashboardResultPageRecoveryForSearch(persistedRoute.replace("/result", ""));
     assert.equal(
       navigation.readDashboardResultPageLocation({
         search: persistedRoute.replace("/result", ""),
