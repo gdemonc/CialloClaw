@@ -87,12 +87,12 @@ export type SecurityRestoreApplyOutcome = {
   rpcContext: SecurityRpcContext;
 };
 
-export async function loadSecurityFocusedTaskDetail(taskId: string, source: SecurityModuleSource): Promise<AgentTaskDetailGetResult | null> {
+export async function loadSecurityFocusedTaskDetail(taskId: string, _source: SecurityModuleSource): Promise<AgentTaskDetailGetResult | null> {
   const normalizedTaskId = taskId.trim();
   if (!normalizedTaskId) {
     return null;
   }
-  const detail = await loadTaskDetailData(normalizedTaskId, source === "mock" ? "mock" : "rpc");
+  const detail = await loadTaskDetailData(normalizedTaskId, "rpc");
   return detail.detail;
 }
 

@@ -14,7 +14,6 @@ import { controlTask, getTaskDetail, listTaskEvents, listTasks, steerTask } from
 import { isActiveApprovalRequest, isApprovalRequest, isArtifact, isAuditRecord, isAuthorizationRecord, isBinaryPendingAuthorizations, isCitation, isDeliveryResult, isMirrorReference, isRecoveryPoint, isTask, isTaskEvent, isTaskStep, normalizeArray, normalizeNullable } from "../shared/dashboardContractValidators";
 import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@/rpc/protocolEnumerations";
 import { formatTaskSourceLabel, getTaskPreviewStatusLabel } from "./taskPage.mapper";
-import { getMockTaskBuckets, getMockTaskDetail, runMockTaskControl } from "./taskPage.mock";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskEventFilters, TaskEventPageData, TaskEventTimeRange, TaskExperience, TaskListItem } from "./taskPage.types";
 
 export type TaskPageDataMode = "rpc" | "mock";
@@ -457,31 +456,7 @@ export function normalizeTaskDetailData(detail: AgentTaskDetailGetResult) {
   }
 }
 
-function getMockTaskBucketPage(group: TaskListGroup, options?: { limit?: number; offset?: number }): TaskBucketPageData {
-  const limit = options?.limit ?? INITIAL_TASK_PAGE_LIMIT[group];
-  const offset = options?.offset ?? 0;
-  const buckets = getMockTaskBuckets();
-  const bucket = group === "unfinished" ? buckets.unfinished : buckets.finished;
-  const items = bucket.items.slice(offset, offset + limit);
-
-  return {
-    items,
-    page: {
-      has_more: offset + limit < bucket.items.length,
-      limit,
-      offset,
-      total: bucket.items.length,
-    },
-  };
-}
-
 export async function loadTaskBucketPage(group: TaskListGroup, options?: { limit?: number; offset?: number; source?: TaskPageDataMode }): Promise<TaskBucketPageData> {
-  const source = options?.source ?? "rpc";
-
-  if (source === "mock") {
-    return getMockTaskBucketPage(group, options);
-  }
-
   const limit = options?.limit ?? INITIAL_TASK_PAGE_LIMIT[group];
   const offset = options?.offset ?? 0;
   const result = await withTimeout(
@@ -502,14 +477,7 @@ export async function loadTaskBucketPage(group: TaskListGroup, options?: { limit
   };
 }
 
-export async function loadTaskEventPage(taskId: string, source: TaskPageDataMode = "rpc", filters: Partial<TaskEventFilters> = DEFAULT_TASK_EVENT_FILTERS, nowProvider: () => Date = () => new Date()): Promise<TaskEventPageData> {
-  if (source === "mock") {
-    return {
-      items: [],
-      page: { has_more: false, limit: 20, offset: 0, total: 0 },
-    };
-  }
-
+export async function loadTaskEventPage(taskId: string, _source: TaskPageDataMode = "rpc", filters: Partial<TaskEventFilters> = DEFAULT_TASK_EVENT_FILTERS, nowProvider: () => Date = () => new Date()): Promise<TaskEventPageData> {
   const normalizedFilters = sanitizeTaskEventFilters(filters);
   const params: AgentTaskEventsListParams = {
     limit: 20,
@@ -524,23 +492,10 @@ export async function loadTaskEventPage(taskId: string, source: TaskPageDataMode
   return normalizeTaskEventPage(await withTimeout(listTaskEvents(params), `task events ${taskId}`));
 }
 
-export async function steerTaskByMessage(taskId: string, message: string, source: TaskPageDataMode = "rpc") {
+export async function steerTaskByMessage(taskId: string, message: string, _source: TaskPageDataMode = "rpc") {
   const trimmed = message.trim();
   if (!trimmed) {
     throw new Error("补充要求不能为空");
-  }
-
-  if (source === "mock") {
-    return {
-      bubble_message: {
-        created_at: new Date().toISOString(),
-        level: "info",
-        task_id: taskId,
-        text: "已记录新的补充要求，后续执行会纳入该指令。",
-        type: "status",
-      },
-      task: getMockTaskDetail(taskId).detail.task,
-    };
   }
 
   const params: AgentTaskSteerParams = {
@@ -553,24 +508,19 @@ export async function steerTaskByMessage(taskId: string, message: string, source
 }
 
 export async function loadTaskBuckets(options?: { unfinishedLimit?: number; finishedLimit?: number; source?: TaskPageDataMode }): Promise<TaskBucketsData> {
-  const source = options?.source ?? "rpc";
   const [unfinishedResult, finishedResult] = await Promise.all([
-    loadTaskBucketPage("unfinished", { limit: options?.unfinishedLimit, source }),
-    loadTaskBucketPage("finished", { limit: options?.finishedLimit, source }),
+    loadTaskBucketPage("unfinished", { limit: options?.unfinishedLimit, source: "rpc" }),
+    loadTaskBucketPage("finished", { limit: options?.finishedLimit, source: "rpc" }),
   ]);
 
   return {
     finished: finishedResult,
-    source,
+    source: "rpc",
     unfinished: unfinishedResult,
   };
 }
 
-export async function loadTaskDetailData(taskId: string, source: TaskPageDataMode = "rpc"): Promise<TaskDetailData> {
-  if (source === "mock") {
-    return getMockTaskDetail(taskId);
-  }
-
+export async function loadTaskDetailData(taskId: string, _source: TaskPageDataMode = "rpc"): Promise<TaskDetailData> {
   const normalized = normalizeTaskDetailData(
     await withTimeout(
       getTaskDetail({
@@ -597,12 +547,8 @@ export async function controlTaskByAction(taskId: string, action: TaskControlAct
     task_id: taskId,
   };
 
-  if (source === "mock") {
-    return runMockTaskControl(taskId, action);
-  }
-
   return {
     result: await withTimeout(controlTask(params), `task control ${action}`),
-    source: "rpc",
+    source,
   };
 }

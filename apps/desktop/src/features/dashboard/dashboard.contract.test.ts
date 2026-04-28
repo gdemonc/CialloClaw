@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 import type {
+  AgentDeliveryOpenParams,
   AgentDeliveryOpenResult,
   AgentNotepadConvertToTaskParams,
   AgentNotepadConvertToTaskResult,
@@ -12,7 +13,9 @@ import type {
   AgentSettingsGetParams,
   AgentNotepadUpdateParams,
   AgentNotepadUpdateResult,
+  AgentTaskArtifactListParams,
   AgentTaskArtifactListResult,
+  AgentTaskArtifactOpenParams,
   AgentTaskArtifactOpenResult,
   AgentTaskControlParams,
   AgentTaskControlResult,
@@ -653,8 +656,11 @@ type DashboardContractRpcMethodOverrides = {
   listSecurityAuditDetailed?: (params: unknown) => Promise<unknown>;
   listSecurityPendingDetailed?: (params: unknown) => Promise<unknown>;
   listSecurityRestorePointsDetailed?: (params: unknown) => Promise<unknown>;
+  listTaskArtifacts?: (params: AgentTaskArtifactListParams) => Promise<AgentTaskArtifactListResult>;
   listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
   listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+  openDelivery?: (params: AgentDeliveryOpenParams) => Promise<AgentDeliveryOpenResult>;
+  openTaskArtifact?: (params: AgentTaskArtifactOpenParams) => Promise<AgentTaskArtifactOpenResult>;
   respondSecurityDetailed?: (params: unknown) => Promise<unknown>;
   runTaskInspector?: (params: unknown) => Promise<unknown>;
   validateSettingsModel?: (params: unknown) => Promise<unknown>;
@@ -782,20 +788,26 @@ function withDesktopAliasRuntime<T>(
         listSecurityRestorePointsDetailed:
           rpcMethods?.listSecurityRestorePointsDetailed ??
           (() => Promise.reject(new Error("listSecurityRestorePointsDetailed should not run in dashboard contract tests"))),
-        listTaskArtifacts() {
-          throw new Error("listTaskArtifacts should not run in dashboard contract tests");
-        },
+        listTaskArtifacts:
+          rpcMethods?.listTaskArtifacts ??
+          (() => {
+            throw new Error("listTaskArtifacts should not run in dashboard contract tests");
+          }),
         listTasks:
           rpcMethods?.listTasks ??
           (() => {
             throw new Error("listTasks should not run in dashboard contract tests");
           }),
-        openDelivery() {
-          throw new Error("openDelivery should not run in dashboard contract tests");
-        },
-        openTaskArtifact() {
-          throw new Error("openTaskArtifact should not run in dashboard contract tests");
-        },
+        openDelivery:
+          rpcMethods?.openDelivery ??
+          (() => {
+            throw new Error("openDelivery should not run in dashboard contract tests");
+          }),
+        openTaskArtifact:
+          rpcMethods?.openTaskArtifact ??
+          (() => {
+            throw new Error("openTaskArtifact should not run in dashboard contract tests");
+          }),
         respondSecurityDetailed:
           rpcMethods?.respondSecurityDetailed ??
           (() => Promise.reject(new Error("respondSecurityDetailed should not run in dashboard contract tests"))),
@@ -3422,34 +3434,113 @@ test("task output helpers normalize open actions from existing rpc contracts", a
   );
 });
 
-test("task output service exposes artifact list and open flows in mock mode", async () => {
-  const outputService = loadTaskOutputServiceModule();
+test("task output service exposes artifact list and open flows through formal RPC payloads", async () => {
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskOutput.service.js");
+      delete requireFn.cache[modulePath];
 
-  const artifactPage = await outputService.loadTaskArtifactPage("task_done_001", "mock");
-  assert.ok(artifactPage.items.length > 0);
-  assert.equal(artifactPage.page.offset, 0);
+      const outputService = requireFn(modulePath) as {
+        describeTaskOpenResultForCurrentTask: (plan: { mode: string; taskId: string | null }, currentTaskId: string | null) => string | null;
+        isAllowedTaskOpenUrl: (url: string) => boolean;
+        loadTaskArtifactPage: (taskId: string) => Promise<AgentTaskArtifactListResult>;
+        openTaskArtifactForTask: (taskId: string, artifactId: string) => Promise<AgentTaskArtifactOpenResult>;
+        openTaskDeliveryForTask: (taskId: string, artifactId?: string) => Promise<AgentDeliveryOpenResult>;
+      };
 
-  const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003", "mock");
-  assert.equal(artifactOpen.open_action, "reveal_in_folder");
+      const artifactPage = await outputService.loadTaskArtifactPage("task_done_001");
+      assert.ok(artifactPage.items.length > 0);
+      assert.equal(artifactPage.page.offset, 0);
 
-  const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001", undefined, "mock");
-  assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+      const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003");
+      assert.equal(artifactOpen.open_action, "reveal_in_folder");
 
-  assert.equal(
-    outputService.describeTaskOpenResultForCurrentTask(
-      {
-        mode: "task_detail",
-        taskId: "task_done_001",
-      },
-      "task_done_001",
-    ),
-    "当前任务没有独立可打开结果，请先查看成果区。",
+      const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001");
+      assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+
+      assert.equal(
+        outputService.describeTaskOpenResultForCurrentTask(
+          {
+            mode: "task_detail",
+            taskId: "task_done_001",
+          },
+          "task_done_001",
+        ),
+        "当前任务没有独立可打开结果，请先查看成果区。",
+      );
+
+      assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
+      assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
+      assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
+      assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
+    },
+    {
+      listTaskArtifacts: async () => ({
+        items: [
+          {
+            artifact_id: "artifact_done_003",
+            artifact_type: "reveal_in_folder",
+            created_at: "2026-04-28T08:00:00.000Z",
+            mime_type: "application/pdf",
+            path: "workspace/reports/q3-review.pdf",
+            task_id: "task_done_001",
+            title: "q3-review.pdf",
+          },
+        ],
+        page: {
+          has_more: false,
+          limit: 1,
+          offset: 0,
+          total: 1,
+        },
+      }),
+      openDelivery: async () => ({
+        delivery_result: {
+          payload: {
+            path: null,
+            task_id: "task_done_001",
+            url: "https://example.test/result",
+          },
+          preview_text: "结果页",
+          title: "结果页",
+          type: "result_page",
+        },
+        open_action: "result_page",
+        resolved_payload: {
+          path: null,
+          task_id: "task_done_001",
+          url: "https://example.test/result",
+        },
+      }),
+      openTaskArtifact: async () => ({
+        artifact: {
+          artifact_id: "artifact_done_003",
+          artifact_type: "reveal_in_folder",
+          created_at: "2026-04-28T08:00:00.000Z",
+          mime_type: "application/pdf",
+          path: "workspace/reports/q3-review.pdf",
+          task_id: "task_done_001",
+          title: "q3-review.pdf",
+        },
+        delivery_result: {
+          payload: {
+            path: "workspace/reports/q3-review.pdf",
+            task_id: "task_done_001",
+            url: null,
+          },
+          preview_text: "定位文件",
+          title: "q3-review.pdf",
+          type: "reveal_in_folder",
+        },
+        open_action: "reveal_in_folder",
+        resolved_payload: {
+          path: "workspace/reports/q3-review.pdf",
+          task_id: "task_done_001",
+          url: null,
+        },
+      }),
+    },
   );
-
-  assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
-  assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
 });
 
 test("note resource open helpers normalize task, url, local open, and copy flows", () => {
@@ -4136,10 +4227,15 @@ test("task rpc service keeps transport failures visible instead of switching to 
 
 test("task rpc service builds protocol-only experience instead of reusing mock task fixtures", () => {
   const taskServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.service.ts"), "utf8");
+  const taskOutputSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskOutput.service.ts"), "utf8");
 
   assert.match(taskServiceSource, /function buildProtocolTaskExperience\(task: Task, detail\?: AgentTaskDetailGetResult\)/);
   assert.doesNotMatch(taskServiceSource, /getTaskExperience\(/);
   assert.doesNotMatch(taskServiceSource, /createFallbackExperience\(/);
+  assert.doesNotMatch(taskServiceSource, /getMockTaskBuckets\(/);
+  assert.doesNotMatch(taskServiceSource, /getMockTaskDetail\(/);
+  assert.doesNotMatch(taskServiceSource, /runMockTaskControl\(/);
+  assert.doesNotMatch(taskOutputSource, /getMockTaskDetail\(/);
 });
 
 test("note rpc service keeps transport failures visible instead of switching to mock data", async () => {
