@@ -228,7 +228,7 @@ function loadTaskOutputServiceModule(desktopLocalPath?: DashboardContractDesktop
       loadTaskArtifactPage: (taskId: string, source: "rpc" | "mock") => Promise<AgentTaskArtifactListResult>;
       openTaskArtifactForTask: (taskId: string, artifactId: string, source: "rpc" | "mock") => Promise<AgentTaskArtifactOpenResult>;
       openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source: "rpc" | "mock") => Promise<AgentDeliveryOpenResult>;
-      resolveTaskOpenExecutionPlan: (result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult) => {
+      resolveTaskOpenExecutionPlan: (result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult, fallbackTaskId?: string | null) => {
         mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
         taskId: string | null;
         path: string | null;
@@ -3633,6 +3633,29 @@ test("task output helpers normalize open actions from existing rpc contracts", a
   );
 
   assert.deepEqual(
+    outputService.resolveTaskOpenExecutionPlan(
+      {
+        open_action: "result_page",
+        resolved_payload: { path: null, url: "https://example.test/result", task_id: null },
+        delivery_result: {
+          type: "result_page",
+          title: "Result page",
+          preview_text: "打开结果页",
+          payload: { path: null, url: "https://example.test/result", task_id: null },
+        },
+      },
+      "task_dashboard_001",
+    ),
+    {
+      mode: "open_result_page",
+      taskId: "task_dashboard_001",
+      path: null,
+      url: "https://example.test/result",
+      feedback: "已打开结果页。",
+    },
+  );
+
+  assert.deepEqual(
     outputService.resolveTaskOpenExecutionPlan({
       artifact: {
         artifact_id: "artifact_dashboard_001",
@@ -4059,6 +4082,7 @@ test("task page adopts rpc output helpers directly in the task detail panel", ()
   assert.match(taskPageSource, /readDashboardTaskDetailRouteState/);
   assert.match(taskPageSource, /subscribeDeliveryReady\(\(payload\) =>/);
   assert.match(taskPageSource, /payload\.task_id/);
+  assert.match(taskPageSource, /handleResolvedOpen\(result, variables\.taskId\)/);
   assert.match(taskPageSource, /navigateToDashboardResultPage/);
   assert.match(taskPageSource, /onOpenResultPage:/);
   assert.doesNotMatch(taskPageSource, /\["dashboard", "tasks", "artifacts"/);

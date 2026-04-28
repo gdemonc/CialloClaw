@@ -60,8 +60,12 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   ]);
 }
 
-function resolveTaskId(payload: DeliveryPayload, result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult) {
-  return payload.task_id ?? result.artifact?.task_id ?? null;
+function resolveTaskId(
+  payload: DeliveryPayload,
+  result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult,
+  fallbackTaskId: string | null = null,
+) {
+  return payload.task_id ?? result.artifact?.task_id ?? fallbackTaskId;
 }
 
 /**
@@ -72,9 +76,12 @@ function resolveTaskId(payload: DeliveryPayload, result: AgentTaskArtifactOpenRe
  * @param result Formal artifact or delivery open payload returned by RPC.
  * @returns The renderer execution plan for the requested output action.
  */
-export function resolveTaskOpenExecutionPlan(result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult): TaskOpenExecutionPlan {
+export function resolveTaskOpenExecutionPlan(
+  result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult,
+  fallbackTaskId: string | null = null,
+): TaskOpenExecutionPlan {
   const payload = result.resolved_payload;
-  const taskId = resolveTaskId(payload, result);
+  const taskId = resolveTaskId(payload, result, fallbackTaskId);
   const path = payload.path;
   const url = payload.url;
 
