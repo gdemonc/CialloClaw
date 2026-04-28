@@ -17,8 +17,8 @@ type StoredDashboardResultPageRouteState = DashboardResultPageRouteState & {
 };
 
 const dashboardResultPageStoragePrefix = "dashboard.result-page.";
-const dashboardResultPageStorageMaxAgeMs = 1000 * 60 * 60 * 12;
-const dashboardResultPageStorageMaxEntries = 64;
+const dashboardResultPageStorageMaxAgeMs = 1000 * 60 * 5;
+const dashboardResultPageStorageMaxEntries = 8;
 
 function getDashboardResultPageStorage() {
   if (typeof window === "undefined") {
@@ -126,6 +126,8 @@ function readStoredDashboardResultPageRouteState(token: string): DashboardResult
       return null;
     }
 
+    storage.removeItem(storageKey);
+
     return {
       taskId: typeof parsed.taskId === "string" ? parsed.taskId : null,
       title: typeof parsed.title === "string" ? parsed.title : null,
@@ -193,25 +195,26 @@ export function readDashboardResultPageRouteState(value: unknown): DashboardResu
 
 /**
  * Resolves dashboard result-page input from both router search params and route
- * state so refreshes can recover the formal delivery address while the cached
- * recovery token remains valid in the current dashboard session.
+ * state so current navigation relies on `history.state`, while the cached token
+ * only acts as a one-time recovery backup when that state is missing.
  *
  * @param input The current location search string and route state payload.
  * @returns The recoverable result-page route payload or null when missing.
  */
 export function readDashboardResultPageLocation(input: DashboardResultPageLocationInput): DashboardResultPageRouteState | null {
-  const searchState = readDashboardResultPageSearch(input.search);
   const routedState = readDashboardResultPageRouteState(input.state);
 
-  if (!searchState) {
+  if (routedState) {
     return routedState;
   }
 
-  return {
-    taskId: searchState.taskId ?? routedState?.taskId ?? null,
-    title: searchState.title ?? routedState?.title ?? null,
-    url: searchState.url,
-  };
+  const searchState = readDashboardResultPageSearch(input.search);
+
+  if (!searchState) {
+    return null;
+  }
+
+  return searchState;
 }
 
 /**

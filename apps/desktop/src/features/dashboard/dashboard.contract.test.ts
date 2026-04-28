@@ -1432,7 +1432,22 @@ test("dashboard result-page navigation helper keeps recoverable route data in bo
     assert.doesNotMatch(persistedRoute, /example\.test/);
     assert.doesNotMatch(persistedRoute, /task_dashboard_001/);
     assert.doesNotMatch(persistedRoute, /Result\+page/);
-    assert.equal(storage.size, 1);
+
+    assert.deepEqual(
+      navigation.readDashboardResultPageLocation({
+        search: persistedRoute.replace("/result", ""),
+        state: {
+          taskId: "task_dashboard_001",
+          title: "Result page",
+          url: "https://example.test/result?page=summary",
+        },
+      }),
+      {
+        taskId: "task_dashboard_001",
+        title: "Result page",
+        url: "https://example.test/result?page=summary",
+      },
+    );
 
     assert.deepEqual(
       navigation.readDashboardResultPageLocation({
@@ -1445,17 +1460,12 @@ test("dashboard result-page navigation helper keeps recoverable route data in bo
         url: "https://example.test/result?page=summary",
       },
     );
-    assert.equal(storage.size, 1);
-    assert.deepEqual(
+    assert.equal(
       navigation.readDashboardResultPageLocation({
         search: persistedRoute.replace("/result", ""),
         state: null,
       }),
-      {
-        taskId: "task_dashboard_001",
-        title: "Result page",
-        url: "https://example.test/result?page=summary",
-      },
+      null,
     );
     assert.deepEqual(navigateCalls, [
       {
@@ -1557,8 +1567,10 @@ test("dashboard result page keeps raw delivery URLs out of the visible query and
   assert.doesNotMatch(navigationSource, /params\.set\("url"/);
   assert.doesNotMatch(navigationSource, /params\.set\("task_id"/);
   assert.match(navigationSource, /params\.get\("result_id"\)/);
-  assert.match(navigationSource, /dashboardResultPageStorageMaxAgeMs = 1000 \* 60 \* 60 \* 12/);
-  assert.match(navigationSource, /dashboardResultPageStorageMaxEntries = 64/);
+  assert.match(navigationSource, /dashboardResultPageStorageMaxAgeMs = 1000 \* 60 \* 5/);
+  assert.match(navigationSource, /dashboardResultPageStorageMaxEntries = 8/);
+  assert.match(navigationSource, /if \(routedState\) \{/);
+  assert.match(navigationSource, /storage\.removeItem\(storageKey\)/);
 });
 
 test("rpc-only dashboard pages no longer expose mock-only page copy", () => {
