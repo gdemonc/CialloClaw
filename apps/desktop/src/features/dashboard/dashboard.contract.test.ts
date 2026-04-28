@@ -1384,23 +1384,84 @@ test("safety page stays RPC-only instead of exposing a page-level mock toggle", 
 });
 test("dashboard result-page navigation helper accepts only explicit route state", () => {
   const navigation = loadDashboardResultPageNavigationModule();
+  const navigateCalls: Array<{ options?: { state?: unknown }; to: string }> = [];
+
+  navigation.navigateToDashboardResultPage(
+    (to, options) => {
+      navigateCalls.push({ options, to });
+    },
+    {
+      taskId: "task_dashboard_001",
+      title: "Result page",
+      url: "https://example.test/result?page=summary",
+    },
+  );
 
   assert.deepEqual(
     navigation.readDashboardResultPageRouteState(
       navigation.buildDashboardResultPageRouteState({
         taskId: "task_dashboard_001",
         title: "Result page",
-        url: "https://example.test/result",
+        url: "https://example.test/result?page=summary",
       }),
     ),
     {
       taskId: "task_dashboard_001",
       title: "Result page",
-      url: "https://example.test/result",
+      url: "https://example.test/result?page=summary",
     },
   );
+  assert.deepEqual(
+    navigation.readDashboardResultPageLocation({
+      state: {
+        taskId: "task_dashboard_001",
+        title: "Result page",
+        url: "https://example.test/result?page=summary",
+      },
+    }),
+    {
+      taskId: "task_dashboard_001",
+      title: "Result page",
+      url: "https://example.test/result?page=summary",
+    },
+  );
+  assert.deepEqual(navigateCalls, [
+    {
+      options: {
+        state: {
+          taskId: "task_dashboard_001",
+          title: "Result page",
+          url: "https://example.test/result?page=summary",
+        },
+      },
+      to: "/result",
+    },
+  ]);
   assert.equal(navigation.readDashboardResultPageRouteState({ title: "Missing url" }), null);
+  assert.equal(
+    navigation.readDashboardResultPageLocation({
+      state: null,
+    }),
+    null,
+  );
 });
+
+test("dashboard result page embeds only trusted local result hosts and never persists visible route tokens", () => {
+  const resultPageSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardResultPage.tsx"), "utf8");
+  const navigationSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardResultPageNavigation.ts"), "utf8");
+
+  assert.match(resultPageSource, /hostname === "\[::1\]"/);
+  assert.match(resultPageSource, /function isEmbeddableDashboardResultPageUrl/);
+  assert.match(resultPageSource, /if \(!isLoopbackHost\(parsed\.hostname\)\) \{/);
+  assert.match(resultPageSource, /return parsed\.protocol === "https:" \|\| parsed\.protocol === "http:"/);
+  assert.match(resultPageSource, /sandbox="allow-downloads allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts"/);
+  assert.match(resultPageSource, /referrerPolicy="no-referrer"/);
+  assert.match(resultPageSource, /不在站内可信嵌入白名单内/);
+  assert.doesNotMatch(navigationSource, /sessionStorage/);
+  assert.doesNotMatch(navigationSource, /result_id=/);
+  assert.match(navigationSource, /return readDashboardResultPageRouteState\(input\.state\)/);
+});
+
 test("dashboard home entrance labels stay hidden until hover or focus", () => {
   const dashboardHomeStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.css"), "utf8");
   const entranceOrbSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/components/DashboardEntranceOrb.tsx"), "utf8");
