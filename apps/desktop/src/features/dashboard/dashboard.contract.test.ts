@@ -86,6 +86,8 @@ function loadDashboardResultPageNavigationModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, "src/features/dashboard/shared/dashboardResultPageNavigation.ts")) as {
       buildDashboardResultPageRouteState: (input: { taskId: string | null; title: string | null; url: string }) => unknown;
+      navigateToDashboardResultPage: (navigate: (to: string, options?: { state?: unknown }) => void, input: { taskId: string | null; title: string | null; url: string }) => void;
+      readDashboardResultPageLocation: (input: { search: string; state: unknown }) => { taskId: string | null; title: string | null; url: string } | null;
       readDashboardResultPageRouteState: (value: unknown) => { taskId: string | null; title: string | null; url: string } | null;
     },
   );
@@ -1377,24 +1379,55 @@ test("dashboard home no longer replays mock summon or voice presets when live re
   assert.match(dashboardHomeSource, /if \(data\.summonTemplates\.length === 0\) \{/);
 });
 
-test("dashboard result-page navigation helper accepts only explicit route state", () => {
+test("dashboard result-page navigation helper keeps recoverable route data in both search and state", () => {
   const navigation = loadDashboardResultPageNavigationModule();
+  const navigateCalls: Array<{ options?: { state?: unknown }; to: string }> = [];
 
-  assert.deepEqual(
-    navigation.readDashboardResultPageRouteState(
-      navigation.buildDashboardResultPageRouteState({
-        taskId: "task_dashboard_001",
-        title: "Result page",
-        url: "https://example.test/result",
-      }),
-    ),
+  navigation.navigateToDashboardResultPage(
+    (to, options) => {
+      navigateCalls.push({ options, to });
+    },
     {
       taskId: "task_dashboard_001",
       title: "Result page",
-      url: "https://example.test/result",
+      url: "https://example.test/result?page=summary",
     },
   );
-  assert.equal(navigation.readDashboardResultPageRouteState({ title: "Missing url" }), null);
+
+  assert.deepEqual(
+    navigation.readDashboardResultPageLocation({
+      search: "?url=https%3A%2F%2Fexample.test%2Fresult%3Fpage%3Dsummary&task_id=task_dashboard_001&title=Result+page",
+      state: navigation.buildDashboardResultPageRouteState({
+        taskId: "task_dashboard_001",
+        title: "Result page",
+        url: "https://example.test/result?page=summary",
+      }),
+    }),
+    {
+      taskId: "task_dashboard_001",
+      title: "Result page",
+      url: "https://example.test/result?page=summary",
+    },
+  );
+  assert.deepEqual(navigateCalls, [
+    {
+      options: {
+        state: {
+          taskId: "task_dashboard_001",
+          title: "Result page",
+          url: "https://example.test/result?page=summary",
+        },
+      },
+      to: "/result?url=https%3A%2F%2Fexample.test%2Fresult%3Fpage%3Dsummary&task_id=task_dashboard_001&title=Result+page",
+    },
+  ]);
+  assert.equal(
+    navigation.readDashboardResultPageLocation({
+      search: "",
+      state: { title: "Missing url" },
+    }),
+    null,
+  );
 });
 
 test("rpc-only dashboard pages no longer expose mock-only page copy", () => {

@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DashboardBackHomeLink } from "@/features/dashboard/shared/DashboardBackHomeLink";
 import { navigateToDashboardTaskDetail } from "@/features/dashboard/shared/dashboardTaskDetailNavigation";
-import { readDashboardResultPageRouteState } from "@/features/dashboard/shared/dashboardResultPageNavigation";
+import { readDashboardResultPageLocation } from "@/features/dashboard/shared/dashboardResultPageNavigation";
 
 function isAllowedDashboardResultPageUrl(url: string) {
   try {
@@ -24,7 +24,10 @@ function isAllowedDashboardResultPageUrl(url: string) {
 export function DashboardResultPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const routeState = readDashboardResultPageRouteState(location.state);
+  const routeState = readDashboardResultPageLocation({
+    search: location.search,
+    state: location.state,
+  });
   const resultUrl = routeState?.url ?? null;
   const canEmbed = resultUrl ? isAllowedDashboardResultPageUrl(resultUrl) : false;
   const hostLabel = useMemo(() => {

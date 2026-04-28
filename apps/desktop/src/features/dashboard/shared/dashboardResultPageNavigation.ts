@@ -7,6 +7,43 @@ export type DashboardResultPageRouteState = {
   url: string;
 };
 
+type DashboardResultPageLocationInput = {
+  search: string;
+  state: unknown;
+};
+
+function readDashboardResultPageSearch(search: string): DashboardResultPageRouteState | null {
+  const params = new URLSearchParams(search);
+  const url = (params.get("url") ?? "").trim();
+  const taskId = (params.get("task_id") ?? "").trim() || null;
+  const title = (params.get("title") ?? "").trim() || null;
+
+  if (!url) {
+    return null;
+  }
+
+  return {
+    taskId,
+    title,
+    url,
+  };
+}
+
+function buildDashboardResultPageSearch(input: DashboardResultPageRouteState) {
+  const params = new URLSearchParams();
+  params.set("url", input.url);
+
+  if (input.taskId) {
+    params.set("task_id", input.taskId);
+  }
+
+  if (input.title?.trim()) {
+    params.set("title", input.title.trim());
+  }
+
+  return params.toString();
+}
+
 /**
  * Builds the router state used by dashboard result-page views so task- and
  * note-driven result openings can converge on one renderer entry.
@@ -56,6 +93,28 @@ export function readDashboardResultPageRouteState(value: unknown): DashboardResu
 }
 
 /**
+ * Resolves dashboard result-page input from both router search params and route
+ * state so refreshes keep the formal delivery address recoverable.
+ *
+ * @param input The current location search string and route state payload.
+ * @returns The recoverable result-page route payload or null when missing.
+ */
+export function readDashboardResultPageLocation(input: DashboardResultPageLocationInput): DashboardResultPageRouteState | null {
+  const searchState = readDashboardResultPageSearch(input.search);
+  const routedState = readDashboardResultPageRouteState(input.state);
+
+  if (!searchState) {
+    return routedState;
+  }
+
+  return {
+    taskId: searchState.taskId ?? routedState?.taskId ?? null,
+    title: searchState.title ?? routedState?.title ?? null,
+    url: searchState.url,
+  };
+}
+
+/**
  * Navigates inside the dashboard to the dedicated result-page shell while
  * preserving the originating task context when available.
  *
@@ -66,7 +125,8 @@ export function navigateToDashboardResultPage(
   navigate: NavigateFunction,
   input: DashboardResultPageRouteState,
 ) {
-  navigate(resolveDashboardRoutePath("result"), {
+  const search = buildDashboardResultPageSearch(input);
+  navigate(`${resolveDashboardRoutePath("result")}?${search}`, {
     state: buildDashboardResultPageRouteState(input),
   });
 }
