@@ -161,20 +161,20 @@ function loadNotePageServiceModule(desktopLocalPath?: DashboardContractDesktopLo
       resolveNoteResourceOpenExecutionPlan: (resource: {
         id: string;
         label: string;
-        openAction?: "task_detail" | "open_url" | "open_file" | "reveal_in_folder" | "copy_path" | null;
+        openAction?: "task_detail" | "result_page" | "open_url" | "open_file" | "reveal_in_folder" | "copy_path" | null;
         path: string;
         taskId?: string | null;
         type: string;
         url?: string | null;
       }) => {
-        mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+        mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
         taskId: string | null;
         path: string | null;
         url: string | null;
         feedback: string;
       };
       performNoteResourceOpenExecution: (plan: {
-        mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+        mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
         feedback: string;
         path: string | null;
         taskId: string | null;
@@ -182,13 +182,24 @@ function loadNotePageServiceModule(desktopLocalPath?: DashboardContractDesktopLo
       }, options?: {
         onOpenTaskDetail?: (input: {
           plan: {
-            mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
             feedback: string;
             path: string | null;
             taskId: string | null;
             url: string | null;
           };
           taskId: string;
+        }) => Promise<string | void> | string | void;
+        onOpenResultPage?: (input: {
+          plan: {
+            mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            feedback: string;
+            path: string | null;
+            taskId: string | null;
+            url: string | null;
+          };
+          taskId: string | null;
+          url: string;
         }) => Promise<string | void> | string | void;
       }) => Promise<string>;
     };
@@ -207,14 +218,14 @@ function loadTaskOutputServiceModule(desktopLocalPath?: DashboardContractDesktop
       openTaskArtifactForTask: (taskId: string, artifactId: string, source: "rpc" | "mock") => Promise<AgentTaskArtifactOpenResult>;
       openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source: "rpc" | "mock") => Promise<AgentDeliveryOpenResult>;
       resolveTaskOpenExecutionPlan: (result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult) => {
-        mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+        mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
         taskId: string | null;
         path: string | null;
         url: string | null;
         feedback: string;
       };
       performTaskOpenExecution: (plan: {
-        mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+        mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
         taskId: string | null;
         path: string | null;
         url: string | null;
@@ -222,13 +233,24 @@ function loadTaskOutputServiceModule(desktopLocalPath?: DashboardContractDesktop
       }, options?: {
         onOpenTaskDetail?: (input: {
           plan: {
-            mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
             taskId: string | null;
             path: string | null;
             url: string | null;
             feedback: string;
           };
           taskId: string;
+        }) => Promise<string | void> | string | void;
+        onOpenResultPage?: (input: {
+          plan: {
+            mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+            taskId: string | null;
+            path: string | null;
+            url: string | null;
+            feedback: string;
+          };
+          taskId: string | null;
+          url: string;
         }) => Promise<string | void> | string | void;
       }) => Promise<string>;
     };
@@ -3429,7 +3451,7 @@ test("task output helpers normalize open actions from existing rpc contracts", a
       },
     }),
     {
-      mode: "open_url",
+      mode: "open_result_page",
       taskId: "task_dashboard_001",
       path: null,
       url: "https://example.test/result",
@@ -3630,6 +3652,18 @@ test("note resource open helpers normalize task, url, local open, and copy flows
   assert.equal(urlPlan.mode, "open_url");
   assert.equal(urlPlan.url, "https://example.test/spec");
 
+  const resultPagePlan = noteService.resolveNoteResourceOpenExecutionPlan({
+    id: "note_resource_002b",
+    label: "Result page",
+    openAction: "result_page",
+    path: "workspace/results/result-page.html",
+    taskId: "task_dashboard_001",
+    type: "result",
+    url: "https://example.test/result",
+  });
+  assert.equal(resultPagePlan.mode, "open_result_page");
+  assert.equal(resultPagePlan.url, "https://example.test/result");
+
   const openFilePlan = noteService.resolveNoteResourceOpenExecutionPlan({
     id: "note_resource_003",
     label: "Draft",
@@ -3774,6 +3808,27 @@ test("task output execution delegates task-detail routing through the shared cal
   assert.equal(feedback, "宸插湪浠〃鐩樹腑鎵撳紑浠诲姟璇︽儏銆?");
 });
 
+test("task output execution can delegate result_page handling through a dedicated callback", async () => {
+  const outputService = loadTaskOutputServiceModule();
+  const openedResultPages: Array<{ taskId: string | null; url: string }> = [];
+
+  const feedback = await outputService.performTaskOpenExecution({
+    mode: "open_result_page",
+    taskId: "task_dashboard_001",
+    path: null,
+    url: "https://example.test/result",
+    feedback: "已打开结果页。",
+  }, {
+    onOpenResultPage: ({ taskId, url }) => {
+      openedResultPages.push({ taskId, url });
+      return "已在桌面结果页中打开。";
+    },
+  });
+
+  assert.deepEqual(openedResultPages, [{ taskId: "task_dashboard_001", url: "https://example.test/result" }]);
+  assert.equal(feedback, "已在桌面结果页中打开。");
+});
+
 test("note resource execution delegates task-detail routing through the shared callback", async () => {
   const noteService = loadNotePageServiceModule();
   const openedTaskIds: string[] = [];
@@ -3793,6 +3848,27 @@ test("note resource execution delegates task-detail routing through the shared c
 
   assert.deepEqual(openedTaskIds, ["task_dashboard_001"]);
   assert.equal(feedback, "宸插湪浠〃鐩樹腑鎵撳紑 Task detail銆?");
+});
+
+test("note resource execution can delegate result_page handling through a dedicated callback", async () => {
+  const noteService = loadNotePageServiceModule();
+  const openedResultPages: Array<{ taskId: string | null; url: string }> = [];
+
+  const feedback = await noteService.performNoteResourceOpenExecution({
+    mode: "open_result_page",
+    feedback: "已打开结果页。",
+    path: null,
+    taskId: "task_dashboard_001",
+    url: "https://example.test/result",
+  }, {
+    onOpenResultPage: ({ taskId, url }) => {
+      openedResultPages.push({ taskId, url });
+      return "已在桌面结果页中打开便签结果。";
+    },
+  });
+
+  assert.deepEqual(openedResultPages, [{ taskId: "task_dashboard_001", url: "https://example.test/result" }]);
+  assert.equal(feedback, "已在桌面结果页中打开便签结果。");
 });
 
 test("task page adopts rpc output helpers directly in the task detail panel", () => {

@@ -18,7 +18,7 @@ const NOTEPAD_RPC_TIMEOUT_MS = 2_500;
 export type NotePageDataMode = "rpc" | "mock";
 
 export type NoteResourceOpenExecutionPlan = {
-  mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+  mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
   feedback: string;
   path: string | null;
   taskId: string | null;
@@ -29,6 +29,11 @@ export type NoteResourceOpenExecutionOptions = {
   onOpenTaskDetail?: (input: {
     plan: NoteResourceOpenExecutionPlan;
     taskId: string;
+  }) => Promise<string | void> | string | void;
+  onOpenResultPage?: (input: {
+    plan: NoteResourceOpenExecutionPlan;
+    taskId: string | null;
+    url: string;
   }) => Promise<string | void> | string | void;
 };
 
@@ -232,7 +237,7 @@ function normalizeResourceOpenAction(action: DeliveryType | null, payload: Deliv
   }
 
   if (action === "result_page" && payload?.url) {
-    return "open_url";
+    return "result_page";
   }
 
   if (payload?.url) {
@@ -747,6 +752,16 @@ export function resolveNoteResourceOpenExecutionPlan(resource: NoteResource): No
     };
   }
 
+  if (resource.openAction === "result_page" && resource.url) {
+    return {
+      feedback: `已打开 ${resource.label} 结果页。`,
+      mode: "open_result_page",
+      path: resource.path || null,
+      taskId: resource.taskId ?? null,
+      url: resource.url,
+    };
+  }
+
   if (resource.openAction === "open_url" && resource.url) {
     return {
       feedback: `已打开 ${resource.label}。`,
@@ -833,6 +848,25 @@ export async function performNoteResourceOpenExecution(
     return typeof detailFeedback === "string" && detailFeedback.trim() !== ""
       ? detailFeedback
       : plan.feedback;
+  }
+
+  if (plan.mode === "open_result_page" && plan.url) {
+    if (!isAllowedNoteOpenUrl(plan.url)) {
+      return "已拦截不受支持的便签结果页链接。";
+    }
+
+    const resultPageFeedback = await options.onOpenResultPage?.({
+      plan,
+      taskId: plan.taskId,
+      url: plan.url,
+    });
+
+    if (typeof resultPageFeedback === "string" && resultPageFeedback.trim() !== "") {
+      return resultPageFeedback;
+    }
+
+    window.open(plan.url, "_blank", "noopener,noreferrer");
+    return plan.feedback;
   }
 
   if (plan.mode === "open_url" && plan.url) {
