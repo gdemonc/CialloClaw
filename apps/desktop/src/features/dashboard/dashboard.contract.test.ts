@@ -1344,6 +1344,15 @@ test("dashboard root no longer falls back to mock home data when the live query 
   assert.match(dashboardRootSource, /sequences=\{dashboardHomeData\?\.voiceSequences \?\? \[\]\}/);
 });
 
+test("dashboard home no longer replays mock summon or voice presets when live recommendations are empty", () => {
+  const dashboardHomeSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardHome.tsx"), "utf8");
+  const dashboardHomeServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts"), "utf8");
+
+  assert.doesNotMatch(dashboardHomeServiceSource, /return templates.length > 0 \? templates : dashboardSummonTemplates\.map/);
+  assert.doesNotMatch(dashboardHomeServiceSource, /return sequences.length > 0 \? sequences : dashboardVoiceSequences\.map/);
+  assert.match(dashboardHomeSource, /if \(data\.summonTemplates\.length === 0\) \{/);
+});
+
 test("dashboard result-page navigation helper accepts only explicit route state", () => {
   const navigation = loadDashboardResultPageNavigationModule();
 
