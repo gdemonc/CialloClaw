@@ -86,6 +86,8 @@ function loadDashboardResultPageNavigationModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, "src/features/dashboard/shared/dashboardResultPageNavigation.ts")) as {
       buildDashboardResultPageRouteState: (input: { taskId: string | null; title: string | null; url: string }) => unknown;
+      navigateToDashboardResultPage: (navigate: (to: string, options?: { state?: unknown }) => void, input: { taskId: string | null; title: string | null; url: string }) => void;
+      readDashboardResultPageLocation: (input: { state: unknown }) => { taskId: string | null; title: string | null; url: string } | null;
       readDashboardResultPageRouteState: (value: unknown) => { taskId: string | null; title: string | null; url: string } | null;
     },
   );
@@ -1441,6 +1443,12 @@ test("dashboard result-page navigation helper accepts only explicit route state"
   assert.equal(
     navigation.readDashboardResultPageLocation({
       state: null,
+    }),
+    null,
+  );
+  assert.equal(
+    navigation.readDashboardResultPageLocation({
+      state: { title: "Missing url" },
     }),
     null,
   );

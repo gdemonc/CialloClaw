@@ -7,6 +7,9 @@ export type DashboardResultPageRouteState = {
   url: string;
 };
 
+type DashboardResultPageLocationInput = {
+  state: unknown;
+};
 /**
  * Builds the router state used by dashboard result-page views so task- and
  * note-driven result openings can converge on one renderer entry.
@@ -53,6 +56,18 @@ export function readDashboardResultPageRouteState(value: unknown): DashboardResu
     title,
     url,
   };
+}
+
+/**
+ * Resolves dashboard result-page input from router state so current navigation
+ * stays within the browser history entry instead of persisting delivery URLs to
+ * renderer-readable storage.
+ *
+ * @param input The current location search string and route state payload.
+ * @returns The recoverable result-page route payload or null when missing.
+ */
+export function readDashboardResultPageLocation(input: DashboardResultPageLocationInput): DashboardResultPageRouteState | null {
+  return readDashboardResultPageRouteState(input.state);
 }
 
 /**

@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DashboardBackHomeLink } from "@/features/dashboard/shared/DashboardBackHomeLink";
 import { navigateToDashboardTaskDetail } from "@/features/dashboard/shared/dashboardTaskDetailNavigation";
-import { readDashboardResultPageRouteState } from "@/features/dashboard/shared/dashboardResultPageNavigation";
+import { readDashboardResultPageLocation } from "@/features/dashboard/shared/dashboardResultPageNavigation";
 
 function isLoopbackHost(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -37,7 +37,12 @@ function isEmbeddableDashboardResultPageUrl(url: string) {
 export function DashboardResultPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const routeState = readDashboardResultPageRouteState(location.state);
+  const routeState = useMemo(
+    () => readDashboardResultPageLocation({
+      state: location.state,
+    }),
+    [location.state],
+  );
   const resultUrl = routeState?.url ?? null;
   const canOpenExternally = resultUrl ? isAllowedDashboardResultPageUrl(resultUrl) : false;
   const canEmbed = resultUrl ? isEmbeddableDashboardResultPageUrl(resultUrl) : false;
