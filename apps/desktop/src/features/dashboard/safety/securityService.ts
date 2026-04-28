@@ -239,46 +239,22 @@ export async function loadSecurityPendingApprovals(
     };
   }
 
-  try {
-    const params: AgentSecurityPendingListParams = {
-      request_meta: createRequestMeta(),
-      limit,
-      offset,
-    };
-    const response = await listSecurityPendingDetailed(params);
+  const params: AgentSecurityPendingListParams = {
+    request_meta: createRequestMeta(),
+    limit,
+    offset,
+  };
+  const response = await listSecurityPendingDetailed(params);
 
-    return {
-      items: response.data.items,
-      page: response.data.page,
-      rpcContext: {
-        serverTime: response.meta?.server_time ?? null,
-        warnings: response.warnings,
-      },
-      source: "rpc",
-    };
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("security pending list", error);
-      const pagedItems = securityPendingMock.items.slice(offset, offset + limit);
-
-      return {
-        items: pagedItems,
-        page: {
-          has_more: offset + pagedItems.length < securityPendingMock.items.length,
-          limit,
-          offset,
-          total: securityPendingMock.items.length,
-        },
-        rpcContext: {
-          serverTime: null,
-          warnings: [],
-        },
-        source: "mock",
-      };
-    }
-
-    throw error;
-  }
+  return {
+    items: response.data.items,
+    page: response.data.page,
+    rpcContext: {
+      serverTime: response.meta?.server_time ?? null,
+      warnings: response.warnings,
+    },
+    source: "rpc",
+  };
 }
 
 export async function loadSecurityRestorePoints(
@@ -313,48 +289,23 @@ export async function loadSecurityRestorePoints(
     };
   }
 
-  try {
-    const params: AgentSecurityRestorePointsListParams = {
-      request_meta: createRequestMeta(),
-      limit,
-      offset,
-      ...(taskId ? { task_id: taskId } : {}),
-    };
-    const response = await listSecurityRestorePointsDetailed(params);
+  const params: AgentSecurityRestorePointsListParams = {
+    request_meta: createRequestMeta(),
+    limit,
+    offset,
+    ...(taskId ? { task_id: taskId } : {}),
+  };
+  const response = await listSecurityRestorePointsDetailed(params);
 
-    return {
-      items: response.data.items,
-      page: response.data.page,
-      rpcContext: {
-        serverTime: response.meta?.server_time ?? null,
-        warnings: response.warnings,
-      },
-      source: "rpc",
-    };
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("security restore points", error);
-      const filteredItems = securityRestorePointsMock.items.filter((item) => !taskId || item.task_id === taskId);
-      const pagedItems = filteredItems.slice(offset, offset + limit);
-
-      return {
-        items: pagedItems,
-        page: {
-          has_more: offset + pagedItems.length < filteredItems.length,
-          limit,
-          offset,
-          total: filteredItems.length,
-        },
-        rpcContext: {
-          serverTime: null,
-          warnings: [],
-        },
-        source: "mock",
-      };
-    }
-
-    throw error;
-  }
+  return {
+    items: response.data.items,
+    page: response.data.page,
+    rpcContext: {
+      serverTime: response.meta?.server_time ?? null,
+      warnings: response.warnings,
+    },
+    source: "rpc",
+  };
 }
 
 export async function loadSecurityAuditRecords(
@@ -392,56 +343,28 @@ export async function loadSecurityAuditRecords(
     };
   }
 
-  try {
-    if (!normalizedTaskId) {
-      throw new Error("Security audit list requires task context in RPC mode.");
-    }
-
-    const params: AgentSecurityAuditListParams = {
-      request_meta: createRequestMeta(),
-      task_id: normalizedTaskId,
-      limit,
-      offset,
-    };
-    const response = await listSecurityAuditDetailed(params);
-
-    return {
-      items: response.data.items,
-      page: response.data.page,
-      rpcContext: {
-        serverTime: response.meta?.server_time ?? null,
-        warnings: response.warnings,
-      },
-      source: "rpc",
-      taskId: normalizedTaskId,
-    };
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("security audit list", error);
-      const filteredItems = normalizedTaskId
-        ? securityAuditMock.items.filter((item) => item.task_id === normalizedTaskId)
-        : securityAuditMock.items;
-      const pagedItems = filteredItems.slice(offset, offset + limit);
-
-      return {
-        items: pagedItems,
-        page: {
-          has_more: offset + pagedItems.length < filteredItems.length,
-          limit,
-          offset,
-          total: filteredItems.length,
-        },
-        rpcContext: {
-          serverTime: null,
-          warnings: [],
-        },
-        source: "mock",
-        taskId: normalizedTaskId,
-      };
-    }
-
-    throw error;
+  if (!normalizedTaskId) {
+    throw new Error("Security audit list requires task context in RPC mode.");
   }
+
+  const params: AgentSecurityAuditListParams = {
+    request_meta: createRequestMeta(),
+    task_id: normalizedTaskId,
+    limit,
+    offset,
+  };
+  const response = await listSecurityAuditDetailed(params);
+
+  return {
+    items: response.data.items,
+    page: response.data.page,
+    rpcContext: {
+      serverTime: response.meta?.server_time ?? null,
+      warnings: response.warnings,
+    },
+    source: "rpc",
+    taskId: normalizedTaskId,
+  };
 }
 
 export async function applySecurityRestorePoint(

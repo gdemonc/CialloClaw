@@ -4152,6 +4152,32 @@ test("security rpc service keeps transport failures visible instead of switching
   );
 });
 
+test("security detail rpc reads keep transport failures visible instead of switching to mock detail lists", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/safety/securityService.js");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadSecurityAuditRecords: (source: "rpc" | "mock", taskId?: string | null, options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityPendingApprovals: (source: "rpc" | "mock", options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityRestorePoints: (source: "rpc" | "mock", options?: { limit?: number; offset?: number; taskId?: string | null }) => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadSecurityPendingApprovals("rpc"), /transport is not wired/i);
+      await assert.rejects(() => service.loadSecurityRestorePoints("rpc", { taskId: "task_dashboard_001" }), /transport is not wired/i);
+      await assert.rejects(() => service.loadSecurityAuditRecords("rpc", "task_dashboard_001"), /transport is not wired/i);
+    },
+    {
+      listSecurityAuditDetailed: () => Promise.reject(transportError),
+      listSecurityPendingDetailed: () => Promise.reject(transportError),
+      listSecurityRestorePointsDetailed: () => Promise.reject(transportError),
+    },
+  );
+});
+
 test("mirror rpc service keeps transport failures visible instead of switching to mock overview data", async () => {
   const transportError = new Error("Named Pipe transport is not wired.");
 
