@@ -17,8 +17,8 @@ type StoredDashboardResultPageRouteState = DashboardResultPageRouteState & {
 };
 
 const dashboardResultPageStoragePrefix = "dashboard.result-page.";
-const dashboardResultPageStorageMaxAgeMs = 1000 * 60 * 60 * 6;
-const dashboardResultPageStorageMaxEntries = 12;
+const dashboardResultPageStorageMaxAgeMs = 1000 * 60 * 5;
+const dashboardResultPageStorageMaxEntries = 4;
 
 function getDashboardResultPageStorage() {
   if (typeof window === "undefined") {
@@ -103,7 +103,8 @@ function readStoredDashboardResultPageRouteState(token: string): DashboardResult
 
   const now = Date.now();
   pruneDashboardResultPageStorage(storage, now);
-  const raw = storage.getItem(`${dashboardResultPageStoragePrefix}${token}`);
+  const storageKey = `${dashboardResultPageStoragePrefix}${token}`;
+  const raw = storage.getItem(storageKey);
   if (!raw) {
     return null;
   }
@@ -111,8 +112,11 @@ function readStoredDashboardResultPageRouteState(token: string): DashboardResult
   try {
     const parsed = JSON.parse(raw) as Partial<StoredDashboardResultPageRouteState>;
     if (typeof parsed.url !== "string" || parsed.url.trim() === "") {
+      storage.removeItem(storageKey);
       return null;
     }
+
+    storage.removeItem(storageKey);
 
     return {
       taskId: typeof parsed.taskId === "string" ? parsed.taskId : null,
@@ -120,6 +124,7 @@ function readStoredDashboardResultPageRouteState(token: string): DashboardResult
       url: parsed.url.trim(),
     };
   } catch {
+    storage.removeItem(storageKey);
     return null;
   }
 }
