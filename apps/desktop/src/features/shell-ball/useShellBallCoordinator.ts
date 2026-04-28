@@ -11,7 +11,7 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { respondSecurityDetailed } from "@/rpc/methods";
-import { subscribeApprovalPending, subscribeDeliveryReady, subscribeTaskRuntime, subscribeTaskUpdated } from "@/rpc/subscriptions";
+import { subscribeAllTaskRuntime, subscribeApprovalPending, subscribeDeliveryReady, subscribeTaskUpdated } from "@/rpc/subscriptions";
 import { submitTextInput } from "@/services/agentInputService";
 import {
   SHELL_BALL_PINNED_BUBBLE_WINDOW_FRAME,
@@ -84,6 +84,11 @@ type QueuedApprovalPendingNotification = {
 
 type QueuedDeliveryReadyNotification = {
   deliveryResult: DeliveryResult;
+  taskId: string;
+};
+
+type QueuedRuntimeNotification = {
+  payload: ShellBallRuntimeNotification;
   taskId: string;
 };
 
@@ -709,7 +714,6 @@ export function applyShellBallBubbleAction(
 
 export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   const [bubbleItems, setBubbleItems] = useState(() => sortShellBallBubbleItemsByTimestamp(cloneShellBallBubbleItems(SHELL_BALL_LOCAL_BUBBLE_ITEMS)));
-  const [activeShellBallTaskId, setActiveShellBallTaskId] = useState<string | null>(null);
   const appendedVoiceBubbleSequenceRef = useRef(0);
   const handledFinalizedSpeechPayloadRef = useRef<string | null>(null);
   const bubbleTurnIndexRef = useRef(0);
@@ -758,6 +762,10 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   // the formal task id locally. Buffer them with the same task-scoped replay
   // path so shell-ball still shows the result bubble and open flow.
   const queuedDeliveryReadyNotificationsRef = useRef(new Map<string, QueuedDeliveryReadyNotification[]>());
+  // Runtime notifications can also race ahead of the submit response. Keep
+  // them task-scoped and replay them once shell-ball has registered the formal
+  // task id for the active conversation turn.
+  const queuedRuntimeNotificationsRef = useRef(new Map<string, QueuedRuntimeNotification[]>());
   // Only shell-ball submissions that are still waiting for their formal task id
   // are allowed to buffer approval notifications. This keeps unrelated desktop
   // approvals from lingering in shell-ball memory forever.
@@ -946,7 +954,6 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   ) => {
     shellBallTaskIdsRef.current.add(taskId);
     activeShellBallTaskIdRef.current = taskId;
-    setActiveShellBallTaskId((currentTaskId) => currentTaskId === taskId ? currentTaskId : taskId);
 
     if (turnIndex !== undefined) {
       shellBallTaskTurnIndexRef.current.set(taskId, turnIndex);
@@ -974,7 +981,14 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
     queuedDeliveryNotifications.forEach((notification) => {
       appendDeliveryReadyBubble(notification);
     });
-  }, [appendApprovalPendingBubble, appendDeliveryReadyBubble]);
+
+    const queuedRuntimeNotifications = queuedRuntimeNotificationsRef.current.get(taskId) ?? [];
+    queuedRuntimeNotificationsRef.current.delete(taskId);
+
+    queuedRuntimeNotifications.forEach((notification) => {
+      appendRuntimeObservationBubble(notification.taskId, notification.payload);
+    });
+  }, [appendApprovalPendingBubble, appendDeliveryReadyBubble, appendRuntimeObservationBubble]);
 
   const beginPendingShellBallTaskRegistration = useCallback(() => {
     pendingShellBallTaskRegistrationsRef.current += 1;
@@ -992,6 +1006,7 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
         queuedApprovalPendingNotificationsRef.current.clear();
         queuedTaskUpdatedNotificationsRef.current.clear();
         queuedDeliveryReadyNotificationsRef.current.clear();
+        queuedRuntimeNotificationsRef.current.clear();
       }
     };
   }, []);
@@ -1954,14 +1969,24 @@ export function useShellBallCoordinator(input: ShellBallCoordinatorInput) {
   }, [appendDeliveryReadyBubble]);
 
   useEffect(() => {
-    if (activeShellBallTaskId === null) {
-      return;
-    }
+    return subscribeAllTaskRuntime((payload) => {
+      if (!shellBallTaskIdsRef.current.has(payload.task_id)) {
+        if (pendingShellBallTaskRegistrationsRef.current === 0) {
+          return;
+        }
 
-    return subscribeTaskRuntime(activeShellBallTaskId, (payload) => {
-      appendRuntimeObservationBubble(activeShellBallTaskId, payload);
+        const queuedNotifications = queuedRuntimeNotificationsRef.current.get(payload.task_id) ?? [];
+        queuedNotifications.push({
+          payload,
+          taskId: payload.task_id,
+        });
+        queuedRuntimeNotificationsRef.current.set(payload.task_id, queuedNotifications);
+        return;
+      }
+
+      appendRuntimeObservationBubble(payload.task_id, payload);
     });
-  }, [activeShellBallTaskId, appendRuntimeObservationBubble]);
+  }, [appendRuntimeObservationBubble]);
 
   useEffect(() => {
     const currentWindow = getCurrentWindow();
