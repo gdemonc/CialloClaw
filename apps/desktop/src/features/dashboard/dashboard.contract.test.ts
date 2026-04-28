@@ -1432,6 +1432,7 @@ test("dashboard result-page navigation helper keeps recoverable route data in bo
     assert.doesNotMatch(persistedRoute, /example\.test/);
     assert.doesNotMatch(persistedRoute, /task_dashboard_001/);
     assert.doesNotMatch(persistedRoute, /Result\+page/);
+    assert.equal(storage.size, 1);
 
     assert.deepEqual(
       navigation.readDashboardResultPageLocation({
@@ -1444,6 +1445,7 @@ test("dashboard result-page navigation helper keeps recoverable route data in bo
         url: "https://example.test/result?page=summary",
       },
     );
+    assert.equal(storage.size, 1);
     assert.deepEqual(
       navigation.readDashboardResultPageLocation({
         search: persistedRoute.replace("/result", ""),
@@ -1483,6 +1485,67 @@ test("dashboard result-page navigation helper keeps recoverable route data in bo
   }
 });
 
+test("dashboard result-page navigation still opens immediately when session storage persistence fails", () => {
+  const navigation = loadDashboardResultPageNavigationModule();
+  const navigateCalls: Array<{ options?: { state?: unknown }; to: string }> = [];
+  const originalWindow = globalThis.window;
+  const sessionStorage = {
+    getItem() {
+      return null;
+    },
+    key() {
+      return null;
+    },
+    removeItem() {
+      return undefined;
+    },
+    setItem() {
+      throw new Error("quota exceeded");
+    },
+    get length() {
+      return 0;
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      sessionStorage,
+    },
+  });
+
+  try {
+    navigation.navigateToDashboardResultPage(
+      (to, options) => {
+        navigateCalls.push({ options, to });
+      },
+      {
+        taskId: "task_dashboard_001",
+        title: "Result page",
+        url: "https://example.test/result?page=summary",
+      },
+    );
+
+    assert.deepEqual(navigateCalls, [
+      {
+        options: {
+          state: {
+            taskId: "task_dashboard_001",
+            title: "Result page",
+            url: "https://example.test/result?page=summary",
+          },
+        },
+        to: "/result",
+      },
+    ]);
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
 test("dashboard result page keeps raw delivery URLs out of the visible query and embeds only sandboxed allowlisted pages", () => {
   const resultPageSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardResultPage.tsx"), "utf8");
   const navigationSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardResultPageNavigation.ts"), "utf8");
@@ -1494,6 +1557,8 @@ test("dashboard result page keeps raw delivery URLs out of the visible query and
   assert.doesNotMatch(navigationSource, /params\.set\("url"/);
   assert.doesNotMatch(navigationSource, /params\.set\("task_id"/);
   assert.match(navigationSource, /params\.get\("result_id"\)/);
+  assert.doesNotMatch(navigationSource, /dashboardResultPageStorageMaxAgeMs/);
+  assert.doesNotMatch(navigationSource, /dashboardResultPageStorageMaxEntries/);
 });
 
 test("rpc-only dashboard pages no longer expose mock-only page copy", () => {

@@ -17,8 +17,6 @@ type StoredDashboardResultPageRouteState = DashboardResultPageRouteState & {
 };
 
 const dashboardResultPageStoragePrefix = "dashboard.result-page.";
-const dashboardResultPageStorageMaxAgeMs = 1000 * 60 * 5;
-const dashboardResultPageStorageMaxEntries = 4;
 
 function getDashboardResultPageStorage() {
   if (typeof window === "undefined") {
@@ -45,7 +43,7 @@ function listDashboardResultPageStorageKeys(storage: Storage) {
   return keys.sort();
 }
 
-function pruneDashboardResultPageStorage(storage: Storage, now: number) {
+function pruneDashboardResultPageStorage(storage: Storage) {
   const keys = listDashboardResultPageStorageKeys(storage);
 
   for (const key of keys) {
@@ -57,22 +55,12 @@ function pruneDashboardResultPageStorage(storage: Storage, now: number) {
 
     try {
       const parsed = JSON.parse(raw) as Partial<StoredDashboardResultPageRouteState>;
-      if (typeof parsed.storedAt !== "number" || now - parsed.storedAt > dashboardResultPageStorageMaxAgeMs) {
+      if (typeof parsed.storedAt !== "number" || typeof parsed.url !== "string" || parsed.url.trim() === "") {
         storage.removeItem(key);
       }
     } catch {
       storage.removeItem(key);
     }
-  }
-
-  const remainingKeys = listDashboardResultPageStorageKeys(storage);
-
-  while (remainingKeys.length > dashboardResultPageStorageMaxEntries) {
-    const oldestKey = remainingKeys.shift();
-    if (!oldestKey) {
-      break;
-    }
-    storage.removeItem(oldestKey);
   }
 }
 
@@ -90,9 +78,13 @@ function storeDashboardResultPageRouteState(input: DashboardResultPageRouteState
     storedAt: now,
   };
 
-  pruneDashboardResultPageStorage(storage, now);
-  storage.setItem(key, JSON.stringify(value));
-  return token;
+  try {
+    pruneDashboardResultPageStorage(storage);
+    storage.setItem(key, JSON.stringify(value));
+    return token;
+  } catch {
+    return null;
+  }
 }
 
 function readStoredDashboardResultPageRouteState(token: string): DashboardResultPageRouteState | null {
@@ -101,8 +93,7 @@ function readStoredDashboardResultPageRouteState(token: string): DashboardResult
     return null;
   }
 
-  const now = Date.now();
-  pruneDashboardResultPageStorage(storage, now);
+  pruneDashboardResultPageStorage(storage);
   const storageKey = `${dashboardResultPageStoragePrefix}${token}`;
   const raw = storage.getItem(storageKey);
   if (!raw) {
