@@ -4657,6 +4657,22 @@ test("TaskDetailPanel defers the security summary until formal detail arrives", 
   assert.match(panelSource, /等待详情同步后展示风险、授权与恢复点/);
 });
 
+test("task detail fallback keeps operator controls available from the selected task preview", () => {
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+  const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
+  const actionBarSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskActionBar.tsx"), "utf8");
+  const mapperSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.mapper.ts"), "utf8");
+
+  assert.match(taskPageSource, /const selectedTask = selectedTaskPreview\?\.task \?\? null;/);
+  assert.match(taskPageSource, /taskControlMutation\.mutate\(\{ action, taskId: selectedTask\.task_id \}\)/);
+  assert.match(taskPageSource, /taskSteerMutation\.mutate\(\{ message, taskId: selectedTask\.task_id \}\)/);
+  assert.match(taskPageSource, /taskId: selectedTask\.task_id/);
+  assert.match(panelSource, /task \? <TaskActionBar detail=\{detail\} onAction=\{onAction\} task=\{task\} \/> : null/);
+  assert.doesNotMatch(panelSource, /detailData \? <TaskActionBar/);
+  assert.match(actionBarSource, /detail: AgentTaskDetailGetResult \| null;/);
+  assert.match(mapperSource, /export function getTaskPrimaryActions\(task: Task, detail: AgentTaskDetailGetResult \| null\)/);
+});
+
 test("TaskDetailPanel renders runtime summary fields from the formal detail payload", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 

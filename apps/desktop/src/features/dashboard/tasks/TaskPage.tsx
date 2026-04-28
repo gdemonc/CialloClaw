@@ -262,6 +262,7 @@ export function TaskPage() {
         task: selectedTaskItem.task,
       }
     : null);
+  const selectedTask = selectedTaskPreview?.task ?? null;
   const detailErrorMessage = taskDetailQuery.isError ? (taskDetailQuery.error instanceof Error ? taskDetailQuery.error.message : "任务详情请求失败") : null;
   const detailState = taskDetailQuery.isError ? "error" : taskDetailQuery.isPending ? "loading" : "ready";
   const artifactListQuery = useQuery({
@@ -504,7 +505,7 @@ export function TaskPage() {
   });
 
   async function handleOpenSafety() {
-    if (!detailData) {
+    if (!selectedTask) {
       return;
     }
 
@@ -519,7 +520,7 @@ export function TaskPage() {
         navigate(resolveDashboardRoutePath("safety"), {
           state: {
             source: "task-detail",
-            taskId: detailData.task.task_id,
+            taskId: selectedTask.task_id,
           },
         });
         return;
@@ -532,7 +533,7 @@ export function TaskPage() {
   }
 
   function handlePrimaryAction(action: "pause" | "resume" | "cancel" | "restart" | "open-safety") {
-    if (!detailData) {
+    if (!selectedTask) {
       return;
     }
 
@@ -541,31 +542,31 @@ export function TaskPage() {
       return;
     }
 
-    taskControlMutation.mutate({ action, taskId: detailData.task.task_id });
+    taskControlMutation.mutate({ action, taskId: selectedTask.task_id });
   }
 
   function handleOpenArtifact(artifactId: string) {
-    if (!detailData) {
+    if (!selectedTask) {
       return;
     }
 
-    artifactOpenMutation.mutate({ artifactId, taskId: detailData.task.task_id });
+    artifactOpenMutation.mutate({ artifactId, taskId: selectedTask.task_id });
   }
 
   function handleOpenLatestDelivery() {
-    if (!detailData) {
+    if (!selectedTask) {
       return;
     }
 
-    deliveryOpenMutation.mutate({ taskId: detailData.task.task_id });
+    deliveryOpenMutation.mutate({ taskId: selectedTask.task_id });
   }
 
   function handleSteerTask(message: string) {
-    if (!detailData) {
+    if (!selectedTask) {
       return;
     }
 
-    taskSteerMutation.mutate({ message, taskId: detailData.task.task_id });
+    taskSteerMutation.mutate({ message, taskId: selectedTask.task_id });
   }
 
   function handleApplyTaskEventFilters(nextFilters: TaskEventFilters) {

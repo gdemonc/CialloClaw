@@ -636,30 +636,6 @@ export function TaskDetailPanel({
 
               {detailData ? <TaskContextBlock detailData={detailData} /> : null}
 
-              <section className="task-detail-card">
-                <div className="task-detail-card__header task-detail-card__header--actionable">
-                  <div>
-                    <p className="task-detail-card__eyebrow">任务引导</p>
-                    <h3 className="task-detail-card__title">补充新的执行要求</h3>
-                  </div>
-                </div>
-                <p className="task-detail-card__hint">这会调用正式 `agent.task.steer`，把补充说明排入当前任务后续执行。</p>
-                <div className="task-detail-steer-box">
-                  <textarea
-                    className="task-detail-steer-box__input"
-                    disabled={!canSteerTask || steeringPending}
-                    onChange={(event) => setSteeringMessage(event.target.value)}
-                    placeholder={canSteerTask ? "例如：保留现有结果，再额外补一份简短结论。" : "当前任务已结束，不能继续补充要求。"}
-                    rows={3}
-                    value={steeringMessage}
-                  />
-                  <button className="task-detail-card__action" disabled={!canSteerTask || steeringPending || !steeringMessage.trim()} onClick={handleSubmitSteering} type="button">
-                    <SendHorizonal className="h-4 w-4" />
-                    {steeringPending ? "提交中..." : "追加要求"}
-                  </button>
-                </div>
-              </section>
-
               {renderRuntimeEventsSection()}
 
               <section className="task-detail-card">
@@ -753,6 +729,30 @@ export function TaskDetailPanel({
               )}
                 </>
               ) : null}
+
+              <section className="task-detail-card">
+                <div className="task-detail-card__header task-detail-card__header--actionable">
+                  <div>
+                    <p className="task-detail-card__eyebrow">任务引导</p>
+                    <h3 className="task-detail-card__title">补充新的执行要求</h3>
+                  </div>
+                </div>
+                <p className="task-detail-card__hint">这会调用正式 `agent.task.steer`，把补充说明排入当前任务后续执行。</p>
+                <div className="task-detail-steer-box">
+                  <textarea
+                    className="task-detail-steer-box__input"
+                    disabled={!canSteerTask || steeringPending}
+                    onChange={(event) => setSteeringMessage(event.target.value)}
+                    placeholder={canSteerTask ? "例如：保留现有结果，再额外补一份简短结论。" : "当前任务已结束，不能继续补充要求。"}
+                    rows={3}
+                    value={steeringMessage}
+                  />
+                  <button className="task-detail-card__action" disabled={!canSteerTask || steeringPending || !steeringMessage.trim()} onClick={handleSubmitSteering} type="button">
+                    <SendHorizonal className="h-4 w-4" />
+                    {steeringPending ? "提交中..." : "追加要求"}
+                  </button>
+                </div>
+              </section>
             </>
           ) : (
             <>
@@ -828,7 +828,7 @@ export function TaskDetailPanel({
         </div>
       </ScrollArea>
 
-      {detailData ? <TaskActionBar detailData={detailData} onAction={onAction} /> : null}
+      {task ? <TaskActionBar detail={detail} onAction={onAction} task={task} /> : null}
     </motion.section>
   );
 }
