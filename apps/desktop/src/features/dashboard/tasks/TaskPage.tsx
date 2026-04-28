@@ -444,8 +444,11 @@ export function TaskPage() {
     },
   });
 
-  async function handleResolvedOpen(result: Awaited<ReturnType<typeof openTaskArtifactForTask>> | Awaited<ReturnType<typeof openTaskDeliveryForTask>>) {
-    const plan = resolveTaskOpenExecutionPlan(result);
+  async function handleResolvedOpen(
+    result: Awaited<ReturnType<typeof openTaskArtifactForTask>> | Awaited<ReturnType<typeof openTaskDeliveryForTask>>,
+    fallbackTaskId: string | null,
+  ) {
+    const plan = resolveTaskOpenExecutionPlan(result, fallbackTaskId);
     const sameTaskMessage = describeTaskOpenResultForCurrentTask(plan, selectedTaskId);
     if (sameTaskMessage) {
       setDetailOpen(true);
@@ -471,8 +474,8 @@ export function TaskPage() {
 
   const artifactOpenMutation = useMutation({
     mutationFn: ({ artifactId, taskId }: { artifactId: string; taskId: string }) => openTaskArtifactForTask(taskId, artifactId, dataMode),
-    onSuccess: async (result) => {
-      await handleResolvedOpen(result);
+    onSuccess: async (result, variables) => {
+      await handleResolvedOpen(result, variables.taskId);
     },
     onError: (error) => {
       showFeedback(error instanceof Error ? `打开成果失败：${error.message}` : "打开成果失败，请稍后再试。");
@@ -481,8 +484,8 @@ export function TaskPage() {
 
   const deliveryOpenMutation = useMutation({
     mutationFn: ({ artifactId, taskId }: { artifactId?: string; taskId: string }) => openTaskDeliveryForTask(taskId, artifactId, dataMode),
-    onSuccess: async (result) => {
-      await handleResolvedOpen(result);
+    onSuccess: async (result, variables) => {
+      await handleResolvedOpen(result, variables.taskId);
     },
     onError: (error) => {
       showFeedback(error instanceof Error ? `打开结果失败：${error.message}` : "打开结果失败，请稍后再试。");
