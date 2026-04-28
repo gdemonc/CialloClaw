@@ -490,13 +490,24 @@ function loadDashboardSettingsMutationModule(rpcMethods?: DashboardContractRpcMe
     delete requireFn.cache[snapshotModulePath];
 
     return requireFn(modulePath) as {
+      formatDashboardSettingsMutationFeedback: (result: {
+        applyMode: string;
+        needRestart: boolean;
+        persisted: boolean;
+        readbackWarning: string | null;
+      }, subject: string) => string;
       updateDashboardSettings: (patch: Record<string, unknown>, source?: "rpc") => Promise<{
         applyMode: string;
         needRestart: boolean;
         persisted: boolean;
+        readbackWarning: string | null;
         source: string;
         updatedKeys: string[];
         snapshot: {
+          rpcContext: {
+            serverTime: string | null;
+            warnings: string[];
+          };
           source: string;
           settings: {
             models: {
@@ -1921,6 +1932,7 @@ test("dashboard settings mutation persists rpc-effective settings into the local
     assert.equal(result.applyMode, "immediate");
     assert.equal(result.needRestart, false);
     assert.equal(result.persisted, true);
+    assert.equal(result.readbackWarning, null);
     assert.deepEqual(result.updatedKeys.sort(), [
       "general.download.ask_before_save_each_file",
       "memory.enabled",
@@ -1938,6 +1950,69 @@ test("dashboard settings mutation persists rpc-effective settings into the local
     assert.equal(persisted.settings.memory.lifecycle, "session");
     assert.equal(persisted.settings.general.download.ask_before_save_each_file, false);
     assert.equal(persisted.settings.models.budget_auto_downgrade, false);
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
+test("dashboard settings mutation keeps successful writes visible when settings readback fails", async () => {
+  const { loadSettings } = loadSettingsServiceModule();
+  const { formatDashboardSettingsMutationFeedback, updateDashboardSettings } = loadDashboardSettingsMutationModule({
+    updateSettings: async () => ({
+      apply_mode: "immediate",
+      need_restart: false,
+      updated_keys: ["memory.enabled"],
+      effective_settings: {
+        memory: {
+          enabled: false,
+        },
+      },
+    }),
+    getSettingsDetailed: async () => {
+      throw new Error("settings readback timed out");
+    },
+  });
+  const originalWindow = globalThis.window;
+  const storage = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      storage.set(key, value);
+    },
+    removeItem(key: string) {
+      storage.delete(key);
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      localStorage,
+    },
+  });
+
+  try {
+    const result = await updateDashboardSettings({
+      memory: {
+        enabled: false,
+      },
+    });
+
+    assert.equal(result.persisted, true);
+    assert.equal(result.source, "rpc");
+    assert.equal(result.readbackWarning, "settings readback timed out");
+    assert.equal(result.snapshot.settings.memory.enabled, false);
+    assert.deepEqual(result.snapshot.rpcContext.warnings, ["settings readback timed out"]);
+    assert.equal(loadSettings().settings.memory.enabled, false);
+    assert.match(
+      formatDashboardSettingsMutationFeedback(result, "记忆开关"),
+      /设置已写入，但 settings\.get 回读失败：settings readback timed out。当前先展示刚保存的本地快照。/,
+    );
   } finally {
     if (originalWindow === undefined) {
       Reflect.deleteProperty(globalThis, "window");

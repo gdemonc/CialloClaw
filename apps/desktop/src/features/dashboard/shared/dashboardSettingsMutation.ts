@@ -1,6 +1,6 @@
 import type { AgentSettingsUpdateParams, ApplyMode, RequestMeta } from "@cialloclaw/protocol";
 import { updateSettings as requestUpdateSettings } from "@/rpc/methods";
-import { loadSettings, saveSettings, type DesktopSettings } from "@/services/settingsService";
+import { loadSettings, saveSettings, toProtocolSettingsSnapshot, type DesktopSettings } from "@/services/settingsService";
 import {
   loadDashboardSettingsSnapshot,
   type DashboardSettingsSnapshotData,
@@ -82,6 +82,7 @@ export type DashboardSettingsMutationResult = {
   updatedKeys: string[];
   source: DashboardSettingsSource;
   persisted: boolean;
+  readbackWarning: string | null;
 };
 
 function createRequestMeta(): RequestMeta {
@@ -169,6 +170,29 @@ function persistPatchedSettings(patch: DashboardSettingsPatch) {
   return nextSettings;
 }
 
+/**
+ * Builds one settings snapshot from the just-persisted desktop settings when
+ * the formal `agent.settings.get` readback fails after a successful write.
+ *
+ * @param persistedSettings The local desktop settings that already include the
+ * just-applied effective settings returned by `agent.settings.update`.
+ * @param warning The readback failure message that should stay visible in UI.
+ * @returns A snapshot aligned with the saved settings plus a readback warning.
+ */
+function buildPersistedSettingsSnapshot(
+  persistedSettings: DesktopSettings,
+  warning: string,
+): DashboardSettingsSnapshotData {
+  return {
+    settings: toProtocolSettingsSnapshot(persistedSettings.settings),
+    source: "rpc",
+    rpcContext: {
+      serverTime: null,
+      warnings: [warning],
+    },
+  };
+}
+
 function inferDashboardSettingsRefreshScope(patch: DashboardSettingsPatch): DashboardSettingsSnapshotScope {
   const touchedScopes = new Set<DashboardSettingsSnapshotScope>();
 
@@ -209,17 +233,34 @@ export async function updateDashboardSettings(
   const response = await requestUpdateSettings(buildRpcSettingsPatch(patch));
   const refreshScope = inferDashboardSettingsRefreshScope(patch);
 
-  persistPatchedSettings(response.effective_settings as DashboardSettingsPatch);
-  const snapshot = await loadDashboardSettingsSnapshot("rpc", refreshScope);
+  const persistedSettings = persistPatchedSettings(response.effective_settings as DashboardSettingsPatch);
 
-  return {
-    snapshot,
-    applyMode: response.apply_mode,
-    needRestart: response.need_restart,
-    updatedKeys: response.updated_keys,
-    source: snapshot.source,
-    persisted: true,
-  };
+  try {
+    const snapshot = await loadDashboardSettingsSnapshot("rpc", refreshScope);
+
+    return {
+      snapshot,
+      applyMode: response.apply_mode,
+      needRestart: response.need_restart,
+      updatedKeys: response.updated_keys,
+      source: snapshot.source,
+      persisted: true,
+      readbackWarning: null,
+    };
+  } catch (error) {
+    const readbackWarning = error instanceof Error ? error.message : "settings readback unavailable";
+    const snapshot = buildPersistedSettingsSnapshot(persistedSettings, readbackWarning);
+
+    return {
+      snapshot,
+      applyMode: response.apply_mode,
+      needRestart: response.need_restart,
+      updatedKeys: response.updated_keys,
+      source: snapshot.source,
+      persisted: true,
+      readbackWarning,
+    };
+  }
 }
 
 /**
@@ -234,13 +275,17 @@ export function formatDashboardSettingsMutationFeedback(result: DashboardSetting
     return `${subject}未保存，当前仅显示本地快照。`;
   }
 
+  const readbackSuffix = result.readbackWarning
+    ? ` 设置已写入，但 settings.get 回读失败：${result.readbackWarning}。当前先展示刚保存的本地快照。`
+    : "";
+
   if (result.needRestart || result.applyMode === "restart_required") {
-    return `${subject}已保存，重启桌面端后生效。`;
+    return `${subject}已保存，重启桌面端后生效。${readbackSuffix}`;
   }
 
   if (result.applyMode === "next_task_effective") {
-    return `${subject}已保存，将在下一任务周期生效。`;
+    return `${subject}已保存，将在下一任务周期生效。${readbackSuffix}`;
   }
 
-  return `${subject}已更新。`;
+  return `${subject}已更新。${readbackSuffix}`;
 }
