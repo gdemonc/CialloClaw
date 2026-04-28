@@ -82,6 +82,15 @@ function loadDashboardSafetyNavigationModule() {
   );
 }
 
+function loadDashboardResultPageNavigationModule() {
+  return withDesktopAliasRuntime((requireFn) =>
+    requireFn(resolve(desktopRoot, "src/features/dashboard/shared/dashboardResultPageNavigation.ts")) as {
+      buildDashboardResultPageRouteState: (input: { taskId: string | null; title: string | null; url: string }) => unknown;
+      readDashboardResultPageRouteState: (value: unknown) => { taskId: string | null; title: string | null; url: string } | null;
+    },
+  );
+}
+
 function loadDashboardTaskDetailNavigationSource() {
   return readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardTaskDetailNavigation.ts"), "utf8");
 }
@@ -1372,6 +1381,25 @@ test("safety page stays RPC-only instead of exposing a page-level mock toggle", 
   assert.doesNotMatch(securityAppSource, /loadDashboardDataMode\("safety"\)/);
   assert.doesNotMatch(securityAppSource, /saveDashboardDataMode\("safety"\)/);
   assert.doesNotMatch(securityAppSource, /setDataMode\(/);
+});
+test("dashboard result-page navigation helper accepts only explicit route state", () => {
+  const navigation = loadDashboardResultPageNavigationModule();
+
+  assert.deepEqual(
+    navigation.readDashboardResultPageRouteState(
+      navigation.buildDashboardResultPageRouteState({
+        taskId: "task_dashboard_001",
+        title: "Result page",
+        url: "https://example.test/result",
+      }),
+    ),
+    {
+      taskId: "task_dashboard_001",
+      title: "Result page",
+      url: "https://example.test/result",
+    },
+  );
+  assert.equal(navigation.readDashboardResultPageRouteState({ title: "Missing url" }), null);
 });
 test("dashboard home entrance labels stay hidden until hover or focus", () => {
   const dashboardHomeStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.css"), "utf8");
@@ -3876,6 +3904,8 @@ test("task page adopts rpc output helpers directly in the task detail panel", ()
   const taskDetailSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
   const taskOutputSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskOutput.service.ts"), "utf8");
   const taskDetailNavigationSource = loadDashboardTaskDetailNavigationSource();
+  const notePageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/NotePage.tsx"), "utf8");
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
 
   assert.match(taskPageSource, /buildDashboardTaskArtifactQueryKey/);
   assert.match(taskPageSource, /loadTaskArtifactPage/);
@@ -3884,8 +3914,12 @@ test("task page adopts rpc output helpers directly in the task detail panel", ()
   assert.match(taskPageSource, /readDashboardTaskDetailRouteState/);
   assert.match(taskPageSource, /subscribeDeliveryReady\(\(payload\) =>/);
   assert.match(taskPageSource, /payload\.task_id/);
+  assert.match(taskPageSource, /navigateToDashboardResultPage/);
+  assert.match(taskPageSource, /onOpenResultPage:/);
   assert.doesNotMatch(taskPageSource, /\["dashboard", "tasks", "artifacts"/);
   assert.doesNotMatch(taskPageSource, /TaskFilesSheet/);
+  assert.match(notePageSource, /navigateToDashboardResultPage/);
+  assert.match(notePageSource, /onOpenResultPage:/);
 
   assert.doesNotMatch(taskDetailSource, /当前协议尚未提供稳定的 artifact\.open 能力/);
   assert.match(taskDetailSource, /onOpenArtifact/);
@@ -3897,7 +3931,9 @@ test("task page adopts rpc output helpers directly in the task detail panel", ()
   assert.doesNotMatch(taskOutputSource, /logRpcMockFallback/);
   assert.match(taskOutputSource, /isAllowedTaskOpenUrl/);
   assert.match(taskOutputSource, /onOpenTaskDetail/);
+  assert.match(taskOutputSource, /onOpenResultPage/);
   assert.match(taskDetailNavigationSource, /requestDashboardTaskDetailOpen/);
+  assert.match(dashboardRootSource, /<DashboardResultPage \/>/);
 });
 
 test("dashboard task-detail routing deduplicates retry request ids and accepts tasks outside loaded buckets", () => {
