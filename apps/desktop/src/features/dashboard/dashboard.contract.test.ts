@@ -3937,6 +3937,13 @@ test("note rpc service keeps transport failures visible instead of switching to 
   );
 });
 
+test("note rpc service derives experience from protocol note data instead of mock fixtures", () => {
+  const noteServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/notePage.service.ts"), "utf8");
+
+  assert.match(noteServiceSource, /function mapItems\(items: TodoItem\[\]\)/);
+  assert.doesNotMatch(noteServiceSource, /getMockNoteExperience\(/);
+});
+
 test("security rpc service keeps transport failures visible instead of switching to mock governance data", async () => {
   const transportError = new Error("Named Pipe transport is not wired.");
 

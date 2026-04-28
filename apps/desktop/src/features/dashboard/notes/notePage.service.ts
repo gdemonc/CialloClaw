@@ -11,7 +11,7 @@ import type {
 } from "@cialloclaw/protocol";
 import { openDesktopLocalPath, revealDesktopLocalPath } from "@/platform/desktopLocalPath";
 import { convertNotepadToTask, listNotepad, updateNotepad } from "@/rpc/methods";
-import { getMockNoteBuckets, getMockNoteExperience, runMockConvertNoteToTask, runMockUpdateNote } from "./notePage.mock";
+import { getMockNoteBuckets, runMockConvertNoteToTask, runMockUpdateNote } from "./notePage.mock";
 import type { NoteConvertOutcome, NoteDetailExperience, NoteListItem, NoteResource, NoteUpdateOutcome, SourceNoteDocument } from "./notePage.types";
 
 const NOTEPAD_RPC_TIMEOUT_MS = 2_500;
@@ -324,7 +324,7 @@ function createFallbackExperience(item: TodoItem): NoteDetailExperience {
 
 function mapItems(items: TodoItem[]): NoteListItem[] {
   return items.map((item) => ({
-    experience: getMockNoteExperience(item.item_id) ?? createFallbackExperience(item),
+    experience: createFallbackExperience(item),
     item,
   }));
 }
