@@ -4323,6 +4323,18 @@ test("security detail rpc reads keep transport failures visible instead of switc
   );
 });
 
+test("security service no longer imports governance mocks into product runtime", () => {
+  const securityServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/securityService.ts"), "utf8");
+
+  assert.doesNotMatch(securityServiceSource, /securitySummaryMock/);
+  assert.doesNotMatch(securityServiceSource, /securityPendingMock/);
+  assert.doesNotMatch(securityServiceSource, /securityRestorePointsMock/);
+  assert.doesNotMatch(securityServiceSource, /securityAuditMock/);
+  assert.doesNotMatch(securityServiceSource, /buildMockRespondResult/);
+  assert.doesNotMatch(securityServiceSource, /buildMockRestoreApplyResult/);
+  assert.doesNotMatch(securityServiceSource, /getInitialSecurityModuleData/);
+});
+
 test("mirror rpc service keeps transport failures visible instead of switching to mock overview data", async () => {
   const transportError = new Error("Named Pipe transport is not wired.");
 
