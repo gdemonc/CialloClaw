@@ -1273,6 +1273,17 @@ test("safety page stays RPC-only instead of exposing a page-level mock toggle", 
   assert.doesNotMatch(securityAppSource, /setDataMode\(/);
 });
 
+test("rpc-only dashboard pages no longer expose mock-only page copy", () => {
+  const notePageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/NotePage.tsx"), "utf8");
+  const mirrorAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/MirrorApp.tsx"), "utf8");
+  const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
+
+  assert.doesNotMatch(notePageSource, /Mock 模式下不会读写真实 markdown 便签/);
+  assert.doesNotMatch(notePageSource, /Mock 模式下不会执行真实巡检/);
+  assert.doesNotMatch(mirrorAppSource, /本地 mock 示例数据/);
+  assert.doesNotMatch(securityAppSource, /sourceBadgeLabel = moduleData\.source/);
+});
+
 test("dashboard home entrance labels stay hidden until hover or focus", () => {
   const dashboardHomeStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.css"), "utf8");
   const entranceOrbSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/components/DashboardEntranceOrb.tsx"), "utf8");

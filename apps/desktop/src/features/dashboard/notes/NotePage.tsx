@@ -459,10 +459,6 @@ export function NotePage() {
     [sourceNoteIndexData],
   );
   const sourceNoteAvailabilityMessage = useMemo(() => {
-    if (dataMode !== "rpc") {
-      return "Mock 模式下不会读写真实 markdown 便签。";
-    }
-
     if (!desktopSourceNotesAvailable) {
       return "当前运行环境不支持桌面端 markdown 便签桥接。";
     }
@@ -480,7 +476,7 @@ export function NotePage() {
     }
 
     return null;
-  }, [dataMode, desktopSourceNotesAvailable, sourceConfigQuery.error, sourceConfigQuery.isPending, taskSourceRoots.length]);
+  }, [desktopSourceNotesAvailable, sourceConfigQuery.error, sourceConfigQuery.isPending, taskSourceRoots.length]);
   const sourceNotesLoading = sourceConfigQuery.isFetching || sourceNotesQuery.isFetching;
 
   const pageStyle = {
@@ -599,11 +595,6 @@ export function NotePage() {
   }
 
   async function refreshInspection(reason: string, prefix?: string) {
-    if (dataMode !== "rpc") {
-      showFeedback("Mock 模式下不会执行真实巡检。");
-      return;
-    }
-
     if (taskSourceRoots.length === 0) {
       const message = "请先在设置面板里配置任务来源目录。";
       setSourceNoteSyncMessage(message);

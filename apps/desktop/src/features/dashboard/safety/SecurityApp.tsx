@@ -1175,8 +1175,8 @@ export function SecurityApp() {
     );
   }
 
-  const sourceBadgeLabel = moduleData.source === "rpc" ? "RPC" : "MOCK";
-  const sourceBadgeColor = moduleData.source === "rpc" ? "green" : "amber";
+  const sourceBadgeLabel = "RPC";
+  const sourceBadgeColor = "green" as const;
 
   const handleRespond = async (approval: ApprovalRequest, decision: ApprovalDecision, rememberRule: boolean) => {
     setActionError(null);

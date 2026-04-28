@@ -856,11 +856,7 @@ export function MirrorApp() {
   const profileView = buildMirrorProfileView(mirrorData.profileItems);
 
   const { overview } = mirrorData;
-  const dataSourceDetails = [
-    mirrorData.source === "rpc"
-      ? "当前展示来自本地 JSON-RPC 服务。"
-      : "当前展示的是本地 mock 示例数据。",
-  ];
+  const dataSourceDetails = ["当前展示来自本地 JSON-RPC 服务。"];
 
   if (mirrorData.rpcContext.serverTime) {
     dataSourceDetails.push(`服务端时间 ${formatMirrorDateTime(mirrorData.rpcContext.serverTime)}`);
@@ -882,10 +878,7 @@ export function MirrorApp() {
     dataSourceDetails.push(`error：${loadError}`);
   }
 
-  const dataSourceBadge =
-    mirrorData.source === "rpc"
-      ? { label: "LIVE", tone: "green" as const, copy: dataSourceDetails.join(" · ") }
-      : { label: "MOCK", tone: "processing" as const, copy: dataSourceDetails.join(" · ") };
+  const dataSourceBadge = { label: "LIVE", tone: "green" as const, copy: dataSourceDetails.join(" · ") };
   const latestMemoryReference = overview.memory_references[0] ?? null;
   const latestConversation = mirrorData.conversations[0] ?? null;
 
