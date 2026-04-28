@@ -1253,6 +1253,16 @@ test("note page stays RPC-only instead of exposing a page-level mock toggle", ()
   assert.doesNotMatch(notePageSource, /setDataMode\(/);
 });
 
+test("mirror page stays RPC-only instead of exposing a page-level mock toggle", () => {
+  const mirrorAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/MirrorApp.tsx"), "utf8");
+
+  assert.match(mirrorAppSource, /const dataMode: MirrorOverviewSource = "rpc";/);
+  assert.doesNotMatch(mirrorAppSource, /DashboardMockToggle/);
+  assert.doesNotMatch(mirrorAppSource, /loadDashboardDataMode\("memory"\)/);
+  assert.doesNotMatch(mirrorAppSource, /saveDashboardDataMode\("memory"\)/);
+  assert.doesNotMatch(mirrorAppSource, /setDataMode\(/);
+});
+
 test("dashboard home entrance labels stay hidden until hover or focus", () => {
   const dashboardHomeStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.css"), "utf8");
   const entranceOrbSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/components/DashboardEntranceOrb.tsx"), "utf8");
