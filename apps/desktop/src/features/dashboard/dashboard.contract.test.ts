@@ -4343,6 +4343,14 @@ test("mirror rpc service keeps transport failures visible instead of switching t
   );
 });
 
+test("mirror service no longer imports overview mock data into product runtime", () => {
+  const mirrorServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/mirrorService.ts"), "utf8");
+
+  assert.doesNotMatch(mirrorServiceSource, /mirrorOverviewMock/);
+  assert.doesNotMatch(mirrorServiceSource, /buildFallbackOverview/);
+  assert.doesNotMatch(mirrorServiceSource, /getInitialMirrorOverviewData/);
+});
+
 test("dashboard home rpc service keeps transport failures visible instead of switching to mock orbit data", async () => {
   const transportError = new Error("Named Pipe transport is not wired.");
 
