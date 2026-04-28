@@ -16,7 +16,7 @@ import { getMockTaskDetail } from "./taskPage.mock";
 export type TaskOutputDataMode = "rpc" | "mock";
 
 export type TaskOpenExecutionPlan = {
-  mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
+  mode: "task_detail" | "open_result_page" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
   taskId: string | null;
   path: string | null;
   url: string | null;
@@ -27,6 +27,11 @@ export type TaskOpenExecutionOptions = {
   onOpenTaskDetail?: (input: {
     plan: TaskOpenExecutionPlan;
     taskId: string;
+  }) => Promise<string | void> | string | void;
+  onOpenResultPage?: (input: {
+    plan: TaskOpenExecutionPlan;
+    taskId: string | null;
+    url: string;
   }) => Promise<string | void> | string | void;
 };
 
@@ -157,9 +162,19 @@ export function resolveTaskOpenExecutionPlan(result: AgentTaskArtifactOpenResult
     };
   }
 
+  if (result.open_action === "result_page" && url) {
+    return {
+      feedback: "已打开结果页。",
+      mode: "open_result_page",
+      path,
+      taskId,
+      url,
+    };
+  }
+
   if (url) {
     return {
-      feedback: result.open_action === "result_page" ? "已打开结果页。" : "已打开链接。",
+      feedback: "已打开链接。",
       mode: "open_url",
       path,
       taskId,
@@ -220,6 +235,25 @@ export async function performTaskOpenExecution(plan: TaskOpenExecutionPlan, opti
     return typeof detailFeedback === "string" && detailFeedback.trim() !== ""
       ? detailFeedback
       : plan.feedback;
+  }
+
+  if (plan.mode === "open_result_page" && plan.url) {
+    if (!isAllowedTaskOpenUrl(plan.url)) {
+      return "已拦截不受支持的结果页链接。";
+    }
+
+    const resultPageFeedback = await options.onOpenResultPage?.({
+      plan,
+      taskId: plan.taskId,
+      url: plan.url,
+    });
+
+    if (typeof resultPageFeedback === "string" && resultPageFeedback.trim() !== "") {
+      return resultPageFeedback;
+    }
+
+    window.open(plan.url, "_blank", "noopener,noreferrer");
+    return plan.feedback;
   }
 
   if (plan.mode === "open_url" && plan.url) {
