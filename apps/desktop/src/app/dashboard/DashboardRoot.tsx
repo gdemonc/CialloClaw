@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { DashboardVoiceField } from "@/features/dashboard/home/components/DashboardVoiceField";
 import {
-  getDashboardHomeFallbackData,
   loadDashboardHomeData,
   submitDashboardHomeRecommendationFeedback,
 } from "@/features/dashboard/home/dashboardHome.service";
@@ -91,7 +90,7 @@ function DashboardRoutes() {
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const dashboardHomeData = dashboardHomeQuery.data ?? getDashboardHomeFallbackData();
+  const dashboardHomeData = dashboardHomeQuery.data ?? null;
   const recommendationFeedbackMutation = useMutation({
     mutationFn: ({ feedback, recommendationId }: { feedback: "positive" | "negative"; recommendationId: string }) =>
       submitDashboardHomeRecommendationFeedback(recommendationId, feedback),
@@ -238,6 +237,25 @@ function DashboardRoutes() {
     recommendationFeedbackMutation.mutate({ feedback, recommendationId });
   };
 
+  const dashboardHomeRoute = dashboardHomeData
+    ? (
+        <DashboardHome
+          data={dashboardHomeData}
+          onRecommendationFeedback={handleRecommendationFeedback}
+          onVoiceOpen={() => setVoiceOpen(true)}
+          voiceOpen={voiceOpen}
+        />
+      )
+    : (
+        <DashboardHomeStatusShell
+          title={dashboardHomeQuery.isError ? "首页同步失败" : "正在同步首页轨道"}
+          message={dashboardHomeQuery.isError
+            ? (dashboardHomeQuery.error instanceof Error ? dashboardHomeQuery.error.message : "首页总览请求失败")
+            : "正在连接任务、便签、镜子与安全模块的正式摘要。"}
+          onRetry={dashboardHomeQuery.isError ? () => void dashboardHomeQuery.refetch() : null}
+        />
+      );
+
   return (
     <div className={cn("dashboard-app", isOpening && "is-opening")}>
       <AnimatePresence mode="wait">
@@ -252,14 +270,7 @@ function DashboardRoutes() {
         >
           <Routes location={location}>
             <Route
-              element={
-                <DashboardHome
-                  data={dashboardHomeData}
-                  onRecommendationFeedback={handleRecommendationFeedback}
-                  onVoiceOpen={() => setVoiceOpen(true)}
-                  voiceOpen={voiceOpen}
-                />
-              }
+              element={dashboardHomeRoute}
               path={resolveDashboardRoutePath("home")}
             />
             <Route element={<TasksPage />} path={`${resolveDashboardModuleRoutePath("tasks")}/*`} />
@@ -276,9 +287,32 @@ function DashboardRoutes() {
         onRecommendationConfirm={(recommendationId) => {
           recommendationFeedbackMutation.mutate({ feedback: "positive", recommendationId });
         }}
-        sequences={dashboardHomeData.voiceSequences}
+        sequences={dashboardHomeData?.voiceSequences ?? []}
       />
     </div>
+  );
+}
+
+type DashboardHomeStatusShellProps = {
+  title: string;
+  message: string;
+  onRetry: (() => void) | null;
+};
+
+function DashboardHomeStatusShell({ title, message, onRetry }: DashboardHomeStatusShellProps) {
+  return (
+    <main className="dashboard-home dashboard-home--status">
+      <section className="dashboard-home__status-card">
+        <p className="dashboard-page__eyebrow">dashboard</p>
+        <h1 className="dashboard-home__status-title">{title}</h1>
+        <p className="dashboard-home__status-copy">{message}</p>
+        {onRetry ? (
+          <button className="dashboard-home__status-action" onClick={onRetry} type="button">
+            重试
+          </button>
+        ) : null}
+      </section>
+    </main>
   );
 }
 

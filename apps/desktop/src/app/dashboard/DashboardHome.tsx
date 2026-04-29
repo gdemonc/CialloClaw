@@ -5,7 +5,7 @@ import { Keyboard, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import ClickSpark from "@/components/ClickSpark";
 import { dashboardDecorOrbs, dashboardEntranceOrbs, dashboardModuleColors } from "@/features/dashboard/home/dashboardHome.config";
-import { getDashboardHomeFallbackData, type DashboardHomeData } from "@/features/dashboard/home/dashboardHome.service";
+import type { DashboardHomeData } from "@/features/dashboard/home/dashboardHome.service";
 import type { DashboardHomeEventStateKey, DashboardHomeModuleKey, DashboardHomeSummonEvent } from "@/features/dashboard/home/dashboardHome.types";
 import { DashboardCenterOrb } from "@/features/dashboard/home/components/DashboardCenterOrb";
 import { DashboardDecorOrb } from "@/features/dashboard/home/components/DashboardDecorOrb";
@@ -50,14 +50,14 @@ function getCenterState(activeStateKey: DashboardHomeEventStateKey | null) {
 }
 
 type DashboardHomeProps = {
-  data?: DashboardHomeData;
+  data: DashboardHomeData;
   onVoiceOpen: () => void;
   onRecommendationFeedback?: (recommendationId: string, feedback: "positive" | "negative") => void;
   voiceOpen: boolean;
 };
 
 export function DashboardHome({
-  data = getDashboardHomeFallbackData(),
+  data,
   onVoiceOpen,
   onRecommendationFeedback,
   voiceOpen,

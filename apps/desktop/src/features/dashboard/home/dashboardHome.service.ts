@@ -14,7 +14,6 @@ import {
   getRecommendations,
   submitRecommendationFeedback,
 } from "@/rpc/methods";
-import { isRpcChannelUnavailable, logRpcMockFallback } from "@/rpc/fallback";
 import {
   dashboardHomeStateGroups,
   dashboardHomeStates,
@@ -790,77 +789,59 @@ function buildDashboardHomeData(input: {
 }
 
 export async function loadDashboardHomeData(): Promise<DashboardHomeData> {
-  try {
-    const [overview, tasksModule, notesModule, memoryModule, safetyModule, recommendations] = await Promise.all([
-      getDashboardOverview({
-        focus_mode: false,
-        include: ["focus_summary", "trust_summary", "quick_actions", "high_value_signal"],
-        request_meta: createRequestMeta("dashboard_overview"),
-      }),
-      getDashboardModule({
-        module: "tasks",
-        request_meta: createRequestMeta("dashboard_module_tasks"),
-        tab: dashboardModuleTabs.tasks,
-      }),
-      getDashboardModule({
-        module: "notes",
-        request_meta: createRequestMeta("dashboard_module_notes"),
-        tab: dashboardModuleTabs.notes,
-      }),
-      getDashboardModule({
-        module: "memory",
-        request_meta: createRequestMeta("dashboard_module_memory"),
-        tab: dashboardModuleTabs.memory,
-      }),
-      getDashboardModule({
-        module: "safety",
-        request_meta: createRequestMeta("dashboard_module_safety"),
-        tab: dashboardModuleTabs.safety,
-      }),
-      getRecommendations({
-        context: {
-          app_name: "CialloClaw Desktop",
-          page_title: "Dashboard Orbit",
-        },
-        request_meta: createRequestMeta("dashboard_recommendations"),
-        scene: "idle",
-        source: "dashboard",
-      }),
-    ]);
-
-    return buildDashboardHomeData({
-      moduleResults: {
-        memory: memoryModule,
-        notes: notesModule,
-        safety: safetyModule,
-        tasks: tasksModule,
+  const [overview, tasksModule, notesModule, memoryModule, safetyModule, recommendations] = await Promise.all([
+    getDashboardOverview({
+      focus_mode: false,
+      include: ["focus_summary", "trust_summary", "quick_actions", "high_value_signal"],
+      request_meta: createRequestMeta("dashboard_overview"),
+    }),
+    getDashboardModule({
+      module: "tasks",
+      request_meta: createRequestMeta("dashboard_module_tasks"),
+      tab: dashboardModuleTabs.tasks,
+    }),
+    getDashboardModule({
+      module: "notes",
+      request_meta: createRequestMeta("dashboard_module_notes"),
+      tab: dashboardModuleTabs.notes,
+    }),
+    getDashboardModule({
+      module: "memory",
+      request_meta: createRequestMeta("dashboard_module_memory"),
+      tab: dashboardModuleTabs.memory,
+    }),
+    getDashboardModule({
+      module: "safety",
+      request_meta: createRequestMeta("dashboard_module_safety"),
+      tab: dashboardModuleTabs.safety,
+    }),
+    getRecommendations({
+      context: {
+        app_name: "CialloClaw Desktop",
+        page_title: "Dashboard Orbit",
       },
-      overview,
-      recommendations,
-    });
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("dashboard home", error);
-      return getDashboardHomeFallbackData();
-    }
+      request_meta: createRequestMeta("dashboard_recommendations"),
+      scene: "idle",
+      source: "dashboard",
+    }),
+  ]);
 
-    throw error;
-  }
+  return buildDashboardHomeData({
+    moduleResults: {
+      memory: memoryModule,
+      notes: notesModule,
+      safety: safetyModule,
+      tasks: tasksModule,
+    },
+    overview,
+    recommendations,
+  });
 }
 
 export async function submitDashboardHomeRecommendationFeedback(recommendationId: string, feedback: RecommendationFeedback) {
-  try {
-    return await submitRecommendationFeedback({
-      feedback,
-      recommendation_id: recommendationId,
-      request_meta: createRequestMeta(`dashboard_recommendation_feedback_${recommendationId}`),
-    });
-  } catch (error) {
-    if (isRpcChannelUnavailable(error)) {
-      logRpcMockFallback("dashboard recommendation feedback", error);
-      return { applied: false };
-    }
-
-    throw error;
-  }
+  return submitRecommendationFeedback({
+    feedback,
+    recommendation_id: recommendationId,
+    request_meta: createRequestMeta(`dashboard_recommendation_feedback_${recommendationId}`),
+  });
 }
