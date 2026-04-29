@@ -1444,6 +1444,7 @@ test("dashboard result page keeps raw delivery URLs out of the visible query and
   const resultPageSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardResultPage.tsx"), "utf8");
   const navigationSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardResultPageNavigation.ts"), "utf8");
 
+  assert.match(resultPageSource, /hostname === "\[::1\]"/);
   assert.match(resultPageSource, /function isEmbeddableDashboardResultPageUrl/);
   assert.match(resultPageSource, /if \(!isLoopbackHost\(parsed\.hostname\)\) \{/);
   assert.match(resultPageSource, /return parsed\.protocol === "https:" \|\| parsed\.protocol === "http:"/);
