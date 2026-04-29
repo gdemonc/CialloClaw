@@ -83,6 +83,74 @@ function loadDashboardTaskDetailNavigationSource() {
   return readFileSync(resolve(desktopRoot, "src/features/dashboard/shared/dashboardTaskDetailNavigation.ts"), "utf8");
 }
 
+function loadDashboardOpeningTransitionModule() {
+  return withDesktopAliasRuntime((requireFn) =>
+    requireFn(resolve(desktopRoot, ".cache/dashboard-tests/app/dashboard/dashboardOpeningTransition.js")) as {
+      DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS: number;
+      createDashboardOpeningTransitionController: (environment: {
+        cancelAnimationFrame: (handle: number) => void;
+        clearTimeout: (handle: number) => void;
+        hasFocus: () => boolean;
+        getVisibilityState: () => DocumentVisibilityState;
+        requestAnimationFrame: (callback: FrameRequestCallback) => number;
+        setIsOpening: (value: boolean) => void;
+        setTimeout: (callback: () => void, timeoutMs: number) => number;
+      }) => {
+        dispose: () => void;
+        handleVisibilityChange: () => boolean;
+        handleWindowFocusChanged: (focused: boolean) => boolean;
+        restoreIfNeeded: () => boolean;
+        trigger: () => void;
+      };
+    },
+  );
+}
+
+function loadDashboardWindowErrorBoundaryModule() {
+  return withDesktopAliasRuntime((requireFn) =>
+    requireFn(resolve(desktopRoot, ".cache/dashboard-tests/app/dashboard/DashboardWindowErrorBoundary.js")) as {
+      DashboardWindowErrorBoundary: (props: { children: unknown }) => {
+        props: { children: unknown };
+        type: {
+          new (props: { children: unknown }): {
+            componentDidCatch: (error: Error, errorInfo: { componentStack: string }) => void;
+            props: { children: unknown };
+            render: () => unknown;
+            state: { hasError: boolean };
+          };
+          getDerivedStateFromError: () => { hasError: boolean };
+        };
+      };
+    },
+  );
+}
+
+function instantiateDashboardWindowErrorBoundary(
+  DashboardWindowErrorBoundary: (props: { children: unknown }) => {
+    props: { children: unknown };
+    type: {
+      new (props: { children: unknown }): {
+          componentDidCatch: (error: Error, errorInfo: { componentStack: string }) => void;
+          props: { children: unknown };
+          render: () => unknown;
+          state: { hasError: boolean };
+        };
+        getDerivedStateFromError: () => { hasError: boolean };
+      };
+  },
+) {
+  const renderedBoundary = DashboardWindowErrorBoundary({ children: null });
+  const BoundaryImplementation = renderedBoundary.type;
+
+  return {
+    BoundaryImplementation,
+    create(props: { children: unknown }) {
+      const element = DashboardWindowErrorBoundary(props);
+      return new BoundaryImplementation(element.props);
+    },
+  };
+}
+
 function loadConversationSessionServiceModule() {
   return withDesktopAliasRuntime((requireFn) => {
     const modulePath = resolve(desktopRoot, "src/services/conversationSessionService.ts");
@@ -638,6 +706,40 @@ function loadMirrorServiceModule() {
       };
     };
   });
+}
+
+function findRenderedElement(
+  node: unknown,
+  predicate: (element: { props: Record<string, unknown>; type: unknown }) => boolean,
+): { props: Record<string, unknown>; type: unknown } | null {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const match = findRenderedElement(item, predicate);
+      if (match) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  if (!node || typeof node !== "object") {
+    return null;
+  }
+
+  const maybeElement = node as { props?: Record<string, unknown>; type?: unknown };
+  if (!maybeElement.props || !("type" in maybeElement)) {
+    return null;
+  }
+
+  const element = {
+    props: maybeElement.props,
+    type: maybeElement.type,
+  };
+  if (predicate(element)) {
+    return element;
+  }
+
+  return findRenderedElement(element.props.children, predicate);
 }
 
 type DashboardContractRpcMethodOverrides = {
@@ -4133,6 +4235,267 @@ test("dashboard task-detail routing deduplicates retry request ids and accepts t
   assert.match(taskPageSource, /const detailRouteState = readDashboardTaskDetailRouteState\(location\.state\);[\s\S]*if \(detailRouteState\) \{[\s\S]*setSelectedTaskId\(detailRouteState\.focusTaskId\);[\s\S]*navigate\(location\.pathname, \{ replace: true, state: null \}\);[\s\S]*return;/);
   assert.doesNotMatch(taskPageSource, /detailRouteState && allTasks\.some\(\(item\) => item\.task\.task_id === detailRouteState\.focusTaskId\)/);
   assert.match(taskPageSource, /if \(selectedTaskId && detailOpen\) \{/);
+});
+
+test("dashboard opening mask replays after Tauri window focus returns from hidden desktop sessions", () => {
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
+
+  assert.match(dashboardRootSource, /createDashboardOpeningTransitionController/);
+  assert.match(dashboardRootSource, /const handleVisibilityChange = \(\) => \{/);
+  assert.match(dashboardRootSource, /\.onFocusChanged\(\(\{ payload: focused \}\) => \{/);
+  assert.match(dashboardRootSource, /openingTransitionController\.handleWindowFocusChanged\(focused\);/);
+});
+
+test("dashboard opening transition controller replays focus and visibility recovery at runtime", () => {
+  const {
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    createDashboardOpeningTransitionController,
+  } = loadDashboardOpeningTransitionModule();
+  const openingStates: boolean[] = [];
+  const timeoutDurations: number[] = [];
+  const cancelledFrames: number[] = [];
+  const clearedTimeouts: number[] = [];
+  const frameCallbacks = new Map<number, FrameRequestCallback>();
+  const timeoutCallbacks = new Map<number, () => void>();
+  let nextHandle = 1;
+  let visibilityState: DocumentVisibilityState = "visible";
+  let hasFocus = true;
+
+  const controller = createDashboardOpeningTransitionController({
+    cancelAnimationFrame: (handle) => {
+      if (handle > 0) {
+        cancelledFrames.push(handle);
+        frameCallbacks.delete(handle);
+      }
+    },
+    clearTimeout: (handle) => {
+      if (handle > 0) {
+        clearedTimeouts.push(handle);
+        timeoutCallbacks.delete(handle);
+      }
+    },
+    hasFocus: () => hasFocus,
+    getVisibilityState: () => visibilityState,
+    requestAnimationFrame: (callback) => {
+      const handle = nextHandle++;
+      frameCallbacks.set(handle, callback);
+      return handle;
+    },
+    setIsOpening: (value) => {
+      openingStates.push(value);
+    },
+    setTimeout: (callback, timeoutMs) => {
+      const handle = nextHandle++;
+      timeoutDurations.push(timeoutMs);
+      timeoutCallbacks.set(handle, callback);
+      return handle;
+    },
+  });
+
+  controller.trigger();
+  assert.deepEqual(openingStates, [true]);
+  assert.deepEqual(timeoutDurations, [DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS]);
+
+  controller.handleWindowFocusChanged(false);
+  assert.equal(cancelledFrames.length, 1);
+  assert.equal(clearedTimeouts.length, 1);
+
+  controller.handleWindowFocusChanged(true);
+  assert.deepEqual(openingStates, [true, true]);
+  assert.deepEqual(timeoutDurations, [
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+  ]);
+  assert.equal(frameCallbacks.size, 1);
+  Array.from(frameCallbacks.values()).at(-1)?.(16.7);
+  assert.deepEqual(openingStates, [true, true, false]);
+
+  controller.handleWindowFocusChanged(false);
+  visibilityState = "hidden";
+  controller.handleWindowFocusChanged(true);
+  assert.deepEqual(openingStates, [true, true, false]);
+
+  visibilityState = "visible";
+  controller.handleVisibilityChange();
+  assert.deepEqual(openingStates, [true, true, false, true]);
+  assert.deepEqual(timeoutDurations, [
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+  ]);
+  Array.from(timeoutCallbacks.values()).at(-1)?.();
+  assert.deepEqual(openingStates, [true, true, false, true, false]);
+
+  controller.dispose();
+  assert.equal(cancelledFrames.length, 3);
+  assert.equal(clearedTimeouts.length, 3);
+});
+
+test("dashboard opening transition controller replays the opening mask for windows mounted while hidden", () => {
+  const {
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    createDashboardOpeningTransitionController,
+  } = loadDashboardOpeningTransitionModule();
+  const openingStates: boolean[] = [];
+  const timeoutDurations: number[] = [];
+  const frameCallbacks = new Map<number, FrameRequestCallback>();
+  let nextHandle = 1;
+  let visibilityState: DocumentVisibilityState = "hidden";
+  let hasFocus = false;
+
+  const controller = createDashboardOpeningTransitionController({
+    cancelAnimationFrame: (handle) => {
+      frameCallbacks.delete(handle);
+    },
+    clearTimeout: () => {},
+    hasFocus: () => hasFocus,
+    getVisibilityState: () => visibilityState,
+    requestAnimationFrame: (callback) => {
+      const handle = nextHandle++;
+      frameCallbacks.set(handle, callback);
+      return handle;
+    },
+    setIsOpening: (value) => {
+      openingStates.push(value);
+    },
+    setTimeout: (_callback, timeoutMs) => {
+      timeoutDurations.push(timeoutMs);
+      return nextHandle++;
+    },
+  });
+
+  controller.trigger();
+  assert.deepEqual(openingStates, [true]);
+  assert.deepEqual(timeoutDurations, [DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS]);
+
+  visibilityState = "visible";
+  assert.equal(controller.handleVisibilityChange(), true);
+  assert.deepEqual(openingStates, [true, true]);
+  assert.deepEqual(timeoutDurations, [
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+  ]);
+});
+
+test("dashboard opening transition controller replays the opening mask for windows mounted while unfocused", () => {
+  const {
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    createDashboardOpeningTransitionController,
+  } = loadDashboardOpeningTransitionModule();
+  const openingStates: boolean[] = [];
+  const timeoutDurations: number[] = [];
+  let nextHandle = 1;
+  let visibilityState: DocumentVisibilityState = "visible";
+  let hasFocus = false;
+
+  const controller = createDashboardOpeningTransitionController({
+    cancelAnimationFrame: () => {},
+    clearTimeout: () => {},
+    hasFocus: () => hasFocus,
+    getVisibilityState: () => visibilityState,
+    requestAnimationFrame: () => nextHandle++,
+    setIsOpening: (value) => {
+      openingStates.push(value);
+    },
+    setTimeout: (_callback, timeoutMs) => {
+      timeoutDurations.push(timeoutMs);
+      return nextHandle++;
+    },
+  });
+
+  controller.trigger();
+  assert.deepEqual(openingStates, [true]);
+  assert.deepEqual(timeoutDurations, [DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS]);
+
+  hasFocus = true;
+  assert.equal(controller.handleWindowFocusChanged(true), true);
+  assert.deepEqual(openingStates, [true, true]);
+  assert.deepEqual(timeoutDurations, [
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+    DASHBOARD_OPENING_RECOVERY_TIMEOUT_MS,
+  ]);
+});
+
+test("dashboard entry keeps a window-level error boundary so runtime faults do not collapse into a blank shell", () => {
+  const dashboardMainSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/main.tsx"), "utf8");
+  const dashboardErrorBoundarySource = readFileSync(
+    resolve(desktopRoot, "src/app/dashboard/DashboardWindowErrorBoundary.tsx"),
+    "utf8",
+  );
+
+  assert.match(dashboardMainSource, /DashboardWindowErrorBoundary/);
+  assert.match(
+    dashboardMainSource,
+    /<DashboardWindowErrorBoundary>[\s\S]*<AppProviders>[\s\S]*<DashboardRoot \/>[\s\S]*<\/AppProviders>[\s\S]*<\/DashboardWindowErrorBoundary>/,
+  );
+  assert.match(dashboardErrorBoundarySource, /export function DashboardWindowErrorBoundary/);
+  assert.match(dashboardErrorBoundarySource, /class DashboardWindowErrorBoundaryImpl extends Component/);
+  assert.match(dashboardErrorBoundarySource, /static getDerivedStateFromError/);
+  assert.match(dashboardErrorBoundarySource, /window\.location\.reload\(\)/);
+  assert.match(dashboardErrorBoundarySource, /dashboard window render failed/);
+});
+
+test("dashboard window error boundary renders a recovery fallback and reload action after runtime faults", () => {
+  const { DashboardWindowErrorBoundary } = loadDashboardWindowErrorBoundaryModule();
+  const child = { props: { id: "child" }, type: "mock-child" };
+  const { BoundaryImplementation, create } = instantiateDashboardWindowErrorBoundary(DashboardWindowErrorBoundary);
+  const boundary = create({ children: child });
+  const originalConsoleError = console.error;
+  const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const consoleMessages: unknown[][] = [];
+  let reloadCalls = 0;
+
+  try {
+    console.error = (...args: unknown[]) => {
+      consoleMessages.push(args);
+    };
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: {
+          reload: () => {
+            reloadCalls += 1;
+          },
+        },
+      },
+      writable: true,
+    });
+
+    assert.equal(boundary.render(), child);
+
+    boundary.componentDidCatch(new Error("dashboard exploded"), {
+      componentStack: "\n    at DashboardRoot",
+    });
+    assert.equal(consoleMessages.length, 1);
+    assert.match(String(consoleMessages[0][0]), /dashboard window render failed/);
+
+    boundary.state = {
+      ...boundary.state,
+      ...BoundaryImplementation.getDerivedStateFromError(),
+    };
+
+    const fallbackTree = boundary.render();
+    const title = findRenderedElement(
+      fallbackTree,
+      (element) => element.type === "h1" && element.props.children === "仪表盘需要恢复",
+    );
+    const reloadButton = findRenderedElement(
+      fallbackTree,
+      (element) => element.props.type === "button" && typeof element.props.onClick === "function",
+    );
+
+    assert.ok(title);
+    assert.ok(reloadButton);
+    (reloadButton.props.onClick as () => void)();
+    assert.equal(reloadCalls, 1);
+  } finally {
+    console.error = originalConsoleError;
+    if (originalWindowDescriptor) {
+      Object.defineProperty(globalThis, "window", originalWindowDescriptor);
+    } else {
+      delete (globalThis as { window?: unknown }).window;
+    }
+  }
 });
 
 test("conversation session reuse expires after the backend freshness window", () => {
