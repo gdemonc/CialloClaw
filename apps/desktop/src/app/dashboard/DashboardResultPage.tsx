@@ -6,7 +6,7 @@ import { navigateToDashboardTaskDetail } from "@/features/dashboard/shared/dashb
 import { readDashboardResultPageLocation } from "@/features/dashboard/shared/dashboardResultPageNavigation";
 
 function isLoopbackHost(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }
 
 function isAllowedDashboardResultPageUrl(url: string) {
