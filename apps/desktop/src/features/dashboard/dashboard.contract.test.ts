@@ -588,6 +588,9 @@ function loadMirrorServiceModule() {
 type DashboardContractRpcMethodOverrides = {
   controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
   convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
+  getDashboardModule?: (params: unknown) => Promise<unknown>;
+  getDashboardOverview?: (params: unknown) => Promise<unknown>;
+  getRecommendations?: (params: unknown) => Promise<unknown>;
   getSecuritySummary?: (params: unknown) => Promise<unknown>;
   getSettings?: (params: unknown) => Promise<unknown>;
   updateSettings?: (params: unknown) => Promise<unknown>;
@@ -690,6 +693,15 @@ function withDesktopAliasRuntime<T>(
         getSecuritySummary:
           rpcMethods?.getSecuritySummary ??
           (() => Promise.reject(new Error("getSecuritySummary should not run in dashboard contract tests"))),
+        getDashboardModule:
+          rpcMethods?.getDashboardModule ??
+          (() => Promise.reject(new Error("getDashboardModule should not run in dashboard contract tests"))),
+        getDashboardOverview:
+          rpcMethods?.getDashboardOverview ??
+          (() => Promise.reject(new Error("getDashboardOverview should not run in dashboard contract tests"))),
+        getRecommendations:
+          rpcMethods?.getRecommendations ??
+          (() => Promise.reject(new Error("getRecommendations should not run in dashboard contract tests"))),
         getSettings:
           rpcMethods?.getSettings ??
           (() => Promise.reject(new Error("getSettings should not run in dashboard contract tests"))),
