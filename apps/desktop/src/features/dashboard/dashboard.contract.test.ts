@@ -3957,6 +3957,63 @@ test("dashboard home rpc service keeps transport failures visible instead of swi
   );
 });
 
+test("dashboard home rejects as soon as the required overview request fails", async () => {
+  const pendingTasksModule: { release: null | (() => void) } = { release: null };
+
+  try {
+    await withDesktopAliasRuntime(
+      async (requireFn) => {
+        const modulePath = resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts");
+        delete requireFn.cache[modulePath];
+
+        const service = requireFn(modulePath) as {
+          loadDashboardHomeData: () => Promise<unknown>;
+        };
+
+        const pendingLoad = service.loadDashboardHomeData();
+        const raceWinner = await Promise.race([
+          pendingLoad.then(
+            () => "resolved" as const,
+            (error) => error,
+          ),
+          new Promise((resolvePromise) => {
+            setTimeout(() => resolvePromise("timed_out" as const), 25);
+          }),
+        ]);
+
+        assert.equal(pendingTasksModule.release === null, false);
+        assert.notEqual(raceWinner, "timed_out");
+        assert.match(
+          raceWinner instanceof Error ? raceWinner.message : String(raceWinner),
+          /overview transport failed/i,
+        );
+      },
+      {
+        getDashboardModule: async () => new Promise((resolvePromise) => {
+          pendingTasksModule.release = () => resolvePromise({
+            highlights: [],
+            module: "tasks",
+            summary: {},
+            tab: "focus",
+          });
+        }),
+        getDashboardOverview: async () => {
+          throw new Error("overview transport failed");
+        },
+        getRecommendations: async () => ({
+          cooldown_hit: false,
+          items: [],
+        }),
+      },
+    );
+  } finally {
+    const releasePendingModule = pendingTasksModule.release;
+    if (typeof releasePendingModule === "function") {
+      releasePendingModule();
+    }
+  }
+});
+
 test("dashboard home keeps module and recommendation failures local instead of blanking the full orbit", async () => {
   await withDesktopAliasRuntime(
     async (requireFn) => {

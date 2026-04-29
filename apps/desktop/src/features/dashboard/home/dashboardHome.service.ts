@@ -783,13 +783,18 @@ function formatDashboardHomeLoadWarning(label: string, error: unknown) {
   return `${label}同步失败：${message}`;
 }
 
+/**
+ * Loads the formal dashboard home orbit. The overview payload is required for
+ * the route, while module and recommendation payloads remain best-effort so
+ * their transport failures can degrade locally without replaying mock data.
+ */
 export async function loadDashboardHomeData(): Promise<DashboardHomeData> {
-  const [overviewResult, tasksResult, notesResult, memoryResult, safetyResult, recommendationsResult] = await Promise.allSettled([
-    getDashboardOverview({
-      focus_mode: false,
-      include: ["focus_summary", "trust_summary", "quick_actions", "high_value_signal"],
-      request_meta: createRequestMeta("dashboard_overview"),
-    }),
+  const overviewPromise = getDashboardOverview({
+    focus_mode: false,
+    include: ["focus_summary", "trust_summary", "quick_actions", "high_value_signal"],
+    request_meta: createRequestMeta("dashboard_overview"),
+  });
+  const secondaryResultsPromise = Promise.allSettled([
     getDashboardModule({
       module: "tasks",
       request_meta: createRequestMeta("dashboard_module_tasks"),
@@ -820,10 +825,8 @@ export async function loadDashboardHomeData(): Promise<DashboardHomeData> {
       source: "dashboard",
     }),
   ]);
-
-  if (overviewResult.status === "rejected") {
-    throw overviewResult.reason;
-  }
+  const overview = await overviewPromise;
+  const [tasksResult, notesResult, memoryResult, safetyResult, recommendationsResult] = await secondaryResultsPromise;
 
   const loadWarnings: string[] = [];
   const tasksModule = tasksResult.status === "fulfilled"
@@ -850,7 +853,7 @@ export async function loadDashboardHomeData(): Promise<DashboardHomeData> {
       safety: safetyModule,
       tasks: tasksModule,
     },
-    overview: overviewResult.value,
+    overview,
     recommendations,
   });
 }
