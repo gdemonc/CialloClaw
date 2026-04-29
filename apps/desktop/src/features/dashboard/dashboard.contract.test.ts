@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 import type {
+  AgentDeliveryOpenParams,
   AgentDeliveryOpenResult,
   AgentNotepadConvertToTaskParams,
   AgentNotepadConvertToTaskResult,
@@ -12,7 +13,9 @@ import type {
   AgentSettingsGetParams,
   AgentNotepadUpdateParams,
   AgentNotepadUpdateResult,
+  AgentTaskArtifactListParams,
   AgentTaskArtifactListResult,
+  AgentTaskArtifactOpenParams,
   AgentTaskArtifactOpenResult,
   AgentTaskControlParams,
   AgentTaskControlResult,
@@ -103,7 +106,7 @@ function loadTaskPageQueryModule() {
       buildDashboardTaskBucketQueryKey: (dataMode: "rpc" | "mock", group: "unfinished" | "finished", limit: number) => unknown;
       buildDashboardTaskDetailQueryKey: (dataMode: "rpc" | "mock", taskId: string) => unknown;
       getDashboardTaskSecurityRefreshPlan: (dataMode: "rpc" | "mock") => unknown;
-      resolveDashboardTaskSafetyOpenPlan: (detailSource: "rpc" | "mock" | "fallback") => unknown;
+      resolveDashboardTaskSafetyOpenPlan: (detailState: "loading" | "error" | "ready") => unknown;
       shouldEnableDashboardTaskDetailQuery: (selectedTaskId: string | null, detailOpen: boolean) => boolean;
       dashboardTaskArtifactQueryPrefix: unknown;
       dashboardTaskBucketQueryPrefix: unknown;
@@ -135,6 +138,25 @@ function loadNotePageServiceModule(desktopLocalPath?: DashboardContractDesktopLo
     delete requireFn.cache[modulePath];
 
     return requireFn(modulePath) as {
+      buildSourceNoteFallbackItems: (note: {
+        content: string;
+        fileName: string;
+        modifiedAtMs: number | null;
+        path: string;
+        sourceRoot: string;
+        title: string;
+      }) => Array<{
+        experience: {
+          canConvertToTask: boolean;
+          detailStatus: string;
+          previewStatus: string;
+          repeatRule: string | null;
+        };
+        item: {
+          bucket: string;
+          status: string;
+        };
+      }>;
       isAllowedNoteOpenUrl: (url: string) => boolean;
       resolveNoteResourceOpenExecutionPlan: (resource: {
         id: string;
@@ -437,13 +459,24 @@ function loadDashboardSettingsMutationModule(rpcMethods?: DashboardContractRpcMe
     delete requireFn.cache[snapshotModulePath];
 
     return requireFn(modulePath) as {
+      formatDashboardSettingsMutationFeedback: (result: {
+        applyMode: string;
+        needRestart: boolean;
+        persisted: boolean;
+        readbackWarning: string | null;
+      }, subject: string) => string;
       updateDashboardSettings: (patch: Record<string, unknown>, source?: "rpc" | "mock") => Promise<{
         applyMode: string;
         needRestart: boolean;
         persisted: boolean;
+        readbackWarning: string | null;
         source: string;
         updatedKeys: string[];
         snapshot: {
+          rpcContext: {
+            serverTime: string | null;
+            warnings: string[];
+          };
           source: string;
           settings: {
             models: {
@@ -586,16 +619,29 @@ function loadMirrorServiceModule() {
 }
 
 type DashboardContractRpcMethodOverrides = {
+  applySecurityRestoreDetailed?: (params: unknown) => Promise<unknown>;
   controlTask?: (params: AgentTaskControlParams) => Promise<AgentTaskControlResult>;
   convertNotepadToTask?: (params: AgentNotepadConvertToTaskParams) => Promise<AgentNotepadConvertToTaskResult>;
+  getDashboardModule?: (params: unknown) => Promise<unknown>;
+  getDashboardOverview?: (params: unknown) => Promise<unknown>;
+  getRecommendations?: (params: unknown) => Promise<unknown>;
+  getMirrorOverviewDetailed?: (params: unknown) => Promise<unknown>;
   getSecuritySummary?: (params: unknown) => Promise<unknown>;
+  getSecuritySummaryDetailed?: (params: unknown) => Promise<unknown>;
   getSettings?: (params: unknown) => Promise<unknown>;
   updateSettings?: (params: unknown) => Promise<unknown>;
   getSettingsDetailed?: (params: unknown) => Promise<unknown>;
   getTaskInspectorConfig?: (params: unknown) => Promise<unknown>;
   getTaskDetail?: (params: AgentTaskDetailGetParams) => Promise<AgentTaskDetailGetResult>;
+  listSecurityAuditDetailed?: (params: unknown) => Promise<unknown>;
+  listSecurityPendingDetailed?: (params: unknown) => Promise<unknown>;
+  listSecurityRestorePointsDetailed?: (params: unknown) => Promise<unknown>;
+  listTaskArtifacts?: (params: AgentTaskArtifactListParams) => Promise<AgentTaskArtifactListResult>;
   listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
   listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+  openDelivery?: (params: AgentDeliveryOpenParams) => Promise<AgentDeliveryOpenResult>;
+  openTaskArtifact?: (params: AgentTaskArtifactOpenParams) => Promise<AgentTaskArtifactOpenResult>;
+  respondSecurityDetailed?: (params: unknown) => Promise<unknown>;
   runTaskInspector?: (params: unknown) => Promise<unknown>;
   validateSettingsModel?: (params: unknown) => Promise<unknown>;
   updateTaskInspectorConfig?: (params: unknown) => Promise<unknown>;
@@ -690,28 +736,64 @@ function withDesktopAliasRuntime<T>(
         getSecuritySummary:
           rpcMethods?.getSecuritySummary ??
           (() => Promise.reject(new Error("getSecuritySummary should not run in dashboard contract tests"))),
+        getDashboardModule:
+          rpcMethods?.getDashboardModule ??
+          (() => Promise.reject(new Error("getDashboardModule should not run in dashboard contract tests"))),
+        getDashboardOverview:
+          rpcMethods?.getDashboardOverview ??
+          (() => Promise.reject(new Error("getDashboardOverview should not run in dashboard contract tests"))),
+        getRecommendations:
+          rpcMethods?.getRecommendations ??
+          (() => Promise.reject(new Error("getRecommendations should not run in dashboard contract tests"))),
+        getMirrorOverviewDetailed:
+          rpcMethods?.getMirrorOverviewDetailed ??
+          (() => Promise.reject(new Error("getMirrorOverviewDetailed should not run in dashboard contract tests"))),
+        getSecuritySummaryDetailed:
+          rpcMethods?.getSecuritySummaryDetailed ??
+          (() => Promise.reject(new Error("getSecuritySummaryDetailed should not run in dashboard contract tests"))),
         getSettings:
           rpcMethods?.getSettings ??
           (() => Promise.reject(new Error("getSettings should not run in dashboard contract tests"))),
+        listSecurityPendingDetailed:
+          rpcMethods?.listSecurityPendingDetailed ??
+          (() => Promise.reject(new Error("listSecurityPendingDetailed should not run in dashboard contract tests"))),
         listNotepad:
           rpcMethods?.listNotepad ??
           (() => {
             throw new Error("listNotepad should not run in dashboard contract tests");
           }),
-        listTaskArtifacts() {
-          throw new Error("listTaskArtifacts should not run in dashboard contract tests");
-        },
+        listSecurityAuditDetailed:
+          rpcMethods?.listSecurityAuditDetailed ??
+          (() => Promise.reject(new Error("listSecurityAuditDetailed should not run in dashboard contract tests"))),
+        listSecurityRestorePointsDetailed:
+          rpcMethods?.listSecurityRestorePointsDetailed ??
+          (() => Promise.reject(new Error("listSecurityRestorePointsDetailed should not run in dashboard contract tests"))),
+        listTaskArtifacts:
+          rpcMethods?.listTaskArtifacts ??
+          (() => {
+            throw new Error("listTaskArtifacts should not run in dashboard contract tests");
+          }),
         listTasks:
           rpcMethods?.listTasks ??
           (() => {
             throw new Error("listTasks should not run in dashboard contract tests");
           }),
-        openDelivery() {
-          throw new Error("openDelivery should not run in dashboard contract tests");
-        },
-        openTaskArtifact() {
-          throw new Error("openTaskArtifact should not run in dashboard contract tests");
-        },
+        openDelivery:
+          rpcMethods?.openDelivery ??
+          (() => {
+            throw new Error("openDelivery should not run in dashboard contract tests");
+          }),
+        openTaskArtifact:
+          rpcMethods?.openTaskArtifact ??
+          (() => {
+            throw new Error("openTaskArtifact should not run in dashboard contract tests");
+          }),
+        respondSecurityDetailed:
+          rpcMethods?.respondSecurityDetailed ??
+          (() => Promise.reject(new Error("respondSecurityDetailed should not run in dashboard contract tests"))),
+        applySecurityRestoreDetailed:
+          rpcMethods?.applySecurityRestoreDetailed ??
+          (() => Promise.reject(new Error("applySecurityRestoreDetailed should not run in dashboard contract tests"))),
         updateNotepad:
           rpcMethods?.updateNotepad ??
           (() => {
@@ -1205,6 +1287,70 @@ test("task page no longer exposes edit guidance and uses 安全总览 without an
   assert.doesNotMatch(taskPageSource, /action === "edit"/);
 });
 
+test("task page stays RPC-only instead of exposing a page-level mock toggle", () => {
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+
+  assert.match(taskPageSource, /const dataMode: TaskPageDataMode = "rpc";/);
+  assert.doesNotMatch(taskPageSource, /DashboardMockToggle/);
+  assert.doesNotMatch(taskPageSource, /loadDashboardDataMode\("tasks"\)/);
+  assert.doesNotMatch(taskPageSource, /saveDashboardDataMode\("tasks"\)/);
+  assert.doesNotMatch(taskPageSource, /setDataMode\(/);
+});
+
+test("note page stays RPC-only instead of exposing a page-level mock toggle", () => {
+  const notePageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/NotePage.tsx"), "utf8");
+
+  assert.match(notePageSource, /const dataMode: NotePageDataMode = "rpc";/);
+  assert.doesNotMatch(notePageSource, /DashboardMockToggle/);
+  assert.doesNotMatch(notePageSource, /loadDashboardDataMode\("notes"\)/);
+  assert.doesNotMatch(notePageSource, /saveDashboardDataMode\("notes"\)/);
+  assert.doesNotMatch(notePageSource, /setDataMode\(/);
+});
+
+test("dashboard root no longer falls back to mock home data when the live query is unavailable", () => {
+  const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
+  const dashboardHomeServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts"), "utf8");
+
+  assert.doesNotMatch(dashboardRootSource, /getDashboardHomeFallbackData/);
+  assert.match(dashboardRootSource, /const dashboardHomeData = dashboardHomeQuery\.data \?\? null;/);
+  assert.match(dashboardRootSource, /DashboardHomeStatusShell/);
+  assert.match(dashboardRootSource, /sequences=\{dashboardHomeData\?\.voiceSequences \?\? \[\]\}/);
+  assert.match(dashboardRootSource, /dashboardHomeStatusShellModules/);
+  assert.match(dashboardRootSource, /to=\{module\.route\}/);
+  assert.doesNotMatch(dashboardHomeServiceSource, /export function getDashboardHomeFallbackData/);
+  assert.match(dashboardHomeServiceSource, /Promise\.allSettled/);
+});
+
+test("dashboard home no longer replays mock summon or voice presets when live recommendations are empty", () => {
+  const dashboardHomeSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardHome.tsx"), "utf8");
+  const dashboardHomeServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts"), "utf8");
+
+  assert.doesNotMatch(dashboardHomeServiceSource, /dashboardHome\.mocks/);
+  assert.doesNotMatch(dashboardHomeServiceSource, /return templates.length > 0 \? templates : dashboardSummonTemplates\.map/);
+  assert.doesNotMatch(dashboardHomeServiceSource, /return sequences.length > 0 \? sequences : dashboardVoiceSequences\.map/);
+  assert.match(dashboardHomeSource, /if \(data\.summonTemplates\.length === 0\) \{/);
+  assert.match(dashboardHomeSource, /data\.loadWarnings\.length > 0/);
+});
+
+test("mirror page stays RPC-only instead of exposing a page-level mock toggle", () => {
+  const mirrorAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/MirrorApp.tsx"), "utf8");
+
+  assert.match(mirrorAppSource, /const dataMode: MirrorOverviewSource = "rpc";/);
+  assert.doesNotMatch(mirrorAppSource, /DashboardMockToggle/);
+  assert.doesNotMatch(mirrorAppSource, /loadDashboardDataMode\("memory"\)/);
+  assert.doesNotMatch(mirrorAppSource, /saveDashboardDataMode\("memory"\)/);
+  assert.doesNotMatch(mirrorAppSource, /setDataMode\(/);
+});
+
+test("safety page stays RPC-only instead of exposing a page-level mock toggle", () => {
+  const securityAppSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/SecurityApp.tsx"), "utf8");
+
+  assert.match(securityAppSource, /const dataMode = "rpc" as const;/);
+  assert.doesNotMatch(securityAppSource, /DashboardMockToggle/);
+  assert.doesNotMatch(securityAppSource, /loadDashboardDataMode\("safety"\)/);
+  assert.doesNotMatch(securityAppSource, /saveDashboardDataMode\("safety"\)/);
+  assert.doesNotMatch(securityAppSource, /setDataMode\(/);
+});
 test("dashboard home entrance labels stay hidden until hover or focus", () => {
   const dashboardHomeStyleSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.css"), "utf8");
   const entranceOrbSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/components/DashboardEntranceOrb.tsx"), "utf8");
@@ -1642,9 +1788,51 @@ test("control panel app surfaces about action feedback in local UI state", () =>
   assert.match(controlPanelAppSource, /aboutActionFeedback \? \([\s\S]*aria-live="polite"[\s\S]*\{aboutActionFeedback\}/);
 });
 
-test("dashboard settings mutation updates the local snapshot in mock mode", async () => {
+test("dashboard settings mutation persists rpc-effective settings into the local snapshot", async () => {
   const { loadSettings } = loadSettingsServiceModule();
-  const { updateDashboardSettings } = loadDashboardSettingsMutationModule();
+  const { updateDashboardSettings } = loadDashboardSettingsMutationModule({
+    updateSettings: async () => ({
+      apply_mode: "immediate",
+      need_restart: false,
+      updated_keys: ["general.download.ask_before_save_each_file", "memory.enabled", "memory.lifecycle", "models.budget_auto_downgrade"],
+      effective_settings: {
+        general: {
+          download: {
+            ask_before_save_each_file: false,
+          },
+        },
+        memory: {
+          enabled: false,
+          lifecycle: "session",
+        },
+        models: {
+          budget_auto_downgrade: false,
+        },
+      },
+    }),
+    getSettingsDetailed: async () => ({
+      data: {
+        settings: {
+          general: {
+            download: {
+              ask_before_save_each_file: false,
+            },
+          },
+          memory: {
+            enabled: false,
+            lifecycle: "session",
+          },
+          models: {
+            budget_auto_downgrade: false,
+          },
+        },
+      },
+      meta: {
+        server_time: "2026-04-28T09:30:00Z",
+      },
+      warnings: [],
+    }),
+  });
   const originalWindow = globalThis.window;
   const storage = new Map<string, string>();
   const localStorage = {
@@ -1681,14 +1869,19 @@ test("dashboard settings mutation updates the local snapshot in mock mode", asyn
           lifecycle: "session",
         },
       },
-      "mock",
     );
 
-    assert.equal(result.source, "mock");
+    assert.equal(result.source, "rpc");
     assert.equal(result.applyMode, "immediate");
     assert.equal(result.needRestart, false);
     assert.equal(result.persisted, true);
-    assert.deepEqual(result.updatedKeys.sort(), ["general", "memory", "models"]);
+    assert.equal(result.readbackWarning, null);
+    assert.deepEqual(result.updatedKeys.sort(), [
+      "general.download.ask_before_save_each_file",
+      "memory.enabled",
+      "memory.lifecycle",
+      "models.budget_auto_downgrade",
+    ]);
     assert.equal(result.snapshot.settings.memory.enabled, false);
     assert.equal(result.snapshot.settings.memory.lifecycle, "session");
     assert.equal(result.snapshot.settings.general.download.ask_before_save_each_file, false);
@@ -1700,6 +1893,69 @@ test("dashboard settings mutation updates the local snapshot in mock mode", asyn
     assert.equal(persisted.settings.memory.lifecycle, "session");
     assert.equal(persisted.settings.general.download.ask_before_save_each_file, false);
     assert.equal(persisted.settings.models.budget_auto_downgrade, false);
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
+test("dashboard settings mutation keeps successful writes visible when settings readback fails", async () => {
+  const { loadSettings } = loadSettingsServiceModule();
+  const { formatDashboardSettingsMutationFeedback, updateDashboardSettings } = loadDashboardSettingsMutationModule({
+    updateSettings: async () => ({
+      apply_mode: "immediate",
+      need_restart: false,
+      updated_keys: ["memory.enabled"],
+      effective_settings: {
+        memory: {
+          enabled: false,
+        },
+      },
+    }),
+    getSettingsDetailed: async () => {
+      throw new Error("settings readback timed out");
+    },
+  });
+  const originalWindow = globalThis.window;
+  const storage = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      storage.set(key, value);
+    },
+    removeItem(key: string) {
+      storage.delete(key);
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      localStorage,
+    },
+  });
+
+  try {
+    const result = await updateDashboardSettings({
+      memory: {
+        enabled: false,
+      },
+    });
+
+    assert.equal(result.persisted, true);
+    assert.equal(result.source, "rpc");
+    assert.equal(result.readbackWarning, "settings readback timed out");
+    assert.equal(result.snapshot.settings.memory.enabled, false);
+    assert.deepEqual(result.snapshot.rpcContext.warnings, ["settings readback timed out"]);
+    assert.equal(loadSettings().settings.memory.enabled, false);
+    assert.match(
+      formatDashboardSettingsMutationFeedback(result, "记忆开关"),
+      /设置已写入，但 settings\.get 回读失败：settings readback timed out。当前先展示刚保存的本地快照。/,
+    );
   } finally {
     if (originalWindow === undefined) {
       Reflect.deleteProperty(globalThis, "window");
@@ -2881,7 +3137,7 @@ test("mirror app reuses the mutation snapshot instead of triggering a second mir
   );
 });
 
-test("dashboard settings mutation keeps fallback snapshots read-only when the RPC transport is unavailable", async () => {
+test("dashboard settings mutation keeps transport failures visible and does not mutate local settings", async () => {
   const { loadSettings } = loadSettingsServiceModule();
   const { updateDashboardSettings } = loadDashboardSettingsMutationModule({
     updateSettings: async () => {
@@ -2910,19 +3166,14 @@ test("dashboard settings mutation keeps fallback snapshots read-only when the RP
 
   try {
     const before = loadSettings();
-    const result = await updateDashboardSettings({
+    await assert.rejects(() => updateDashboardSettings({
       memory: {
         enabled: false,
         lifecycle: "session",
       },
-    });
+    }), /transport is not wired/i);
     const after = loadSettings();
 
-    assert.equal(result.source, "mock");
-    assert.equal(result.persisted, false);
-    assert.deepEqual(result.updatedKeys, []);
-    assert.equal(result.snapshot.settings.memory.enabled, before.settings.memory.enabled);
-    assert.equal(result.snapshot.settings.memory.lifecycle, before.settings.memory.lifecycle);
     assert.equal(after.settings.memory.enabled, before.settings.memory.enabled);
     assert.equal(after.settings.memory.lifecycle, before.settings.memory.lifecycle);
   } finally {
@@ -3129,10 +3380,13 @@ test("SecurityApp keeps snapshot-only approval detail renderable when live cards
 test("TaskPage wiring helpers require real detail for safety focus and keep detail query task-id centric", () => {
   const { resolveDashboardTaskSafetyOpenPlan, shouldEnableDashboardTaskDetailQuery } = loadTaskPageQueryModule();
 
-  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("fallback"), {
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("loading"), {
     shouldRefetchDetail: true,
   });
-  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("rpc"), {
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("error"), {
+    shouldRefetchDetail: true,
+  });
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("ready"), {
     shouldRefetchDetail: false,
   });
   assert.equal(shouldEnableDashboardTaskDetailQuery("task_dashboard_001", true), true);
@@ -3240,34 +3494,113 @@ test("task output helpers normalize open actions from existing rpc contracts", a
   );
 });
 
-test("task output service exposes artifact list and open flows in mock mode", async () => {
-  const outputService = loadTaskOutputServiceModule();
+test("task output service exposes artifact list and open flows through formal RPC payloads", async () => {
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskOutput.service.js");
+      delete requireFn.cache[modulePath];
 
-  const artifactPage = await outputService.loadTaskArtifactPage("task_done_001", "mock");
-  assert.ok(artifactPage.items.length > 0);
-  assert.equal(artifactPage.page.offset, 0);
+      const outputService = requireFn(modulePath) as {
+        describeTaskOpenResultForCurrentTask: (plan: { mode: string; taskId: string | null }, currentTaskId: string | null) => string | null;
+        isAllowedTaskOpenUrl: (url: string) => boolean;
+        loadTaskArtifactPage: (taskId: string) => Promise<AgentTaskArtifactListResult>;
+        openTaskArtifactForTask: (taskId: string, artifactId: string) => Promise<AgentTaskArtifactOpenResult>;
+        openTaskDeliveryForTask: (taskId: string, artifactId?: string) => Promise<AgentDeliveryOpenResult>;
+      };
 
-  const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003", "mock");
-  assert.equal(artifactOpen.open_action, "reveal_in_folder");
+      const artifactPage = await outputService.loadTaskArtifactPage("task_done_001");
+      assert.ok(artifactPage.items.length > 0);
+      assert.equal(artifactPage.page.offset, 0);
 
-  const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001", undefined, "mock");
-  assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+      const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003");
+      assert.equal(artifactOpen.open_action, "reveal_in_folder");
 
-  assert.equal(
-    outputService.describeTaskOpenResultForCurrentTask(
-      {
-        mode: "task_detail",
-        taskId: "task_done_001",
-      },
-      "task_done_001",
-    ),
-    "当前任务没有独立可打开结果，请先查看成果区。",
+      const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001");
+      assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+
+      assert.equal(
+        outputService.describeTaskOpenResultForCurrentTask(
+          {
+            mode: "task_detail",
+            taskId: "task_done_001",
+          },
+          "task_done_001",
+        ),
+        "当前任务没有独立可打开结果，请先查看成果区。",
+      );
+
+      assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
+      assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
+      assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
+      assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
+    },
+    {
+      listTaskArtifacts: async () => ({
+        items: [
+          {
+            artifact_id: "artifact_done_003",
+            artifact_type: "reveal_in_folder",
+            created_at: "2026-04-28T08:00:00.000Z",
+            mime_type: "application/pdf",
+            path: "workspace/reports/q3-review.pdf",
+            task_id: "task_done_001",
+            title: "q3-review.pdf",
+          },
+        ],
+        page: {
+          has_more: false,
+          limit: 1,
+          offset: 0,
+          total: 1,
+        },
+      }),
+      openDelivery: async () => ({
+        delivery_result: {
+          payload: {
+            path: null,
+            task_id: "task_done_001",
+            url: "https://example.test/result",
+          },
+          preview_text: "结果页",
+          title: "结果页",
+          type: "result_page",
+        },
+        open_action: "result_page",
+        resolved_payload: {
+          path: null,
+          task_id: "task_done_001",
+          url: "https://example.test/result",
+        },
+      }),
+      openTaskArtifact: async () => ({
+        artifact: {
+          artifact_id: "artifact_done_003",
+          artifact_type: "reveal_in_folder",
+          created_at: "2026-04-28T08:00:00.000Z",
+          mime_type: "application/pdf",
+          path: "workspace/reports/q3-review.pdf",
+          task_id: "task_done_001",
+          title: "q3-review.pdf",
+        },
+        delivery_result: {
+          payload: {
+            path: "workspace/reports/q3-review.pdf",
+            task_id: "task_done_001",
+            url: null,
+          },
+          preview_text: "定位文件",
+          title: "q3-review.pdf",
+          type: "reveal_in_folder",
+        },
+        open_action: "reveal_in_folder",
+        resolved_payload: {
+          path: "workspace/reports/q3-review.pdf",
+          task_id: "task_done_001",
+          url: null,
+        },
+      }),
+    },
   );
-
-  assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
-  assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
 });
 
 test("note resource open helpers normalize task, url, local open, and copy flows", () => {
@@ -3570,7 +3903,42 @@ test("note page consumes note query helpers instead of inlining note bucket cont
   assert.match(notePageSource, /getDashboardNoteRefreshPlan/);
   assert.doesNotMatch(notePageSource, /\["dashboard", "notes", "bucket", dataMode/);
   assert.match(noteServiceSource, /isAllowedNoteOpenUrl/);
+  assert.match(noteServiceSource, /if \(payload\?\.url\) \{/);
   assert.match(noteServiceSource, /mode === "open_url"/);
+});
+
+test("source-note fallback cards stay local instead of inferring formal todo bucket and due status", () => {
+  const noteService = loadNotePageServiceModule();
+  const items = noteService.buildSourceNoteFallbackItems({
+    content: [
+      "- [ ] 复查仪表盘文案",
+      "due: 2024-04-30T10:00:00.000Z",
+      "note: 保留这一条给巡检同步。",
+    ].join("\n"),
+    fileName: "review.md",
+    modifiedAtMs: 1714300000000,
+    path: "D:/notes/review.md",
+    sourceRoot: "D:/notes",
+    title: "review",
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].item.bucket, "later");
+  assert.equal(items[0].item.status, "normal");
+  assert.equal(items[0].experience.canConvertToTask, false);
+  assert.equal(items[0].experience.detailStatus, "等待巡检同步");
+  assert.equal(items[0].experience.previewStatus, "待巡检");
+  assert.equal(items[0].experience.repeatRule, null);
+});
+
+test("note service no longer invents related resources from title keywords", () => {
+  const noteServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/notePage.service.ts"), "utf8");
+
+  assert.match(noteServiceSource, /function createResourceHints\(item: TodoItem\)/);
+  assert.doesNotMatch(noteServiceSource, /normalizedTitle\.includes\("template"\)/);
+  assert.doesNotMatch(noteServiceSource, /normalizedTitle\.includes\("report"\)/);
+  assert.doesNotMatch(noteServiceSource, /normalizedTitle\.includes\("design"\)/);
+  assert.match(noteServiceSource, /return \[\];/);
 });
 
 test("task fallback copy no longer claims backend output actions are missing", () => {
@@ -3582,10 +3950,9 @@ test("task fallback copy no longer claims backend output actions are missing", (
   assert.doesNotMatch(taskTabsSource, /当前协议尚未提供稳定的 artifact\.open 能力/);
 });
 
-test("task detail normalization rejects string restore points in rpc mode and keeps null approval fallback", () => {
+test("task detail normalization rejects string restore points in rpc mode and keeps runtime summary defaults", () => {
   withDesktopAliasRuntime((requireFn) => {
     const service = requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js")) as {
-      buildFallbackTaskDetailData: (item: { experience: ReturnType<typeof createFallbackExperience>; task: Task }) => { detail: AgentTaskDetailGetResult };
       normalizeTaskDetailResult: (detail: AgentTaskDetailGetResult) => AgentTaskDetailGetResult;
     };
 
@@ -3604,24 +3971,8 @@ test("task detail normalization rejects string restore points in rpc mode and ke
       /restore point/i,
     );
 
-    const fallback = service.buildFallbackTaskDetailData({
-      experience: createFallbackExperience(),
-      task: createTask({ status: "waiting_auth" }),
-    });
-
-    assert.equal(fallback.detail.approval_request, null);
-    assert.deepEqual(fallback.detail.runtime_summary, {
-      active_steering_count: 0,
-      events_count: 0,
-      latest_failure_code: null,
-      latest_failure_category: null,
-      latest_failure_summary: null,
-      latest_event_type: null,
-      loop_stop_reason: null,
-      observation_signals: [],
-    });
-    assert.equal(fallback.detail.security_summary.pending_authorizations, 0);
-    assert.equal(fallback.detail.security_summary.security_status, "normal");
+    const taskServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.service.ts"), "utf8");
+    assert.doesNotMatch(taskServiceSource, /buildFallbackTaskDetailData/);
   });
 });
 
@@ -3873,6 +4224,19 @@ test("task rpc service keeps transport failures visible instead of switching to 
   );
 });
 
+test("task rpc service builds protocol-only experience instead of reusing mock task fixtures", () => {
+  const taskServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.service.ts"), "utf8");
+  const taskOutputSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskOutput.service.ts"), "utf8");
+
+  assert.match(taskServiceSource, /function buildProtocolTaskExperience\(task: Task, detail\?: AgentTaskDetailGetResult\)/);
+  assert.doesNotMatch(taskServiceSource, /getTaskExperience\(/);
+  assert.doesNotMatch(taskServiceSource, /createFallbackExperience\(/);
+  assert.doesNotMatch(taskServiceSource, /getMockTaskBuckets\(/);
+  assert.doesNotMatch(taskServiceSource, /getMockTaskDetail\(/);
+  assert.doesNotMatch(taskServiceSource, /runMockTaskControl\(/);
+  assert.doesNotMatch(taskOutputSource, /getMockTaskDetail\(/);
+});
+
 test("note rpc service keeps transport failures visible instead of switching to mock data", async () => {
   const transportError = new Error("Named Pipe transport is not wired.");
 
@@ -3899,11 +4263,372 @@ test("note rpc service keeps transport failures visible instead of switching to 
   );
 });
 
-test("TaskDetailPanel defers the entire fallback security summary until formal detail arrives", () => {
+test("note rpc service derives experience from protocol note data instead of mock fixtures", () => {
+  const noteServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/notePage.service.ts"), "utf8");
+
+  assert.match(noteServiceSource, /function mapItems\(items: TodoItem\[\]\)/);
+  assert.doesNotMatch(noteServiceSource, /getMockNoteExperience\(/);
+  assert.doesNotMatch(noteServiceSource, /getMockNoteBuckets\(/);
+  assert.doesNotMatch(noteServiceSource, /runMockConvertNoteToTask\(/);
+  assert.doesNotMatch(noteServiceSource, /runMockUpdateNote\(/);
+});
+
+test("security rpc service keeps transport failures visible instead of switching to mock governance data", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/safety/securityService.js");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadSecurityModuleData: (source?: "rpc" | "mock") => Promise<unknown>;
+        loadSecurityModuleRpcData: () => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadSecurityModuleData("rpc"), /transport is not wired/i);
+      await assert.rejects(() => service.loadSecurityModuleRpcData(), /transport is not wired/i);
+    },
+    {
+      getSecuritySummaryDetailed: () => Promise.reject(transportError),
+      listSecurityPendingDetailed: () => Promise.reject(transportError),
+    },
+  );
+});
+
+test("security detail rpc reads keep transport failures visible instead of switching to mock detail lists", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/safety/securityService.js");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadSecurityAuditRecords: (source: "rpc" | "mock", taskId?: string | null, options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityPendingApprovals: (source: "rpc" | "mock", options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityRestorePoints: (source: "rpc" | "mock", options?: { limit?: number; offset?: number; taskId?: string | null }) => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadSecurityPendingApprovals("rpc"), /transport is not wired/i);
+      await assert.rejects(() => service.loadSecurityRestorePoints("rpc", { taskId: "task_dashboard_001" }), /transport is not wired/i);
+      await assert.rejects(() => service.loadSecurityAuditRecords("rpc", "task_dashboard_001"), /transport is not wired/i);
+    },
+    {
+      listSecurityAuditDetailed: () => Promise.reject(transportError),
+      listSecurityPendingDetailed: () => Promise.reject(transportError),
+      listSecurityRestorePointsDetailed: () => Promise.reject(transportError),
+    },
+  );
+});
+
+test("dashboard home rpc service keeps transport failures visible instead of switching to mock orbit data", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadDashboardHomeData: () => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadDashboardHomeData(), /transport is not wired/i);
+    },
+    {
+      getDashboardModule: () => Promise.reject(transportError),
+      getDashboardOverview: () => Promise.reject(transportError),
+      getRecommendations: () => Promise.reject(transportError),
+    },
+  );
+});
+
+test("mirror overview keeps rendering when memory settings snapshot falls back to a warning snapshot", async () => {
+  const originalWindow = globalThis.window;
+  const storage = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      storage.set(key, value);
+    },
+    removeItem(key: string) {
+      storage.delete(key);
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      localStorage,
+    },
+  });
+
+  try {
+    await withDesktopAliasRuntime(
+      async (requireFn) => {
+        const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/memory/mirrorService.js");
+        const snapshotModulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/shared/dashboardSettingsSnapshot.js");
+        delete requireFn.cache[modulePath];
+        delete requireFn.cache[snapshotModulePath];
+
+        const service = requireFn(modulePath) as {
+          loadMirrorOverviewData: () => Promise<{
+            overview: { history_summary: string[] };
+            rpcContext: { warnings: string[] };
+            settingsSnapshot: {
+              rpcContext: { warnings: string[] };
+              settings: { memory: { enabled: boolean } };
+              source: string;
+            };
+          }>;
+        };
+
+        const result = await service.loadMirrorOverviewData();
+
+        assert.equal(result.overview.history_summary[0], "memory overview");
+        assert.equal(result.settingsSnapshot.source, "rpc");
+        assert.equal(result.settingsSnapshot.settings.memory.enabled, true);
+        assert.deepEqual(result.settingsSnapshot.rpcContext.warnings, ["settings-context: memory settings unavailable"]);
+        assert.ok(result.rpcContext.warnings.includes("settings-context: memory settings unavailable"));
+      },
+      {
+        getMirrorOverviewDetailed: async () => ({
+          data: {
+            daily_summary: null,
+            history_summary: ["memory overview"],
+            memory_references: [],
+            profile: null,
+          },
+          meta: {
+            server_time: "2026-04-28T10:00:00Z",
+          },
+          warnings: [],
+        }),
+        getSettingsDetailed: async () => {
+          throw new Error("memory settings unavailable");
+        },
+        getSecuritySummaryDetailed: async () => ({
+          data: {
+            summary: {
+              latest_restore_point: null,
+              pending_authorizations: 0,
+              risk_level: "green",
+              security_status: "normal",
+            },
+          },
+          meta: {
+            server_time: "2026-04-28T10:00:00Z",
+          },
+          warnings: [],
+        }),
+        listSecurityPendingDetailed: async () => ({
+          data: {
+            items: [],
+            page: {
+              has_more: false,
+              limit: 20,
+              offset: 0,
+              total: 0,
+            },
+          },
+          meta: {
+            server_time: "2026-04-28T10:00:00Z",
+          },
+          warnings: [],
+        }),
+        listTasks: async () => ({
+          items: [],
+          page: {
+            has_more: false,
+            limit: 20,
+            offset: 0,
+            total: 0,
+          },
+        }),
+      },
+    );
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
+test("dashboard home keeps module and recommendation failures local instead of blanking the full orbit", async () => {
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadDashboardHomeData: () => Promise<{
+          focusLine: { headline: string; reason: string };
+          loadWarnings: string[];
+          stateGroups: Array<{ key: string; states: string[] }>;
+          summonTemplates: Array<unknown>;
+          voiceSequences: Array<unknown>;
+        }>;
+      };
+
+      const data = await service.loadDashboardHomeData();
+
+      assert.equal(data.stateGroups.length, 4);
+      assert.equal(data.loadWarnings.length, 2);
+      assert.match(data.loadWarnings[0], /便签摘要同步失败：notes module unavailable/);
+      assert.match(data.loadWarnings[1], /建议流同步失败：recommendations unavailable/);
+      assert.equal(data.focusLine.headline, "首页总览已经连接到真实任务轨道。");
+      assert.equal(data.summonTemplates.length, 0);
+      assert.equal(data.voiceSequences.length, 0);
+    },
+    {
+      getDashboardModule: async (params) => {
+        const moduleName = (params as { module?: string }).module;
+        if (moduleName === "notes") {
+          throw new Error("notes module unavailable");
+        }
+
+        return {
+          highlights: moduleName === "tasks" ? ["继续处理 task focus"] : [],
+          module: moduleName ?? "unknown",
+          summary: {},
+          tab: "overview",
+        };
+      },
+      getDashboardOverview: async () => ({
+        overview: {
+          focus_summary: null,
+          trust_summary: {
+            has_restore_point: false,
+            pending_authorizations: 0,
+            risk_level: "green",
+            workspace_path: "workspace",
+          },
+        },
+      }),
+      getRecommendations: async () => {
+        throw new Error("recommendations unavailable");
+      },
+    },
+  );
+});
+
+test("security service no longer imports governance mocks into product runtime", () => {
+  const securityServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/safety/securityService.ts"), "utf8");
+
+  assert.doesNotMatch(securityServiceSource, /securitySummaryMock/);
+  assert.doesNotMatch(securityServiceSource, /securityPendingMock/);
+  assert.doesNotMatch(securityServiceSource, /securityRestorePointsMock/);
+  assert.doesNotMatch(securityServiceSource, /securityAuditMock/);
+  assert.doesNotMatch(securityServiceSource, /buildMockRespondResult/);
+  assert.doesNotMatch(securityServiceSource, /buildMockRestoreApplyResult/);
+  assert.doesNotMatch(securityServiceSource, /getInitialSecurityModuleData/);
+});
+
+test("security detail rpc reads keep transport failures visible instead of switching to mock detail lists", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/safety/securityService.js");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadSecurityAuditRecords: (source: "rpc" | "mock", taskId?: string | null, options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityPendingApprovals: (source: "rpc" | "mock", options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityRestorePoints: (source: "rpc" | "mock", options?: { limit?: number; offset?: number; taskId?: string | null }) => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadSecurityPendingApprovals("rpc"), /transport is not wired/i);
+      await assert.rejects(() => service.loadSecurityRestorePoints("rpc", { taskId: "task_dashboard_001" }), /transport is not wired/i);
+      await assert.rejects(() => service.loadSecurityAuditRecords("rpc", "task_dashboard_001"), /transport is not wired/i);
+    },
+    {
+      listSecurityAuditDetailed: () => Promise.reject(transportError),
+      listSecurityPendingDetailed: () => Promise.reject(transportError),
+      listSecurityRestorePointsDetailed: () => Promise.reject(transportError),
+    },
+  );
+});
+
+test("mirror rpc service keeps transport failures visible instead of switching to mock overview data", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/memory/mirrorService.js");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadMirrorOverviewData: (source?: "rpc" | "mock") => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadMirrorOverviewData("rpc"), /transport is not wired/i);
+    },
+    {
+      getMirrorOverviewDetailed: () => Promise.reject(transportError),
+    },
+  );
+});
+
+test("mirror service no longer imports overview mock data into product runtime", () => {
+  const mirrorServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/memory/mirrorService.ts"), "utf8");
+
+  assert.doesNotMatch(mirrorServiceSource, /mirrorOverviewMock/);
+  assert.doesNotMatch(mirrorServiceSource, /buildFallbackOverview/);
+  assert.doesNotMatch(mirrorServiceSource, /getInitialMirrorOverviewData/);
+});
+
+test("dashboard home rpc service keeps transport failures visible instead of switching to mock orbit data", async () => {
+  const transportError = new Error("Named Pipe transport is not wired.");
+
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts");
+      delete requireFn.cache[modulePath];
+
+      const service = requireFn(modulePath) as {
+        loadDashboardHomeData: () => Promise<unknown>;
+      };
+
+      await assert.rejects(() => service.loadDashboardHomeData(), /transport is not wired/i);
+    },
+    {
+      getDashboardModule: () => Promise.reject(transportError),
+      getDashboardOverview: () => Promise.reject(transportError),
+      getRecommendations: () => Promise.reject(transportError),
+    },
+  );
+});
+test("TaskDetailPanel defers the security summary until formal detail arrives", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /detailData\.source === "fallback" \|\| detailState !== "ready"/);
+  assert.match(panelSource, /detailState !== "ready" \|\| detail === null/);
   assert.match(panelSource, /等待详情同步后展示风险、授权与恢复点/);
+});
+
+test("task detail fallback keeps operator controls available from the selected task preview", () => {
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+  const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
+  const actionBarSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskActionBar.tsx"), "utf8");
+  const mapperSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.mapper.ts"), "utf8");
+
+  assert.match(taskPageSource, /const selectedTask = selectedTaskPreview\?\.task \?\? null;/);
+  assert.match(taskPageSource, /taskControlMutation\.mutate\(\{ action, taskId: selectedTask\.task_id \}\)/);
+  assert.match(taskPageSource, /taskSteerMutation\.mutate\(\{ message, taskId: selectedTask\.task_id \}\)/);
+  assert.match(taskPageSource, /taskId: selectedTask\.task_id/);
+  assert.doesNotMatch(taskPageSource, /detailData && artifactListQuery\.isError/);
+  assert.match(panelSource, /task \? <TaskActionBar detail=\{detail\} onAction=\{onAction\} task=\{task\} \/> : null/);
+  assert.doesNotMatch(panelSource, /detailData \? <TaskActionBar/);
+  assert.match(panelSource, /<h3 className="task-detail-card__title">已生成的结果<\/h3>/);
+  assert.match(panelSource, /!artifactLoading && !artifactErrorMessage \? \(/);
+  assert.match(actionBarSource, /detail: AgentTaskDetailGetResult \| null;/);
+  assert.match(mapperSource, /export function getTaskPrimaryActions\(task: Task, detail: AgentTaskDetailGetResult \| null\)/);
+  assert.match(mapperSource, /const hasAnchor = detail !== null/);
+  assert.doesNotMatch(mapperSource, /detail\?\.approval_request !== null \|\| detail\?\.security_summary\.latest_restore_point !== null/);
 });
 
 test("TaskDetailPanel renders runtime summary fields from the formal detail payload", () => {
@@ -3931,7 +4656,7 @@ test("TaskDetailPanel keeps evidence artifacts scoped to formal citation links",
 test("TaskDetailPanel separates formal delivery from structured evidence metadata", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /const formalDeliveryResult = detail\.delivery_result;/);
+  assert.match(panelSource, /const formalDeliveryResult = detail\?\.delivery_result \?\? null;/);
   assert.match(panelSource, /Formal Delivery/);
   assert.match(panelSource, /该区域只消费正式 `delivery_result`/);
   assert.match(panelSource, /citation\.evidence_role/);
@@ -3942,8 +4667,8 @@ test("TaskDetailPanel separates formal delivery from structured evidence metadat
 test("TaskDetailPanel renders a formal screen governance section only for screen tasks with synced detail", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /const isScreenTask = task\.source_type === "screen_capture" \|\| detail\.task\.intent\?\.name === "screen_analyze"/);
-  assert.match(panelSource, /if \(!isScreenTask \|\| shouldDeferSecuritySummary\) \{/);
+  assert.match(panelSource, /const isScreenTask = task\?\.source_type === "screen_capture" \|\| detail\?\.task\.intent\?\.name === "screen_analyze"/);
+  assert.match(panelSource, /if \(!isScreenTask \|\| shouldDeferSecuritySummary \|\| !runtimeSummary \|\| detail === null\) \{/);
   assert.match(panelSource, /Screen Governance/);
   assert.match(panelSource, /屏幕授权、恢复与失败收口/);
   assert.match(panelSource, /该区域只消费正式 `approval_request`、`authorization_record`、`audit_record`、`recovery_point` 与 `runtime_summary` 字段/);
@@ -4009,28 +4734,3 @@ test("dashboard validators read enum truth sources from protocol exports", () =>
   assert.match(validatorSource, /import\s*\{[^}]*APPROVAL_STATUSES[^}]*RISK_LEVELS[^}]*\}\s*from\s*"@cialloclaw\/protocol"/);
 });
 
-function createFallbackExperience() {
-  return {
-    acceptance: [],
-    assistantState: {
-      hint: "fallback",
-      label: "fallback",
-    },
-    background: "fallback",
-    constraints: [],
-    dueAt: null,
-    goal: "fallback",
-    nextAction: "fallback",
-    noteDraft: "fallback",
-    noteEntries: [],
-    outputs: [],
-    phase: "fallback",
-    priority: "steady" as const,
-    progressHint: "fallback",
-    quickContext: [],
-    recentConversation: [],
-    relatedFiles: [],
-    stepTargets: {},
-    suggestedNext: "fallback",
-  };
-}
