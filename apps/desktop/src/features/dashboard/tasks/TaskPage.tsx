@@ -60,7 +60,7 @@ import {
 } from "./taskOutput.service";
 import { TaskDetailPanel } from "./components/TaskDetailPanel";
 import { TaskPreviewCard } from "./components/TaskPreviewCard";
-import type { TaskEventFilters, TaskListItem } from "./taskPage.types";
+import type { TaskEventFilters, TaskListItem, TaskPrimaryAction } from "./taskPage.types";
 import "./taskPage.css";
 
 type TaskClusterKey = "archive" | "departure" | "holding" | "irregular";
@@ -262,6 +262,7 @@ export function TaskPage() {
       }
     : null);
   const selectedTask = selectedTaskPreview?.task ?? null;
+  const selectedTaskControlTargetId = selectedTask?.task_id ?? selectedTaskId;
   const detailErrorMessage = taskDetailQuery.isError ? (taskDetailQuery.error instanceof Error ? taskDetailQuery.error.message : "任务详情请求失败") : null;
   const detailState = taskDetailQuery.isError ? "error" : taskDetailQuery.isPending ? "loading" : "ready";
   const artifactListQuery = useQuery({
@@ -296,6 +297,13 @@ export function TaskPage() {
       : `${describeCurrentStep(selectedTaskPreview.task, selectedTaskPreview.experience)} 下一步：${selectedTaskPreview.experience.nextAction}`
     : null;
   const selectedUpdateLabel = selectedTaskPreview ? new Date(selectedTaskPreview.task.updated_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "--";
+  const fallbackDetailActions: TaskPrimaryAction[] | null = !selectedTaskPreview && selectedTaskControlTargetId
+    ? [
+        { action: "restart", label: "重启", tooltip: "重新拉起当前任务。" },
+        { action: "cancel", label: "取消", tooltip: "结束当前任务，并保留已有轨迹。" },
+        { action: "open-safety", label: "安全总览", tooltip: "查看当前任务相关的安全总览。" },
+      ]
+    : null;
 
   useEffect(() => {
     if (routeFocusTaskId || stageInitialized || selectedTaskId) {
@@ -496,7 +504,7 @@ export function TaskPage() {
   });
 
   async function handleOpenSafety() {
-    if (!selectedTask) {
+    if (!selectedTaskControlTargetId) {
       return;
     }
 
@@ -511,7 +519,7 @@ export function TaskPage() {
         navigate(resolveDashboardRoutePath("safety"), {
           state: {
             source: "task-detail",
-            taskId: selectedTask.task_id,
+            taskId: selectedTaskControlTargetId,
           },
         });
         return;
@@ -524,7 +532,7 @@ export function TaskPage() {
       navigate(resolveDashboardRoutePath("safety"), {
         state: {
           source: "task-detail",
-          taskId: selectedTask.task_id,
+          taskId: selectedTaskControlTargetId,
         },
       });
       return;
@@ -534,7 +542,7 @@ export function TaskPage() {
   }
 
   function handlePrimaryAction(action: "pause" | "resume" | "cancel" | "restart" | "open-safety") {
-    if (!selectedTask) {
+    if (!selectedTaskControlTargetId) {
       return;
     }
 
@@ -543,31 +551,31 @@ export function TaskPage() {
       return;
     }
 
-    taskControlMutation.mutate({ action, taskId: selectedTask.task_id });
+    taskControlMutation.mutate({ action, taskId: selectedTaskControlTargetId });
   }
 
   function handleOpenArtifact(artifactId: string) {
-    if (!selectedTask) {
+    if (!selectedTaskControlTargetId) {
       return;
     }
 
-    artifactOpenMutation.mutate({ artifactId, taskId: selectedTask.task_id });
+    artifactOpenMutation.mutate({ artifactId, taskId: selectedTaskControlTargetId });
   }
 
   function handleOpenLatestDelivery() {
-    if (!selectedTask) {
+    if (!selectedTaskControlTargetId) {
       return;
     }
 
-    deliveryOpenMutation.mutate({ taskId: selectedTask.task_id });
+    deliveryOpenMutation.mutate({ taskId: selectedTaskControlTargetId });
   }
 
   function handleSteerTask(message: string) {
-    if (!selectedTask) {
+    if (!selectedTaskControlTargetId) {
       return;
     }
 
-    taskSteerMutation.mutate({ message, taskId: selectedTask.task_id });
+    taskSteerMutation.mutate({ message, taskId: selectedTaskControlTargetId });
   }
 
   function handleApplyTaskEventFilters(nextFilters: TaskEventFilters) {
@@ -833,6 +841,7 @@ export function TaskPage() {
                   detailState={detailState}
                   deliveryActionPending={deliveryOpenMutation.isPending}
                   feedback={feedback}
+                  fallbackActions={fallbackDetailActions}
                   onAction={handlePrimaryAction}
                   onClose={() => setDetailOpen(false)}
                   onOpenArtifact={handleOpenArtifact}

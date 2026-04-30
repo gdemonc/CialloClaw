@@ -8,7 +8,7 @@ import { cn } from "@/utils/cn";
 import { formatTimestamp } from "@/utils/formatters";
 import { getTaskPreviewStatusLabel, getTaskProgress, getTaskStateVoice, getTaskStatusBadgeClass, isTaskEnded } from "../taskPage.mapper";
 import type { Task } from "@cialloclaw/protocol";
-import type { TaskDetailData, TaskExperience } from "../taskPage.types";
+import type { TaskDetailData, TaskExperience, TaskPrimaryAction } from "../taskPage.types";
 import { TaskActionBar } from "./TaskActionBar";
 import { TaskContextBlock } from "./TaskContextBlock";
 import { TaskProgressTimeline } from "./TaskProgressTimeline";
@@ -30,6 +30,7 @@ type TaskDetailPanelProps = {
   detailState: "loading" | "error" | "ready";
   deliveryActionPending: boolean;
   feedback: string | null;
+  fallbackActions?: TaskPrimaryAction[] | null;
   onAction: (action: "pause" | "resume" | "cancel" | "restart" | "open-safety") => void;
   onClose: () => void;
   onOpenArtifact: (artifactId: string) => void;
@@ -58,6 +59,7 @@ export function TaskDetailPanel({
   detailState,
   deliveryActionPending,
   feedback,
+  fallbackActions = null,
   onAction,
   onClose,
   onOpenArtifact,
@@ -169,6 +171,7 @@ export function TaskDetailPanel({
               </div>
               <p className="task-detail-ended-copy">{detailNoticeBody}</p>
             </section>
+            {fallbackActions && fallbackActions.length > 0 ? <TaskActionBar actionsOverride={fallbackActions} detail={null} onAction={onAction} task={null} /> : null}
           </div>
         </ScrollArea>
       </motion.section>

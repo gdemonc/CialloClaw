@@ -3,11 +3,13 @@ import { ArrowUpRight, Pause, Play, RotateCcw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getTaskPrimaryActions } from "../taskPage.mapper";
+import type { TaskPrimaryAction } from "../taskPage.types";
 
 type TaskActionBarProps = {
+  actionsOverride?: TaskPrimaryAction[] | null;
   detail: AgentTaskDetailGetResult | null;
   onAction: (action: "pause" | "resume" | "cancel" | "restart" | "open-safety") => void;
-  task: Task;
+  task: Task | null;
 };
 
 const actionIcons = {
@@ -18,8 +20,8 @@ const actionIcons = {
   resume: Play,
 } as const;
 
-export function TaskActionBar({ detail, onAction, task }: TaskActionBarProps) {
-  const actions = getTaskPrimaryActions(task, detail);
+export function TaskActionBar({ actionsOverride = null, detail, onAction, task }: TaskActionBarProps) {
+  const actions = actionsOverride ?? (task ? getTaskPrimaryActions(task, detail) : []);
 
   return (
     <div className="task-detail-actions">
