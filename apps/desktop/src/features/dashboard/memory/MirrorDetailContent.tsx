@@ -833,10 +833,14 @@ function MirrorMemoryDetail({
                 <p className="mirror-page__micro-label">设置来源</p>
                 <p className="mirror-page__stage-headline">settings.get</p>
               </div>
-              <StatusBadge tone="green">{settingsSnapshot.source}</StatusBadge>
+              <StatusBadge tone={settingsSnapshot.degraded ? "yellow" : "green"}>
+                {settingsSnapshot.degraded ? "local warning view" : settingsSnapshot.source}
+              </StatusBadge>
             </div>
             <p className="mirror-page__summary-copy">
-              {settingsSnapshot.rpcContext.serverTime
+              {settingsSnapshot.degraded
+                ? "当前展示的是本地持久化设置快照；正式 settings.get 读取失败，已降级为带提醒视图。"
+                : settingsSnapshot.rpcContext.serverTime
                 ? `服务端快照时间：${settingsSnapshot.rpcContext.serverTime}`
                 : "当前展示的是正式 settings 快照。"}
             </p>

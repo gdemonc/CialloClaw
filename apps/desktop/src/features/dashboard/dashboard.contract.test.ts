@@ -596,6 +596,7 @@ function loadDashboardSettingsMutationModule(rpcMethods?: DashboardContractRpcMe
         source: string;
         updatedKeys: string[];
         snapshot: {
+          degraded: boolean;
           rpcContext: {
             serverTime: string | null;
             warnings: string[];
@@ -634,6 +635,7 @@ function loadDashboardSettingsSnapshotModule(rpcMethods?: Pick<DashboardContract
         source?: "rpc" | "mock",
         scope?: AgentSettingsGetParams["scope"],
       ) => Promise<{
+        degraded: boolean;
         source: string;
         settings: {
           general: {
@@ -678,6 +680,7 @@ function loadMirrorServiceModule() {
             warnings: string[];
           };
           settingsSnapshot: {
+            degraded: boolean;
             source: string;
             settings: {
               memory: {
@@ -695,6 +698,7 @@ function loadMirrorServiceModule() {
           conversations: Array<{ id: string }>;
         },
         settingsSnapshot: {
+          degraded: boolean;
           source: string;
           settings: {
             memory: {
@@ -721,6 +725,7 @@ function loadMirrorServiceModule() {
           warnings: string[];
         };
         settingsSnapshot: {
+          degraded: boolean;
           source: string;
           settings: {
             memory: {
@@ -2682,6 +2687,7 @@ test("dashboard settings mutation keeps successful writes visible when settings 
     assert.equal(result.persisted, true);
     assert.equal(result.source, "rpc");
     assert.equal(result.readbackWarning, "settings readback timed out");
+    assert.equal(result.snapshot.degraded, true);
     assert.equal(result.snapshot.settings.memory.enabled, false);
     assert.deepEqual(result.snapshot.rpcContext.warnings, ["settings readback timed out"]);
     assert.equal(loadSettings().settings.memory.enabled, false);
@@ -2762,6 +2768,7 @@ test("dashboard settings snapshot merges scoped memory payloads onto the local b
 
     assert.deepEqual(requestedScopes, ["memory"]);
     assert.equal(snapshot.source, "rpc");
+    assert.equal(snapshot.degraded, false);
     assert.equal(snapshot.settings.memory.enabled, false);
     assert.equal(snapshot.settings.memory.lifecycle, "session");
     assert.equal(snapshot.settings.general.download.ask_before_save_each_file, true);
@@ -3826,6 +3833,7 @@ test("mirror overview can reuse a refreshed settings snapshot without reloading 
         warnings: [],
       },
       settingsSnapshot: {
+        degraded: false,
         source: "rpc",
         settings: {
           memory: {
@@ -5316,6 +5324,38 @@ test("security detail rpc reads keep transport failures visible instead of switc
   );
 });
 
+test("security service rejects legacy mock source calls instead of silently issuing rpc requests", async () => {
+  await withDesktopAliasRuntime(async (requireFn) => {
+    const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/safety/securityService.js");
+    delete requireFn.cache[modulePath];
+
+    const service = requireFn(modulePath) as {
+      loadSecurityModuleData: (source?: "rpc" | "mock") => Promise<unknown>;
+      loadSecurityPendingApprovals: (source: "rpc" | "mock", options?: { limit?: number; offset?: number }) => Promise<unknown>;
+      loadSecurityRestorePoints: (
+        source: "rpc" | "mock",
+        options?: { limit?: number; offset?: number; taskId?: string | null },
+      ) => Promise<unknown>;
+      loadSecurityAuditRecords: (
+        source: "rpc" | "mock",
+        taskId?: string | null,
+        options?: { limit?: number; offset?: number },
+      ) => Promise<unknown>;
+    };
+
+    await assert.rejects(() => service.loadSecurityModuleData("mock"), /no longer supports mock data mode/i);
+    await assert.rejects(() => service.loadSecurityPendingApprovals("mock"), /no longer supports mock data mode/i);
+    await assert.rejects(
+      () => service.loadSecurityRestorePoints("mock", { taskId: "task_dashboard_001" }),
+      /no longer supports mock data mode/i,
+    );
+    await assert.rejects(
+      () => service.loadSecurityAuditRecords("mock", "task_dashboard_001"),
+      /no longer supports mock data mode/i,
+    );
+  });
+});
+
 test("dashboard home rpc service keeps transport failures visible instead of switching to mock orbit data", async () => {
   const transportError = new Error("Named Pipe transport is not wired.");
 
@@ -5383,6 +5423,7 @@ test("mirror overview keeps rendering when memory settings snapshot falls back t
 
         assert.equal(result.overview.history_summary[0], "memory overview");
         assert.equal(result.settingsSnapshot.source, "rpc");
+        assert.equal(result.settingsSnapshot.degraded, true);
         assert.equal(result.settingsSnapshot.settings.memory.enabled, true);
         assert.deepEqual(result.settingsSnapshot.rpcContext.warnings, ["settings-context: memory settings unavailable"]);
         assert.ok(result.rpcContext.warnings.includes("settings-context: memory settings unavailable"));
@@ -5727,4 +5768,3 @@ test("dashboard validators read enum truth sources from protocol exports", () =>
 
   assert.match(validatorSource, /import\s*\{[^}]*APPROVAL_STATUSES[^}]*RISK_LEVELS[^}]*\}\s*from\s*"@cialloclaw\/protocol"/);
 });
-

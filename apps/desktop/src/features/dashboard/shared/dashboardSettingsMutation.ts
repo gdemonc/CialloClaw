@@ -186,6 +186,7 @@ function buildPersistedSettingsSnapshot(
   return {
     settings: toProtocolSettingsSnapshot(persistedSettings.settings),
     source: "rpc",
+    degraded: true,
     rpcContext: {
       serverTime: null,
       warnings: [warning],
