@@ -16,6 +16,7 @@ export type DashboardSettingsSnapshotScope = AgentSettingsGetParams["scope"];
 export type DashboardSettingsSnapshotData = {
   settings: SettingsSnapshot["settings"];
   source: DashboardSettingsSource;
+  degraded: boolean;
   rpcContext: {
     serverTime: string | null;
     warnings: string[];
@@ -86,6 +87,7 @@ export function buildDashboardSettingsWarningSnapshot(warning: string): Dashboar
   return {
     settings: getDashboardSettingsBaseline(),
     source: "rpc",
+    degraded: true,
     rpcContext: {
       serverTime: null,
       warnings: [warning],
@@ -122,6 +124,7 @@ export async function loadDashboardSettingsSnapshot(
       scope,
     ),
     source: "rpc",
+    degraded: false,
     rpcContext: {
       serverTime: response.meta?.server_time ?? null,
       warnings: response.warnings,

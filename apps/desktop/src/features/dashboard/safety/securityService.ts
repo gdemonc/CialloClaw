@@ -30,7 +30,7 @@ import {
 } from "@/rpc/methods";
 import { loadTaskDetailData } from "../tasks/taskPage.service";
 
-export type SecurityModuleSource = "rpc" | "mock";
+export type SecurityModuleSource = "rpc";
 
 export type SecurityRpcContext = {
   serverTime: string | null;
@@ -77,12 +77,19 @@ export type SecurityRestoreApplyOutcome = {
   rpcContext: SecurityRpcContext;
 };
 
+function requireRpcSecuritySource(source: unknown) {
+  if (source && source !== "rpc") {
+    throw new Error("Security dashboard no longer supports mock data mode.");
+  }
+}
+
 export async function loadSecurityFocusedTaskDetail(taskId: string, source: SecurityModuleSource): Promise<AgentTaskDetailGetResult | null> {
+  requireRpcSecuritySource(source);
   const normalizedTaskId = taskId.trim();
   if (!normalizedTaskId) {
     return null;
   }
-  const detail = await loadTaskDetailData(normalizedTaskId, source === "mock" ? "mock" : "rpc");
+  const detail = await loadTaskDetailData(normalizedTaskId, "rpc");
   return detail.detail;
 }
 
@@ -106,6 +113,7 @@ function createRequestMeta(): RequestMeta {
 }
 
 export async function loadSecurityModuleData(_source: SecurityModuleSource = "rpc"): Promise<SecurityModuleData> {
+  requireRpcSecuritySource(_source);
   return loadSecurityModuleRpcData();
 }
 
@@ -145,6 +153,7 @@ export async function respondToApproval(
   rememberRule: boolean,
   _source: SecurityModuleSource,
 ): Promise<SecurityRespondOutcome> {
+  requireRpcSecuritySource(_source);
   const params: AgentSecurityRespondParams = {
     request_meta: createRequestMeta(),
     task_id: approval.task_id,
@@ -180,6 +189,7 @@ export async function loadSecurityPendingApprovals(
     offset?: number;
   },
 ): Promise<SecurityPendingListData> {
+  requireRpcSecuritySource(_source);
   const limit = options?.limit ?? 20;
   const offset = options?.offset ?? 0;
 
@@ -209,6 +219,7 @@ export async function loadSecurityRestorePoints(
     taskId?: string | null;
   },
 ): Promise<SecurityRestorePointListData> {
+  requireRpcSecuritySource(_source);
   const limit = options?.limit ?? 20;
   const offset = options?.offset ?? 0;
   const taskId = options?.taskId?.trim() || undefined;
@@ -240,6 +251,7 @@ export async function loadSecurityAuditRecords(
     offset?: number;
   },
 ): Promise<SecurityAuditRecordListData> {
+  requireRpcSecuritySource(_source);
   const limit = options?.limit ?? 20;
   const offset = options?.offset ?? 0;
   const normalizedTaskId = taskId?.trim() || null;
@@ -272,6 +284,7 @@ export async function applySecurityRestorePoint(
   restorePoint: RecoveryPoint,
   _source: SecurityModuleSource,
 ): Promise<SecurityRestoreApplyOutcome> {
+  requireRpcSecuritySource(_source);
   const params: AgentSecurityRestoreApplyParams = {
     request_meta: createRequestMeta(),
     task_id: restorePoint.task_id,
