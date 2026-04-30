@@ -138,6 +138,25 @@ function loadNotePageServiceModule(desktopLocalPath?: DashboardContractDesktopLo
     delete requireFn.cache[modulePath];
 
     return requireFn(modulePath) as {
+      buildSourceNoteFallbackItems: (note: {
+        content: string;
+        fileName: string;
+        modifiedAtMs: number | null;
+        path: string;
+        sourceRoot: string;
+        title: string;
+      }) => Array<{
+        experience: {
+          canConvertToTask: boolean;
+          detailStatus: string;
+          previewStatus: string;
+          repeatRule: string | null;
+        };
+        item: {
+          bucket: string;
+          status: string;
+        };
+      }>;
       isAllowedNoteOpenUrl: (url: string) => boolean;
       resolveNoteResourceOpenExecutionPlan: (resource: {
         id: string;
@@ -1276,6 +1295,16 @@ test("task page stays RPC-only instead of exposing a page-level mock toggle", ()
   assert.doesNotMatch(taskPageSource, /loadDashboardDataMode\("tasks"\)/);
   assert.doesNotMatch(taskPageSource, /saveDashboardDataMode\("tasks"\)/);
   assert.doesNotMatch(taskPageSource, /setDataMode\(/);
+});
+
+test("note page stays RPC-only instead of exposing a page-level mock toggle", () => {
+  const notePageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/NotePage.tsx"), "utf8");
+
+  assert.match(notePageSource, /const dataMode: NotePageDataMode = "rpc";/);
+  assert.doesNotMatch(notePageSource, /DashboardMockToggle/);
+  assert.doesNotMatch(notePageSource, /loadDashboardDataMode\("notes"\)/);
+  assert.doesNotMatch(notePageSource, /saveDashboardDataMode\("notes"\)/);
+  assert.doesNotMatch(notePageSource, /setDataMode\(/);
 });
 
 test("dashboard root no longer falls back to mock home data when the live query is unavailable", () => {
@@ -3875,7 +3904,42 @@ test("note page consumes note query helpers instead of inlining note bucket cont
   assert.match(notePageSource, /getDashboardNoteRefreshPlan/);
   assert.doesNotMatch(notePageSource, /\["dashboard", "notes", "bucket", dataMode/);
   assert.match(noteServiceSource, /isAllowedNoteOpenUrl/);
+  assert.match(noteServiceSource, /if \(payload\?\.url\) \{/);
   assert.match(noteServiceSource, /mode === "open_url"/);
+});
+
+test("source-note fallback cards stay local instead of inferring formal todo bucket and due status", () => {
+  const noteService = loadNotePageServiceModule();
+  const items = noteService.buildSourceNoteFallbackItems({
+    content: [
+      "- [ ] 复查仪表盘文案",
+      "due: 2024-04-30T10:00:00.000Z",
+      "note: 保留这一条给巡检同步。",
+    ].join("\n"),
+    fileName: "review.md",
+    modifiedAtMs: 1714300000000,
+    path: "D:/notes/review.md",
+    sourceRoot: "D:/notes",
+    title: "review",
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].item.bucket, "later");
+  assert.equal(items[0].item.status, "normal");
+  assert.equal(items[0].experience.canConvertToTask, false);
+  assert.equal(items[0].experience.detailStatus, "等待巡检同步");
+  assert.equal(items[0].experience.previewStatus, "待巡检");
+  assert.equal(items[0].experience.repeatRule, null);
+});
+
+test("note service no longer invents related resources from title keywords", () => {
+  const noteServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/notePage.service.ts"), "utf8");
+
+  assert.match(noteServiceSource, /function createResourceHints\(item: TodoItem\)/);
+  assert.doesNotMatch(noteServiceSource, /normalizedTitle\.includes\("template"\)/);
+  assert.doesNotMatch(noteServiceSource, /normalizedTitle\.includes\("report"\)/);
+  assert.doesNotMatch(noteServiceSource, /normalizedTitle\.includes\("design"\)/);
+  assert.match(noteServiceSource, /return \[\];/);
 });
 
 test("task fallback copy no longer claims backend output actions are missing", () => {
@@ -4198,6 +4262,16 @@ test("note rpc service keeps transport failures visible instead of switching to 
       updateNotepad: () => Promise.reject(transportError),
     },
   );
+});
+
+test("note rpc service derives experience from protocol note data instead of mock fixtures", () => {
+  const noteServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/notePage.service.ts"), "utf8");
+
+  assert.match(noteServiceSource, /function mapItems\(items: TodoItem\[\]\)/);
+  assert.doesNotMatch(noteServiceSource, /getMockNoteExperience\(/);
+  assert.doesNotMatch(noteServiceSource, /getMockNoteBuckets\(/);
+  assert.doesNotMatch(noteServiceSource, /runMockConvertNoteToTask\(/);
+  assert.doesNotMatch(noteServiceSource, /runMockUpdateNote\(/);
 });
 
 test("security rpc service keeps transport failures visible instead of switching to mock governance data", async () => {
