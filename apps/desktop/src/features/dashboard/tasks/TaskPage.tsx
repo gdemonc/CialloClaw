@@ -47,7 +47,6 @@ import {
   loadTaskBucketPage,
   loadTaskDetailData,
   loadTaskEventPage,
-  loadTaskPreviewById,
   steerTaskByMessage,
   type TaskPageDataMode,
 } from "./taskPage.service";
@@ -255,19 +254,13 @@ export function TaskPage() {
   });
 
   const selectedDetailTaskId = taskDetailQuery.data?.task.task_id ?? null;
-  const selectedTaskPreviewQuery = useQuery({
-    enabled: detailOpen && Boolean(selectedTaskId) && selectedTaskItem === null,
-    queryKey: ["dashboard", "tasks", "preview", dataMode, selectedTaskId ?? ""],
-    queryFn: () => loadTaskPreviewById(selectedTaskId!, dataMode),
-    refetchOnMount: securityRefreshPlan.refetchOnMount,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
-    retry: false,
-  });
   const detailData = taskDetailQuery.data ?? null;
-  const selectedTaskPreview = detailData
-    ?? selectedTaskItem
-    ?? selectedTaskPreviewQuery.data;
+  const selectedTaskPreview = detailData ?? (selectedTaskItem
+    ? {
+        experience: selectedTaskItem.experience,
+        task: selectedTaskItem.task,
+      }
+    : null);
   const selectedTask = selectedTaskPreview?.task ?? null;
   const detailErrorMessage = taskDetailQuery.isError ? (taskDetailQuery.error instanceof Error ? taskDetailQuery.error.message : "任务详情请求失败") : null;
   const detailState = taskDetailQuery.isError ? "error" : taskDetailQuery.isPending ? "loading" : "ready";
