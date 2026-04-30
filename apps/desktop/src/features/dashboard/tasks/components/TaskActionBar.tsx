@@ -1,12 +1,13 @@
+import type { AgentTaskDetailGetResult, Task } from "@cialloclaw/protocol";
 import { ArrowUpRight, Pause, Play, RotateCcw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getTaskPrimaryActions } from "../taskPage.mapper";
-import type { TaskDetailData } from "../taskPage.types";
 
 type TaskActionBarProps = {
-  detailData: TaskDetailData;
+  detail: AgentTaskDetailGetResult | null;
   onAction: (action: "pause" | "resume" | "cancel" | "restart" | "open-safety") => void;
+  task: Task;
 };
 
 const actionIcons = {
@@ -17,8 +18,8 @@ const actionIcons = {
   resume: Play,
 } as const;
 
-export function TaskActionBar({ detailData, onAction }: TaskActionBarProps) {
-  const actions = getTaskPrimaryActions(detailData.task, detailData.detail);
+export function TaskActionBar({ detail, onAction, task }: TaskActionBarProps) {
+  const actions = getTaskPrimaryActions(task, detail);
 
   return (
     <div className="task-detail-actions">

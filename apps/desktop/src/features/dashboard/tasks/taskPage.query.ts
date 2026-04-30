@@ -30,8 +30,8 @@ export function shouldEnableDashboardTaskDetailQuery(selectedTaskId: string | nu
   return Boolean(selectedTaskId && detailOpen);
 }
 
-export function resolveDashboardTaskSafetyOpenPlan(detailSource: "rpc" | "mock" | "fallback") {
+export function resolveDashboardTaskSafetyOpenPlan(detailState: "loading" | "error" | "ready") {
   return {
-    shouldRefetchDetail: detailSource === "fallback",
+    shouldRefetchDetail: detailState !== "ready",
   };
 }

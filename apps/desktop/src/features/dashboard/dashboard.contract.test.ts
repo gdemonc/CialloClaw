@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 import type {
+  AgentDeliveryOpenParams,
   AgentDeliveryOpenResult,
   AgentNotepadConvertToTaskParams,
   AgentNotepadConvertToTaskResult,
@@ -12,7 +13,9 @@ import type {
   AgentSettingsGetParams,
   AgentNotepadUpdateParams,
   AgentNotepadUpdateResult,
+  AgentTaskArtifactListParams,
   AgentTaskArtifactListResult,
+  AgentTaskArtifactOpenParams,
   AgentTaskArtifactOpenResult,
   AgentTaskControlParams,
   AgentTaskControlResult,
@@ -103,7 +106,7 @@ function loadTaskPageQueryModule() {
       buildDashboardTaskBucketQueryKey: (dataMode: "rpc" | "mock", group: "unfinished" | "finished", limit: number) => unknown;
       buildDashboardTaskDetailQueryKey: (dataMode: "rpc" | "mock", taskId: string) => unknown;
       getDashboardTaskSecurityRefreshPlan: (dataMode: "rpc" | "mock") => unknown;
-      resolveDashboardTaskSafetyOpenPlan: (detailSource: "rpc" | "mock" | "fallback") => unknown;
+      resolveDashboardTaskSafetyOpenPlan: (detailState: "loading" | "error" | "ready") => unknown;
       shouldEnableDashboardTaskDetailQuery: (selectedTaskId: string | null, detailOpen: boolean) => boolean;
       dashboardTaskArtifactQueryPrefix: unknown;
       dashboardTaskBucketQueryPrefix: unknown;
@@ -614,8 +617,11 @@ type DashboardContractRpcMethodOverrides = {
   listSecurityAuditDetailed?: (params: unknown) => Promise<unknown>;
   listSecurityPendingDetailed?: (params: unknown) => Promise<unknown>;
   listSecurityRestorePointsDetailed?: (params: unknown) => Promise<unknown>;
+  listTaskArtifacts?: (params: AgentTaskArtifactListParams) => Promise<AgentTaskArtifactListResult>;
   listNotepad?: (params: AgentNotepadListParams) => Promise<AgentNotepadListResult>;
   listTasks?: (params: AgentTaskListParams) => Promise<AgentTaskListResult>;
+  openDelivery?: (params: AgentDeliveryOpenParams) => Promise<AgentDeliveryOpenResult>;
+  openTaskArtifact?: (params: AgentTaskArtifactOpenParams) => Promise<AgentTaskArtifactOpenResult>;
   respondSecurityDetailed?: (params: unknown) => Promise<unknown>;
   runTaskInspector?: (params: unknown) => Promise<unknown>;
   validateSettingsModel?: (params: unknown) => Promise<unknown>;
@@ -743,20 +749,26 @@ function withDesktopAliasRuntime<T>(
         listSecurityRestorePointsDetailed:
           rpcMethods?.listSecurityRestorePointsDetailed ??
           (() => Promise.reject(new Error("listSecurityRestorePointsDetailed should not run in dashboard contract tests"))),
-        listTaskArtifacts() {
-          throw new Error("listTaskArtifacts should not run in dashboard contract tests");
-        },
+        listTaskArtifacts:
+          rpcMethods?.listTaskArtifacts ??
+          (() => {
+            throw new Error("listTaskArtifacts should not run in dashboard contract tests");
+          }),
         listTasks:
           rpcMethods?.listTasks ??
           (() => {
             throw new Error("listTasks should not run in dashboard contract tests");
           }),
-        openDelivery() {
-          throw new Error("openDelivery should not run in dashboard contract tests");
-        },
-        openTaskArtifact() {
-          throw new Error("openTaskArtifact should not run in dashboard contract tests");
-        },
+        openDelivery:
+          rpcMethods?.openDelivery ??
+          (() => {
+            throw new Error("openDelivery should not run in dashboard contract tests");
+          }),
+        openTaskArtifact:
+          rpcMethods?.openTaskArtifact ??
+          (() => {
+            throw new Error("openTaskArtifact should not run in dashboard contract tests");
+          }),
         respondSecurityDetailed:
           rpcMethods?.respondSecurityDetailed ??
           (() => Promise.reject(new Error("respondSecurityDetailed should not run in dashboard contract tests"))),
@@ -1256,6 +1268,16 @@ test("task page no longer exposes edit guidance and uses 安全总览 without an
   assert.doesNotMatch(taskPageSource, /action === "edit"/);
 });
 
+test("task page stays RPC-only instead of exposing a page-level mock toggle", () => {
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+
+  assert.match(taskPageSource, /const dataMode: TaskPageDataMode = "rpc";/);
+  assert.doesNotMatch(taskPageSource, /DashboardMockToggle/);
+  assert.doesNotMatch(taskPageSource, /loadDashboardDataMode\("tasks"\)/);
+  assert.doesNotMatch(taskPageSource, /saveDashboardDataMode\("tasks"\)/);
+  assert.doesNotMatch(taskPageSource, /setDataMode\(/);
+});
+
 test("dashboard root no longer falls back to mock home data when the live query is unavailable", () => {
   const dashboardRootSource = readFileSync(resolve(desktopRoot, "src/app/dashboard/DashboardRoot.tsx"), "utf8");
   const dashboardHomeServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/home/dashboardHome.service.ts"), "utf8");
@@ -1266,6 +1288,7 @@ test("dashboard root no longer falls back to mock home data when the live query 
   assert.match(dashboardRootSource, /sequences=\{dashboardHomeData\?\.voiceSequences \?\? \[\]\}/);
   assert.match(dashboardRootSource, /dashboardHomeStatusShellModules/);
   assert.match(dashboardRootSource, /to=\{module\.route\}/);
+  assert.doesNotMatch(dashboardRootSource, /clearDashboardResultPageRecoveryForSearch/);
   assert.doesNotMatch(dashboardHomeServiceSource, /export function getDashboardHomeFallbackData/);
   assert.match(dashboardHomeServiceSource, /Promise\.allSettled/);
 });
@@ -3329,10 +3352,13 @@ test("SecurityApp keeps snapshot-only approval detail renderable when live cards
 test("TaskPage wiring helpers require real detail for safety focus and keep detail query task-id centric", () => {
   const { resolveDashboardTaskSafetyOpenPlan, shouldEnableDashboardTaskDetailQuery } = loadTaskPageQueryModule();
 
-  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("fallback"), {
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("loading"), {
     shouldRefetchDetail: true,
   });
-  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("rpc"), {
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("error"), {
+    shouldRefetchDetail: true,
+  });
+  assert.deepEqual(resolveDashboardTaskSafetyOpenPlan("ready"), {
     shouldRefetchDetail: false,
   });
   assert.equal(shouldEnableDashboardTaskDetailQuery("task_dashboard_001", true), true);
@@ -3440,34 +3466,113 @@ test("task output helpers normalize open actions from existing rpc contracts", a
   );
 });
 
-test("task output service exposes artifact list and open flows in mock mode", async () => {
-  const outputService = loadTaskOutputServiceModule();
+test("task output service exposes artifact list and open flows through formal RPC payloads", async () => {
+  await withDesktopAliasRuntime(
+    async (requireFn) => {
+      const modulePath = resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskOutput.service.js");
+      delete requireFn.cache[modulePath];
 
-  const artifactPage = await outputService.loadTaskArtifactPage("task_done_001", "mock");
-  assert.ok(artifactPage.items.length > 0);
-  assert.equal(artifactPage.page.offset, 0);
+      const outputService = requireFn(modulePath) as {
+        describeTaskOpenResultForCurrentTask: (plan: { mode: string; taskId: string | null }, currentTaskId: string | null) => string | null;
+        isAllowedTaskOpenUrl: (url: string) => boolean;
+        loadTaskArtifactPage: (taskId: string) => Promise<AgentTaskArtifactListResult>;
+        openTaskArtifactForTask: (taskId: string, artifactId: string) => Promise<AgentTaskArtifactOpenResult>;
+        openTaskDeliveryForTask: (taskId: string, artifactId?: string) => Promise<AgentDeliveryOpenResult>;
+      };
 
-  const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003", "mock");
-  assert.equal(artifactOpen.open_action, "reveal_in_folder");
+      const artifactPage = await outputService.loadTaskArtifactPage("task_done_001");
+      assert.ok(artifactPage.items.length > 0);
+      assert.equal(artifactPage.page.offset, 0);
 
-  const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001", undefined, "mock");
-  assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+      const artifactOpen = await outputService.openTaskArtifactForTask("task_done_001", "artifact_done_003");
+      assert.equal(artifactOpen.open_action, "reveal_in_folder");
 
-  assert.equal(
-    outputService.describeTaskOpenResultForCurrentTask(
-      {
-        mode: "task_detail",
-        taskId: "task_done_001",
-      },
-      "task_done_001",
-    ),
-    "当前任务没有独立可打开结果，请先查看成果区。",
+      const deliveryOpen = await outputService.openTaskDeliveryForTask("task_done_001");
+      assert.equal(deliveryOpen.delivery_result.payload.task_id, "task_done_001");
+
+      assert.equal(
+        outputService.describeTaskOpenResultForCurrentTask(
+          {
+            mode: "task_detail",
+            taskId: "task_done_001",
+          },
+          "task_done_001",
+        ),
+        "当前任务没有独立可打开结果，请先查看成果区。",
+      );
+
+      assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
+      assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
+      assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
+      assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
+    },
+    {
+      listTaskArtifacts: async () => ({
+        items: [
+          {
+            artifact_id: "artifact_done_003",
+            artifact_type: "reveal_in_folder",
+            created_at: "2026-04-28T08:00:00.000Z",
+            mime_type: "application/pdf",
+            path: "workspace/reports/q3-review.pdf",
+            task_id: "task_done_001",
+            title: "q3-review.pdf",
+          },
+        ],
+        page: {
+          has_more: false,
+          limit: 1,
+          offset: 0,
+          total: 1,
+        },
+      }),
+      openDelivery: async () => ({
+        delivery_result: {
+          payload: {
+            path: null,
+            task_id: "task_done_001",
+            url: "https://example.test/result",
+          },
+          preview_text: "结果页",
+          title: "结果页",
+          type: "result_page",
+        },
+        open_action: "result_page",
+        resolved_payload: {
+          path: null,
+          task_id: "task_done_001",
+          url: "https://example.test/result",
+        },
+      }),
+      openTaskArtifact: async () => ({
+        artifact: {
+          artifact_id: "artifact_done_003",
+          artifact_type: "reveal_in_folder",
+          created_at: "2026-04-28T08:00:00.000Z",
+          mime_type: "application/pdf",
+          path: "workspace/reports/q3-review.pdf",
+          task_id: "task_done_001",
+          title: "q3-review.pdf",
+        },
+        delivery_result: {
+          payload: {
+            path: "workspace/reports/q3-review.pdf",
+            task_id: "task_done_001",
+            url: null,
+          },
+          preview_text: "定位文件",
+          title: "q3-review.pdf",
+          type: "reveal_in_folder",
+        },
+        open_action: "reveal_in_folder",
+        resolved_payload: {
+          path: "workspace/reports/q3-review.pdf",
+          task_id: "task_done_001",
+          url: null,
+        },
+      }),
+    },
   );
-
-  assert.equal(outputService.isAllowedTaskOpenUrl("https://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("http://example.test/result"), true);
-  assert.equal(outputService.isAllowedTaskOpenUrl("javascript:alert(1)"), false);
-  assert.equal(outputService.isAllowedTaskOpenUrl("file:///tmp/out.txt"), false);
 });
 
 test("note resource open helpers normalize task, url, local open, and copy flows", () => {
@@ -3782,10 +3887,9 @@ test("task fallback copy no longer claims backend output actions are missing", (
   assert.doesNotMatch(taskTabsSource, /当前协议尚未提供稳定的 artifact\.open 能力/);
 });
 
-test("task detail normalization rejects string restore points in rpc mode and keeps null approval fallback", () => {
+test("task detail normalization rejects string restore points in rpc mode and keeps runtime summary defaults", () => {
   withDesktopAliasRuntime((requireFn) => {
     const service = requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.service.js")) as {
-      buildFallbackTaskDetailData: (item: { experience: ReturnType<typeof createFallbackExperience>; task: Task }) => { detail: AgentTaskDetailGetResult };
       normalizeTaskDetailResult: (detail: AgentTaskDetailGetResult) => AgentTaskDetailGetResult;
     };
 
@@ -3804,24 +3908,8 @@ test("task detail normalization rejects string restore points in rpc mode and ke
       /restore point/i,
     );
 
-    const fallback = service.buildFallbackTaskDetailData({
-      experience: createFallbackExperience(),
-      task: createTask({ status: "waiting_auth" }),
-    });
-
-    assert.equal(fallback.detail.approval_request, null);
-    assert.deepEqual(fallback.detail.runtime_summary, {
-      active_steering_count: 0,
-      events_count: 0,
-      latest_failure_code: null,
-      latest_failure_category: null,
-      latest_failure_summary: null,
-      latest_event_type: null,
-      loop_stop_reason: null,
-      observation_signals: [],
-    });
-    assert.equal(fallback.detail.security_summary.pending_authorizations, 0);
-    assert.equal(fallback.detail.security_summary.security_status, "normal");
+    const taskServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.service.ts"), "utf8");
+    assert.doesNotMatch(taskServiceSource, /buildFallbackTaskDetailData/);
   });
 });
 
@@ -4071,6 +4159,19 @@ test("task rpc service keeps transport failures visible instead of switching to 
       listTasks: () => Promise.reject(transportError),
     },
   );
+});
+
+test("task rpc service builds protocol-only experience instead of reusing mock task fixtures", () => {
+  const taskServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.service.ts"), "utf8");
+  const taskOutputSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskOutput.service.ts"), "utf8");
+
+  assert.match(taskServiceSource, /function buildProtocolTaskExperience\(task: Task, detail\?: AgentTaskDetailGetResult\)/);
+  assert.doesNotMatch(taskServiceSource, /getTaskExperience\(/);
+  assert.doesNotMatch(taskServiceSource, /createFallbackExperience\(/);
+  assert.doesNotMatch(taskServiceSource, /getMockTaskBuckets\(/);
+  assert.doesNotMatch(taskServiceSource, /getMockTaskDetail\(/);
+  assert.doesNotMatch(taskServiceSource, /runMockTaskControl\(/);
+  assert.doesNotMatch(taskOutputSource, /getMockTaskDetail\(/);
 });
 
 test("note rpc service keeps transport failures visible instead of switching to mock data", async () => {
@@ -4429,12 +4530,32 @@ test("dashboard home rpc service keeps transport failures visible instead of swi
     },
   );
 });
-
 test("TaskDetailPanel defers the security summary until formal detail arrives", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /detailData\.source === "fallback" \|\| detailState !== "ready"/);
+  assert.match(panelSource, /detailState !== "ready" \|\| detail === null/);
   assert.match(panelSource, /等待详情同步后展示风险、授权与恢复点/);
+});
+
+test("task detail fallback keeps operator controls available from the selected task preview", () => {
+  const taskPageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/TaskPage.tsx"), "utf8");
+  const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
+  const actionBarSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskActionBar.tsx"), "utf8");
+  const mapperSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/taskPage.mapper.ts"), "utf8");
+
+  assert.match(taskPageSource, /const selectedTask = selectedTaskPreview\?\.task \?\? null;/);
+  assert.match(taskPageSource, /taskControlMutation\.mutate\(\{ action, taskId: selectedTask\.task_id \}\)/);
+  assert.match(taskPageSource, /taskSteerMutation\.mutate\(\{ message, taskId: selectedTask\.task_id \}\)/);
+  assert.match(taskPageSource, /taskId: selectedTask\.task_id/);
+  assert.doesNotMatch(taskPageSource, /detailData && artifactListQuery\.isError/);
+  assert.match(panelSource, /task \? <TaskActionBar detail=\{detail\} onAction=\{onAction\} task=\{task\} \/> : null/);
+  assert.doesNotMatch(panelSource, /detailData \? <TaskActionBar/);
+  assert.match(panelSource, /<h3 className="task-detail-card__title">已生成的结果<\/h3>/);
+  assert.match(panelSource, /!artifactLoading && !artifactErrorMessage \? \(/);
+  assert.match(actionBarSource, /detail: AgentTaskDetailGetResult \| null;/);
+  assert.match(mapperSource, /export function getTaskPrimaryActions\(task: Task, detail: AgentTaskDetailGetResult \| null\)/);
+  assert.match(mapperSource, /const hasAnchor = detail !== null/);
+  assert.doesNotMatch(mapperSource, /detail\?\.approval_request !== null \|\| detail\?\.security_summary\.latest_restore_point !== null/);
 });
 
 test("TaskDetailPanel renders runtime summary fields from the formal detail payload", () => {
@@ -4462,7 +4583,7 @@ test("TaskDetailPanel keeps evidence artifacts scoped to formal citation links",
 test("TaskDetailPanel separates formal delivery from structured evidence metadata", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /const formalDeliveryResult = detail\.delivery_result;/);
+  assert.match(panelSource, /const formalDeliveryResult = detail\?\.delivery_result \?\? null;/);
   assert.match(panelSource, /Formal Delivery/);
   assert.match(panelSource, /该区域只消费正式 `delivery_result`/);
   assert.match(panelSource, /citation\.evidence_role/);
@@ -4473,8 +4594,8 @@ test("TaskDetailPanel separates formal delivery from structured evidence metadat
 test("TaskDetailPanel renders a formal screen governance section only for screen tasks with synced detail", () => {
   const panelSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/tasks/components/TaskDetailPanel.tsx"), "utf8");
 
-  assert.match(panelSource, /const isScreenTask = task\.source_type === "screen_capture" \|\| detail\.task\.intent\?\.name === "screen_analyze"/);
-  assert.match(panelSource, /if \(!isScreenTask \|\| shouldDeferSecuritySummary\) \{/);
+  assert.match(panelSource, /const isScreenTask = task\?\.source_type === "screen_capture" \|\| detail\?\.task\.intent\?\.name === "screen_analyze"/);
+  assert.match(panelSource, /if \(!isScreenTask \|\| shouldDeferSecuritySummary \|\| !runtimeSummary \|\| detail === null\) \{/);
   assert.match(panelSource, /Screen Governance/);
   assert.match(panelSource, /屏幕授权、恢复与失败收口/);
   assert.match(panelSource, /该区域只消费正式 `approval_request`、`authorization_record`、`audit_record`、`recovery_point` 与 `runtime_summary` 字段/);
@@ -4540,28 +4661,3 @@ test("dashboard validators read enum truth sources from protocol exports", () =>
   assert.match(validatorSource, /import\s*\{[^}]*APPROVAL_STATUSES[^}]*RISK_LEVELS[^}]*\}\s*from\s*"@cialloclaw\/protocol"/);
 });
 
-function createFallbackExperience() {
-  return {
-    acceptance: [],
-    assistantState: {
-      hint: "fallback",
-      label: "fallback",
-    },
-    background: "fallback",
-    constraints: [],
-    dueAt: null,
-    goal: "fallback",
-    nextAction: "fallback",
-    noteDraft: "fallback",
-    noteEntries: [],
-    outputs: [],
-    phase: "fallback",
-    priority: "steady" as const,
-    progressHint: "fallback",
-    quickContext: [],
-    recentConversation: [],
-    relatedFiles: [],
-    stepTargets: {},
-    suggestedNext: "fallback",
-  };
-}

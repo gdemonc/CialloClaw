@@ -190,8 +190,13 @@ export function getFinishedTaskGroups(items: TaskListItem[], expanded: boolean):
   return groups.filter((group) => group.items.length > 0);
 }
 
-function buildTaskSafetyAction(task: Task, detail: AgentTaskDetailGetResult): TaskPrimaryAction {
-  const hasAnchor = task.status === "waiting_auth" || detail.approval_request !== null || detail.security_summary.latest_restore_point !== null;
+function buildTaskSafetyAction(task: Task, detail: AgentTaskDetailGetResult | null): TaskPrimaryAction {
+  const hasAnchor = detail !== null
+    && (
+      task.status === "waiting_auth"
+      || detail.approval_request !== null
+      || detail.security_summary.latest_restore_point !== null
+    );
 
   return {
     action: "open-safety",
@@ -200,7 +205,7 @@ function buildTaskSafetyAction(task: Task, detail: AgentTaskDetailGetResult): Ta
   };
 }
 
-export function getTaskPrimaryActions(task: Task, detail: AgentTaskDetailGetResult): TaskPrimaryAction[] {
+export function getTaskPrimaryActions(task: Task, detail: AgentTaskDetailGetResult | null): TaskPrimaryAction[] {
   const safetyAction = buildTaskSafetyAction(task, detail);
 
   if (task.status === "processing") {
