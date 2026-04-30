@@ -1,6 +1,11 @@
 import type { AgentSettingsGetParams, RequestMeta, SettingsSnapshot, TimeInterval } from "@cialloclaw/protocol";
 import { getSettingsDetailed } from "@/rpc/methods";
-import { hydrateDesktopSettings, loadSettings, toProtocolSettingsSnapshot } from "@/services/settingsService";
+import {
+  hydrateDesktopRuntimeDefaults,
+  hydrateDesktopSettings,
+  loadSettings,
+  toProtocolSettingsSnapshot,
+} from "@/services/settingsService";
 
 export type DashboardSettingsSource = "rpc";
 export type DashboardSettingsSnapshotScope = AgentSettingsGetParams["scope"];
@@ -102,6 +107,7 @@ export async function loadDashboardSettingsSnapshot(
   scope: DashboardSettingsSnapshotScope = "all",
 ): Promise<DashboardSettingsSnapshotData> {
   const baseline = getDashboardSettingsBaseline();
+  await hydrateDesktopRuntimeDefaults();
   const params: AgentSettingsGetParams = {
     request_meta: createRequestMeta(),
     scope,
