@@ -301,6 +301,11 @@ function loadSettingsServiceModule(desktopHost?: DashboardContractDesktopHostOve
     delete requireFn.cache[runtimeDefaultsModulePath];
 
     return requireFn(modulePath) as {
+      loadDesktopRuntimeDefaultsSnapshot: () => Promise<{
+        data_path: string;
+        workspace_path: string;
+        task_sources: string[];
+      } | null>;
       loadHydratedSettings: () => Promise<{
         settings: {
           general: {
@@ -516,10 +521,14 @@ function loadControlPanelServiceModule(rpcMethods?: DashboardContractRpcMethodOv
   }, rpcMethods);
 }
 
-function loadControlPanelAboutServiceModule() {
+function loadControlPanelAboutServiceModule(desktopHost?: DashboardContractDesktopHostOverrides) {
   return withDesktopAliasRuntime((requireFn) => {
     const modulePath = resolve(desktopRoot, "src/services/controlPanelAboutService.ts");
+    const settingsModulePath = resolve(desktopRoot, ".cache/dashboard-tests/services/settingsService.js");
+    const runtimeDefaultsModulePath = resolve(desktopRoot, ".cache/dashboard-tests/platform/desktopRuntimeDefaults.js");
     delete requireFn.cache[modulePath];
+    delete requireFn.cache[settingsModulePath];
+    delete requireFn.cache[runtimeDefaultsModulePath];
 
     return requireFn(modulePath) as {
       getControlPanelAboutFeedbackChannels: () => Array<
@@ -544,11 +553,17 @@ function loadControlPanelAboutServiceModule() {
       getControlPanelAboutFallbackSnapshot: () => {
         appName: string;
         appVersion: string;
+        localDataPath: string | null;
       };
+      loadControlPanelAboutSnapshot: () => Promise<{
+        appName: string;
+        appVersion: string;
+        localDataPath: string | null;
+      }>;
       copyControlPanelAboutValue: (value: string, successMessage: string) => Promise<string>;
-      runControlPanelAboutAction: (action: "share") => Promise<string>;
+      runControlPanelAboutAction: (action: "open_data_directory" | "share") => Promise<string>;
     };
-  });
+  }, undefined, undefined, desktopHost);
 }
 
 function loadDashboardSettingsMutationModule(rpcMethods?: DashboardContractRpcMethodOverrides) {
@@ -1789,6 +1804,56 @@ test("settings service hydrates runtime defaults before loading fallback snapsho
   }
 });
 
+test("settings service exposes the trusted runtime data directory snapshot", async () => {
+  const originalWindow = globalThis.window;
+  const storage = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      storage.set(key, value);
+    },
+    removeItem(key: string) {
+      storage.delete(key);
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      __TAURI_INTERNALS__: {},
+      localStorage,
+    },
+  });
+
+  try {
+    const settingsService = loadSettingsServiceModule({
+      invoke: async (command) => {
+        assert.equal(command, "desktop_get_runtime_defaults");
+        return {
+          data_path: "/Users/runtime/CialloClaw/data",
+          workspace_path: "/Users/runtime/CialloClaw/workspace",
+          task_sources: ["/Users/runtime/CialloClaw/workspace/todos"],
+        };
+      },
+    });
+
+    const runtimeDefaults = await settingsService.loadDesktopRuntimeDefaultsSnapshot();
+
+    assert.deepEqual(runtimeDefaults, {
+      data_path: "/Users/runtime/CialloClaw/data",
+      workspace_path: "/Users/runtime/CialloClaw/workspace",
+      task_sources: ["/Users/runtime/CialloClaw/workspace/todos"],
+    });
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
 test("settings service loadHydratedSettings keeps existing snapshot when host hydration fails", async () => {
   const originalWindow = globalThis.window;
   const storage = new Map<string, string>();
@@ -2265,6 +2330,7 @@ test("control panel about service exposes fallback metadata and feedback channel
   assert.deepEqual(fallback, {
     appName: "CialloClaw",
     appVersion: "0.1.0",
+    localDataPath: null,
   });
   assert.deepEqual(feedbackChannels, [
     {
@@ -2295,11 +2361,66 @@ test("control panel about service exposes fallback metadata and feedback channel
   ]);
 });
 
-test("control panel about helpers copy feedback and share links", async () => {
-  const { copyControlPanelAboutValue, runControlPanelAboutAction } = loadControlPanelAboutServiceModule();
+test("control panel about snapshot reuses the trusted runtime data directory", async () => {
+  const originalWindow = globalThis.window;
+  const storage = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      storage.set(key, value);
+    },
+    removeItem(key: string) {
+      storage.delete(key);
+    },
+  };
+
+  Object.assign(globalThis, {
+    window: {
+      __TAURI_INTERNALS__: {},
+      localStorage,
+    },
+  });
+
+  try {
+    const { loadControlPanelAboutSnapshot } = loadControlPanelAboutServiceModule({
+      invoke: async (command) => {
+        assert.equal(command, "desktop_get_runtime_defaults");
+        return {
+          data_path: "/Users/runtime/CialloClaw/data",
+          workspace_path: "/Users/runtime/CialloClaw/workspace",
+          task_sources: ["/Users/runtime/CialloClaw/workspace/todos"],
+        };
+      },
+    });
+
+    const snapshot = await loadControlPanelAboutSnapshot();
+
+    assert.equal(snapshot.appName, "CialloClaw");
+    assert.equal(snapshot.appVersion, "0.1.0");
+    assert.equal(snapshot.localDataPath, "/Users/runtime/CialloClaw/data");
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.assign(globalThis, { window: originalWindow });
+    }
+  }
+});
+
+test("control panel about helpers open the data directory and share links", async () => {
   const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
   const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   const copiedValues: string[] = [];
+  const invokedCommands: string[] = [];
+
+  const { copyControlPanelAboutValue, runControlPanelAboutAction } = loadControlPanelAboutServiceModule({
+    invoke: async (command) => {
+      invokedCommands.push(command);
+      return undefined;
+    },
+  });
 
   Object.defineProperty(globalThis, "navigator", {
     configurable: true,
@@ -2312,12 +2433,22 @@ test("control panel about helpers copy feedback and share links", async () => {
     },
   });
 
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: {},
+    },
+  });
+
   try {
     const feedbackCopy = await copyControlPanelAboutValue("https://github.com/1024XEngineer/CialloClaw/issues", "已复制反馈渠道链接。");
+    const openFeedback = await runControlPanelAboutAction("open_data_directory");
     const shareFeedback = await runControlPanelAboutAction("share");
 
     assert.equal(feedbackCopy, "已复制反馈渠道链接。");
+    assert.equal(openFeedback, "已在系统中打开本地存储目录。");
     assert.equal(shareFeedback, "已复制分享链接。");
+    assert.deepEqual(invokedCommands, ["desktop_open_runtime_data_path"]);
     assert.deepEqual(copiedValues, [
       "https://github.com/1024XEngineer/CialloClaw/issues",
       "https://github.com/1024XEngineer/CialloClaw",
@@ -2344,8 +2475,11 @@ test("control panel app wires the about navigation without update-only fields", 
   assert.match(controlPanelAppSource, /type ControlPanelSectionId = .*"about"/);
   assert.match(controlPanelAppSource, /navLabel: "关于"/);
   assert.match(controlPanelAppSource, /case "about":/);
+  assert.match(controlPanelAppSource, /title="本地存储位置"/);
   assert.match(controlPanelAppSource, /title="帮助与反馈"/);
   assert.match(controlPanelAppSource, /title="版本信息"/);
+  assert.match(controlPanelAppSource, /数据目录/);
+  assert.match(controlPanelAppSource, /打开目录/);
   assert.match(controlPanelAppSource, /应用内新手引导/);
   assert.match(controlPanelAppSource, /反馈渠道/);
   assert.match(controlPanelAppSource, /CONTROL_PANEL_ABOUT_FEEDBACK_CHANNELS/);
@@ -2369,6 +2503,8 @@ test("control panel app surfaces about action feedback in local UI state", () =>
   assert.match(controlPanelAppSource, /const \[aboutActionFeedback, setAboutActionFeedback\] = useState<string \| null>\(null\);/);
   assert.match(controlPanelAppSource, /const feedback = await runControlPanelAboutAction\(action\);[\s\S]*setAboutActionFeedback\(feedback\);/);
   assert.match(controlPanelAppSource, /const feedback = await copyControlPanelAboutValue\(url, "已复制反馈渠道链接。"\);[\s\S]*setAboutActionFeedback\(feedback\);/);
+  assert.match(controlPanelAppSource, /const localDataPath = aboutSnapshot\.localDataPath\?\.trim\(\) \?\? "";/);
+  assert.match(controlPanelAppSource, /handleAboutAction\("open_data_directory"\)/);
   assert.match(controlPanelAppSource, /aboutActionFeedback \? \([\s\S]*aria-live="polite"[\s\S]*\{aboutActionFeedback\}/);
   assert.match(controlPanelAppSource, /const settings = \(await loadHydratedSettings\(\)\)\.settings;/);
   assert.match(controlPanelAppSource, /const fallbackData = await buildLocalControlPanelSnapshot\(\);/);

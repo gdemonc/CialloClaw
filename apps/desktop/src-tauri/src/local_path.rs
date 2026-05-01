@@ -71,6 +71,12 @@ pub fn reveal_local_path(raw_path: &str, roots: &LocalPathRoots) -> Result<(), S
     reveal_with_system_handler(&target)
 }
 
+/// Opens one host-owned runtime directory after creating it when needed.
+pub fn open_trusted_directory(target: &Path) -> Result<(), String> {
+    let canonical_target = prepare_trusted_directory_target(target)?;
+    open_with_system_handler(&canonical_target)
+}
+
 /// Resolves delivery paths against trusted workspace or runtime-open roots and
 /// rejects any target that escapes those formal desktop-open scopes.
 fn resolve_existing_local_path(raw_path: &str, roots: &LocalPathRoots) -> Result<PathBuf, String> {
@@ -127,6 +133,31 @@ fn resolve_path_candidate(raw_path: &str, roots: &LocalPathRoots) -> Result<Path
     }
 
     Err("runtime-relative delivery paths must stay within the trusted temp/ scope".to_string())
+}
+
+fn prepare_trusted_directory_target(target: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(target).map_err(|error| {
+        format!(
+            "failed to create trusted local directory {}: {error}",
+            target.display()
+        )
+    })?;
+
+    let canonical_target = target.canonicalize().map_err(|error| {
+        format!(
+            "failed to canonicalize trusted local directory {}: {error}",
+            target.display()
+        )
+    })?;
+
+    if !canonical_target.is_dir() {
+        return Err(format!(
+            "trusted local target is not a directory: {}",
+            canonical_target.display()
+        ));
+    }
+
+    Ok(canonical_target)
 }
 
 fn strip_workspace_prefix(raw_path: &str) -> Option<&str> {
@@ -283,7 +314,10 @@ fn run_platform_command(program: &str, args: &[&Path], description: &str) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_existing_local_path, resolve_path_candidate, LocalPathRoots};
+    use super::{
+        prepare_trusted_directory_target, resolve_existing_local_path, resolve_path_candidate,
+        LocalPathRoots,
+    };
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -421,6 +455,32 @@ mod tests {
         );
 
         assert_eq!(roots.workspace_root(), Some(&missing_workspace_root));
+    }
+
+    #[test]
+    fn prepare_trusted_directory_target_creates_missing_directory() {
+        let target = unique_temp_path("trusted-runtime-data-dir");
+
+        let resolved = prepare_trusted_directory_target(&target)
+            .expect("prepare trusted runtime data directory");
+
+        assert!(resolved.is_absolute());
+        assert!(resolved.is_dir());
+
+        let _ = fs::remove_dir_all(target);
+    }
+
+    #[test]
+    fn prepare_trusted_directory_target_rejects_existing_files() {
+        let target = unique_temp_path("trusted-runtime-data-file.txt");
+        fs::write(&target, "not a directory").expect("write trusted runtime file");
+
+        let error = prepare_trusted_directory_target(&target)
+            .expect_err("file target should not masquerade as a directory");
+
+        assert!(error.contains("not a directory"));
+
+        let _ = fs::remove_file(target);
     }
 
     struct RootFixture {

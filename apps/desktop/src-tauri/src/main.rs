@@ -50,6 +50,7 @@ type JsonChannel = Channel<Value>;
 
 #[derive(Clone, Serialize)]
 struct DesktopRuntimeDefaultsPayload {
+    data_path: String,
     workspace_path: String,
     task_sources: Vec<String>,
 }
@@ -452,6 +453,18 @@ async fn desktop_reveal_local_path(
 }
 
 #[tauri::command]
+async fn desktop_open_runtime_data_path(
+    runtime_paths_state: tauri::State<'_, Arc<runtime_paths::DesktopRuntimePaths>>,
+) -> Result<(), String> {
+    let runtime_paths_state = Arc::clone(runtime_paths_state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        local_path::open_trusted_directory(runtime_paths_state.data_dir().as_path())
+    })
+    .await
+    .map_err(|error| format!("desktop runtime data open task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn desktop_load_source_notes(
     bridge_state: tauri::State<'_, Arc<NamedPipeBridgeState>>,
     settings_snapshot_state: tauri::State<'_, Arc<DesktopSettingsSnapshotState>>,
@@ -567,6 +580,10 @@ fn desktop_get_runtime_defaults(
     runtime_paths_state: tauri::State<'_, Arc<runtime_paths::DesktopRuntimePaths>>,
 ) -> DesktopRuntimeDefaultsPayload {
     DesktopRuntimeDefaultsPayload {
+        data_path: runtime_paths_state
+            .data_dir()
+            .to_string_lossy()
+            .replace('\\', "/"),
         workspace_path: runtime_paths_state
             .workspace_root()
             .to_string_lossy()
@@ -2298,6 +2315,7 @@ fn main() {
             desktop_promote_onboarding,
             desktop_open_local_path,
             desktop_reveal_local_path,
+            desktop_open_runtime_data_path,
             desktop_sync_settings_snapshot,
             desktop_get_runtime_defaults,
             desktop_load_source_notes,

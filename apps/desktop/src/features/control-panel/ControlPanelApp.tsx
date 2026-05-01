@@ -836,6 +836,8 @@ export function ControlPanelApp() {
   const providerApiKeyHint = "通过 JSON-RPC `agent.settings.update` 提交；只写入后端 Stronghold，不会回显明文。";
   const hasRpcLoadError = loadError !== null;
   const onboardingReplayDisabled = isSaving || isRunningInspection || isReplayingOnboarding;
+  const localDataPath = aboutSnapshot.localDataPath?.trim() ?? "";
+  const localDataPathLabel = localDataPath || "当前本地存储目录暂不可用";
 
   const saveStateValue = hasChanges ? <StatusPill tone="pending">待保存</StatusPill> : <StatusPill tone="synced">已同步</StatusPill>;
 
@@ -1618,6 +1620,24 @@ export function ControlPanelApp() {
       case "about":
         return (
           <>
+            <SettingsCard title="本地存储位置" description="这里展示桌面端当前用户目录下的正式 data 存储位置。">
+              <InfoRow label="数据目录" value={<code className="control-panel-shell__about-link">{localDataPathLabel}</code>} />
+
+              <ControlLine label="定位操作" hint="优先在系统资源管理器中打开 data 目录；目录不存在时会由宿主按需创建。" className="control-panel-shell__row--stacked">
+                <div className="control-panel-shell__about-actions">
+                  <Button
+                    type="button"
+                    variant="soft"
+                    className="control-panel-shell__about-button"
+                    onClick={() => void handleAboutAction("open_data_directory")}
+                    disabled={localDataPath.length === 0}
+                  >
+                    打开目录
+                  </Button>
+                </div>
+              </ControlLine>
+            </SettingsCard>
+
             <SettingsCard title="帮助与反馈" description="集中展示应用内帮助入口与可扩展的反馈渠道。">
               <InfoRow label="帮助入口" value="应用内新手引导" />
 
