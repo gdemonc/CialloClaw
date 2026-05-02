@@ -458,7 +458,10 @@ async fn desktop_open_runtime_data_path(
 ) -> Result<(), String> {
     let runtime_paths_state = Arc::clone(runtime_paths_state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        local_path::open_trusted_directory(runtime_paths_state.data_dir().as_path())
+        local_path::open_trusted_directory(
+            runtime_paths_state.data_dir().as_path(),
+            runtime_paths_state.runtime_root().as_path(),
+        )
     })
     .await
     .map_err(|error| format!("desktop runtime data open task failed: {error}"))?
