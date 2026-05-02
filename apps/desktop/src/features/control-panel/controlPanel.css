@@ -644,7 +644,7 @@
 
 .control-panel-shell__about-link {
   color: var(--cp-copy);
-  font-family: "Consolas", "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 0.84rem;
   word-break: break-all;
 }
@@ -717,7 +717,7 @@
 
 .control-panel-shell__feedback-link-copy {
   color: var(--cp-copy);
-  font-family: "Consolas", "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 0.8rem;
   word-break: break-all;
 }
