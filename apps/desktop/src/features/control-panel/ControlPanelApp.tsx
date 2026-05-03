@@ -218,6 +218,21 @@ function normalizeIntervalNumberInput(rawValue: string, fallbackValue: number) {
   return parsedValue;
 }
 
+function normalizeDisplayPath(rawPath: string) {
+  // Runtime path payloads are display-only here, so trim Windows extended-path
+  // prefixes away instead of leaking host-internal `//?/` forms into the UI.
+  const trimmed = rawPath.trim();
+  if (trimmed.startsWith("//?/UNC/")) {
+    return `//${trimmed.slice("//?/UNC/".length)}`;
+  }
+
+  if (trimmed.startsWith("//?/")) {
+    return trimmed.slice("//?/".length);
+  }
+
+  return trimmed;
+}
+
 function getFloatingBallSizeSliderValue(size: string) {
   const matchedIndex = FLOATING_BALL_SIZE_VALUES.indexOf(size as (typeof FLOATING_BALL_SIZE_VALUES)[number]);
   return matchedIndex === -1 ? 1 : matchedIndex;
@@ -838,7 +853,7 @@ export function ControlPanelApp() {
   const providerApiKeyHint = "通过 JSON-RPC `agent.settings.update` 提交；只写入后端 Stronghold，不会回显明文。";
   const hasRpcLoadError = loadError !== null;
   const onboardingReplayDisabled = isSaving || isRunningInspection || isReplayingOnboarding;
-  const localDataPath = aboutSnapshot.localDataPath?.trim() ?? "";
+  const localDataPath = normalizeDisplayPath(aboutSnapshot.localDataPath ?? "");
   const localDataPathLabel = localDataPath || "当前本地存储目录暂不可用";
   const restoreDefaultsDisabled = isSaving || isRunningInspection || isValidatingModel || isReplayingOnboarding;
 
@@ -1673,7 +1688,7 @@ export function ControlPanelApp() {
                   <Button
                     type="button"
                     variant="soft"
-                    className="control-panel-shell__about-button"
+                    className="control-panel-shell__button control-panel-shell__button--secondary control-panel-shell__about-button"
                     onClick={() => void handleAboutAction("open_data_directory")}
                     disabled={localDataPath.length === 0}
                   >
@@ -1704,7 +1719,12 @@ export function ControlPanelApp() {
 
               <ControlLine label="分享操作" hint="优先复制仓库地址；若当前环境不支持剪贴板，会直接显示链接。" className="control-panel-shell__row--stacked">
                 <div className="control-panel-shell__about-actions">
-                  <Button type="button" variant="soft" className="control-panel-shell__about-button" onClick={() => void handleAboutAction("share")}>
+                  <Button
+                    type="button"
+                    variant="soft"
+                    className="control-panel-shell__button control-panel-shell__button--secondary control-panel-shell__about-button"
+                    onClick={() => void handleAboutAction("share")}
+                  >
                     复制链接
                   </Button>
                 </div>
@@ -1716,32 +1736,29 @@ export function ControlPanelApp() {
               <InfoRow label="应用版本" value={aboutSnapshot.appVersion} />
             </SettingsCard>
 
-            <SettingsCard title="恢复默认设置" description="将桌面端普通设置恢复到默认值，同时保留当前 workspace、任务来源、模型路由与已保存 API Key。">
+            <SettingsCard title="恢复默认偏好" description="将界面与协作偏好恢复到默认值，同时保留当前 workspace、任务来源、模型路由与已保存 API Key。">
               <Text as="p" size="2" className="control-panel-shell__about-note">
-                恢复默认设置不会删除任务历史、记忆、本地文件，也不会重置当前 workspace 路径、任务来源、模型路由或清除已保存 API Key。
+                会重置通用设置、悬浮球、记忆设置、任务巡检与预算自动降级；不会删除任务历史、记忆内容、本地文件，也不会改动当前 workspace 路径、任务来源、模型路由或已保存 API Key。
               </Text>
 
               {isRestoreDefaultsConfirming ? (
                 <div className="control-panel-shell__about-confirm">
                   <Text as="p" size="2" className="control-panel-shell__about-note">
-                    确认后会立即提交默认设置；若存在需要延后生效的设置，仍按后端当前 `apply_mode` 规则生效。
+                    确认后会立即提交上述偏好重置；若存在需要延后生效的设置，仍按后端当前 `apply_mode` 规则生效。
                   </Text>
                   <div className="control-panel-shell__about-actions">
                     <Button
                       type="button"
-                      variant="soft"
-                      color="amber"
-                      className="control-panel-shell__about-button"
+                      className="control-panel-shell__button control-panel-shell__button--primary control-panel-shell__about-button"
                       onClick={() => void handleRestoreDefaults()}
                       disabled={restoreDefaultsDisabled}
                     >
-                      确认恢复默认设置
+                      确认恢复默认偏好
                     </Button>
                     <Button
                       type="button"
                       variant="soft"
-                      color="gray"
-                      className="control-panel-shell__about-button"
+                      className="control-panel-shell__button control-panel-shell__button--ghost control-panel-shell__about-button"
                       onClick={handleCancelRestoreDefaults}
                       disabled={restoreDefaultsDisabled}
                     >
@@ -1750,17 +1767,16 @@ export function ControlPanelApp() {
                   </div>
                 </div>
               ) : (
-                <ControlLine label="恢复操作" hint="这里只重置普通设置，不会改动当前 workspace、任务来源、模型路由或已保存 API Key。" className="control-panel-shell__row--stacked">
+                <ControlLine label="重置操作" hint="这里只恢复通用与协作偏好，不会改动当前 workspace、任务来源、模型路由或已保存 API Key。" className="control-panel-shell__row--stacked">
                   <div className="control-panel-shell__about-actions">
                     <Button
                       type="button"
                       variant="soft"
-                      color="gray"
-                      className="control-panel-shell__about-button"
+                      className="control-panel-shell__button control-panel-shell__button--secondary control-panel-shell__about-button"
                       onClick={handlePrepareRestoreDefaults}
                       disabled={restoreDefaultsDisabled}
                     >
-                      恢复默认设置
+                      恢复默认偏好
                     </Button>
                   </div>
                 </ControlLine>

@@ -639,7 +639,30 @@
 }
 
 .control-panel-shell__about-button {
+  border: 1px solid var(--cp-border-strong);
+  box-shadow: var(--cp-card-shadow);
+  font-weight: 600;
   min-height: 2.65rem;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.control-panel-shell__about-button:not(:disabled):hover,
+.control-panel-shell__about-button:not(:disabled):focus-visible {
+  border-color: var(--cp-accent-outline);
+  box-shadow:
+    var(--cp-card-shadow),
+    0 0 0 1px var(--cp-accent-outline-soft);
+}
+
+.control-panel-shell__about-button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.control-panel-shell__about-button:disabled {
+  opacity: 0.58;
 }
 
 .control-panel-shell__about-link {

@@ -2635,10 +2635,10 @@ test("control panel app wires the about navigation without update-only fields", 
   assert.match(controlPanelAppSource, /title="本地存储位置"/);
   assert.match(controlPanelAppSource, /title="帮助与反馈"/);
   assert.match(controlPanelAppSource, /title="版本信息"/);
-  assert.match(controlPanelAppSource, /title="恢复默认设置"/);
+  assert.match(controlPanelAppSource, /title="恢复默认偏好"/);
   assert.match(controlPanelAppSource, /数据目录/);
   assert.match(controlPanelAppSource, /打开目录/);
-  assert.match(controlPanelAppSource, /恢复默认设置/);
+  assert.match(controlPanelAppSource, /恢复默认偏好/);
   assert.match(controlPanelAppSource, /应用内新手引导/);
   assert.match(controlPanelAppSource, /反馈渠道/);
   assert.match(controlPanelAppSource, /CONTROL_PANEL_ABOUT_FEEDBACK_CHANNELS/);
@@ -2662,12 +2662,13 @@ test("control panel app surfaces about action feedback in local UI state", () =>
   assert.match(controlPanelAppSource, /const \[aboutActionFeedback, setAboutActionFeedback\] = useState<string \| null>\(null\);/);
   assert.match(controlPanelAppSource, /const feedback = await runControlPanelAboutAction\(action\);[\s\S]*setAboutActionFeedback\(feedback\);/);
   assert.match(controlPanelAppSource, /const feedback = await copyControlPanelAboutValue\(url, "已复制反馈渠道链接。"\);[\s\S]*setAboutActionFeedback\(feedback\);/);
-  assert.match(controlPanelAppSource, /const localDataPath = aboutSnapshot\.localDataPath\?\.trim\(\) \?\? "";/);
+  assert.match(controlPanelAppSource, /const localDataPath = normalizeDisplayPath\(aboutSnapshot\.localDataPath \?\? ""\);/);
   assert.match(controlPanelAppSource, /handleAboutAction\("open_data_directory"\)/);
   assert.match(controlPanelAppSource, /const \[isRestoreDefaultsConfirming, setIsRestoreDefaultsConfirming\] = useState\(false\);/);
   assert.match(controlPanelAppSource, /const restoreDraft = buildControlPanelRestoreDefaultsData\(draft\);/);
   assert.match(controlPanelAppSource, /validateModel: false/);
-  assert.match(controlPanelAppSource, /模型路由或已保存 API Key/);
+  assert.match(controlPanelAppSource, /模型路由与已保存 API Key/);
+  assert.match(controlPanelAppSource, /恢复默认偏好/);
   assert.match(controlPanelAppSource, /aboutActionFeedback \? \([\s\S]*aria-live="polite"[\s\S]*\{aboutActionFeedback\}/);
   assert.match(controlPanelAppSource, /const settings = \(await loadHydratedSettings\(\)\)\.settings;/);
   assert.match(controlPanelAppSource, /const fallbackData = await buildLocalControlPanelSnapshot\(\);/);
