@@ -1030,12 +1030,17 @@ export function ControlPanelApp() {
       return;
     }
 
-    const restoreDraft = buildControlPanelRestoreDefaultsData(draft);
+    const persistedPanelData = panelData;
+    if (!persistedPanelData) {
+      return;
+    }
+
+    const restoreDraft = buildControlPanelRestoreDefaultsData(draft, persistedPanelData);
 
     setIsSaving(true);
     try {
       const result = await saveControlPanelData(restoreDraft, {
-        confirmedInspector: panelData.inspector,
+        confirmedInspector: persistedPanelData.inspector,
         saveInspector: true,
         saveSettings: true,
         validateModel: false,
@@ -1743,7 +1748,7 @@ export function ControlPanelApp() {
                     会重置通用设置、悬浮球、记忆设置、任务巡检与预算自动降级。
                   </Text>
                   <Text as="p" size="2" className="control-panel-shell__about-note">
-                    不会删除任务历史、记忆内容、本地文件，也不会改动当前 workspace 路径、任务来源、模型路由或已保存 API Key。
+                    不会删除任务历史、记忆内容、本地文件，也不会改动当前已保存的 workspace 路径、任务来源、模型路由或已保存 API Key。
                   </Text>
                   <Text as="p" size="2" className="control-panel-shell__about-note">
                     确认后会立即提交默认设置；若存在需要延后生效的设置，仍按后端当前 `apply_mode` 规则生效。

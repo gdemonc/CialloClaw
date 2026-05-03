@@ -484,6 +484,91 @@ function loadControlPanelServiceModule(rpcMethods?: DashboardContractRpcMethodOv
           };
         };
         warnings?: string[];
+      }, persisted: {
+        source: "rpc";
+        providerApiKeyInput: string;
+        settings: {
+          general: {
+            language: string;
+            auto_launch: boolean;
+            theme_mode: string;
+            voice_notification_enabled: boolean;
+            voice_type: string;
+            download: {
+              ask_before_save_each_file: boolean;
+              workspace_path: string;
+            };
+          };
+          floating_ball: {
+            auto_snap: boolean;
+            idle_translucent: boolean;
+            position_mode: string;
+            size: string;
+          };
+          memory: {
+            enabled: boolean;
+            lifecycle: string;
+            work_summary_interval: {
+              unit: string;
+              value: number;
+            };
+            profile_refresh_interval: {
+              unit: string;
+              value: number;
+            };
+          };
+          task_automation: {
+            task_sources: string[];
+            inspection_interval: {
+              unit: string;
+              value: number;
+            };
+            inspect_on_file_change: boolean;
+            inspect_on_startup: boolean;
+            remind_before_deadline: boolean;
+            remind_when_stale: boolean;
+          };
+          models: {
+            provider: string;
+            provider_api_key_configured: boolean;
+            budget_auto_downgrade: boolean;
+            base_url: string;
+            model: string;
+            stronghold: {
+              backend: string;
+              available: boolean;
+              fallback: boolean;
+              initialized: boolean;
+              formal_store: boolean;
+            };
+          };
+        };
+        inspector: {
+          task_sources: string[];
+          inspection_interval: {
+            unit: string;
+            value: number;
+          };
+          inspect_on_file_change: boolean;
+          inspect_on_startup: boolean;
+          remind_before_deadline: boolean;
+          remind_when_stale: boolean;
+        };
+        securitySummary: {
+          security_status: string;
+          pending_authorizations: number;
+          latest_restore_point: null;
+          token_cost_summary: {
+            current_task_tokens: number;
+            current_task_cost: number;
+            today_tokens: number;
+            today_cost: number;
+            single_task_limit: number;
+            daily_limit: number;
+            budget_auto_downgrade: boolean;
+          };
+        };
+        warnings?: string[];
       }) => {
         source: "rpc";
         providerApiKeyInput: string;
@@ -2665,7 +2750,7 @@ test("control panel app surfaces about action feedback in local UI state", () =>
   assert.match(controlPanelAppSource, /const localDataPath = normalizeDisplayPath\(aboutSnapshot\.localDataPath \?\? ""\);/);
   assert.match(controlPanelAppSource, /handleAboutAction\("open_data_directory"\)/);
   assert.match(controlPanelAppSource, /const \[isRestoreDefaultsConfirming, setIsRestoreDefaultsConfirming\] = useState\(false\);/);
-  assert.match(controlPanelAppSource, /const restoreDraft = buildControlPanelRestoreDefaultsData\(draft\);/);
+  assert.match(controlPanelAppSource, /const restoreDraft = buildControlPanelRestoreDefaultsData\(draft, persistedPanelData\);/);
   assert.match(controlPanelAppSource, /validateModel: false/);
   assert.match(controlPanelAppSource, /不会删除任务历史、记忆内容、本地文件/);
   assert.match(controlPanelAppSource, /恢复默认设置/);
@@ -2685,12 +2770,12 @@ test("control panel keeps budget rows in the safety page instead of duplicating 
   assert.doesNotMatch(controlPanelAppSource, /label="当日上限"/);
 });
 
-test("control panel restore-default helper preserves workspace, task-source, and model-route boundaries", () => {
+test("control panel restore-default helper preserves the persisted workspace, task-source, and model-route boundaries", () => {
   const { buildControlPanelRestoreDefaultsData } = loadControlPanelServiceModule();
 
-  const restored = buildControlPanelRestoreDefaultsData({
+  const persisted: Parameters<typeof buildControlPanelRestoreDefaultsData>[1] = {
     source: "rpc",
-    providerApiKeyInput: "sk-unsaved-secret",
+    providerApiKeyInput: "",
     settings: {
       general: {
         language: "en-US",
@@ -2699,7 +2784,7 @@ test("control panel restore-default helper preserves workspace, task-source, and
         voice_notification_enabled: false,
         voice_type: "custom_voice",
         download: {
-          workspace_path: "D:/CustomWorkspace",
+          workspace_path: "D:/SavedWorkspace",
           ask_before_save_each_file: false,
         },
       },
@@ -2722,7 +2807,7 @@ test("control panel restore-default helper preserves workspace, task-source, and
         },
       },
       task_automation: {
-        task_sources: ["D:/custom-todos"],
+        task_sources: ["D:/saved-todos"],
         inspection_interval: {
           unit: "hour",
           value: 2,
@@ -2748,7 +2833,7 @@ test("control panel restore-default helper preserves workspace, task-source, and
       },
     },
     inspector: {
-      task_sources: ["D:/custom-todos"],
+      task_sources: ["D:/saved-todos"],
       inspection_interval: {
         unit: "hour",
         value: 2,
@@ -2773,11 +2858,45 @@ test("control panel restore-default helper preserves workspace, task-source, and
       },
     },
     warnings: ["stale warning"],
-  });
+  };
+
+  const draft: Parameters<typeof buildControlPanelRestoreDefaultsData>[0] = {
+    ...persisted,
+    providerApiKeyInput: "sk-unsaved-secret",
+    settings: {
+      ...persisted.settings,
+      general: {
+        ...persisted.settings.general,
+        download: {
+          ...persisted.settings.general.download,
+          workspace_path: "D:/UnsavedWorkspace",
+        },
+      },
+      task_automation: {
+        ...persisted.settings.task_automation,
+        task_sources: ["D:/unsaved-todos"],
+      },
+      models: {
+        ...persisted.settings.models,
+        provider: "openai-compatible",
+        base_url: "https://draft.example.com/v1",
+        model: "draft-model",
+      },
+    },
+    inspector: {
+      ...persisted.inspector,
+      task_sources: ["D:/unsaved-todos"],
+    },
+  };
+
+  const restored = buildControlPanelRestoreDefaultsData(
+    draft,
+    persisted,
+  );
 
   assert.equal(restored.providerApiKeyInput, "");
   assert.equal(restored.settings.general.language, "zh-CN");
-  assert.equal(restored.settings.general.download.workspace_path, "D:/CustomWorkspace");
+  assert.equal(restored.settings.general.download.workspace_path, "D:/SavedWorkspace");
   assert.equal(restored.settings.general.download.ask_before_save_each_file, true);
   assert.equal(restored.settings.floating_ball.size, "medium");
   assert.equal(restored.settings.memory.enabled, true);
@@ -2794,8 +2913,8 @@ test("control panel restore-default helper preserves workspace, task-source, and
     initialized: true,
     formal_store: true,
   });
-  assert.deepEqual(restored.settings.task_automation.task_sources, ["D:/custom-todos"]);
-  assert.deepEqual(restored.inspector.task_sources, ["D:/custom-todos"]);
+  assert.deepEqual(restored.settings.task_automation.task_sources, ["D:/saved-todos"]);
+  assert.deepEqual(restored.inspector.task_sources, ["D:/saved-todos"]);
   assert.deepEqual(restored.inspector.inspection_interval, { unit: "minute", value: 15 });
   assert.equal(restored.inspector.inspect_on_startup, true);
   assert.equal(restored.inspector.inspect_on_file_change, true);
