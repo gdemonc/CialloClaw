@@ -1736,15 +1736,17 @@ export function ControlPanelApp() {
               <InfoRow label="应用版本" value={aboutSnapshot.appVersion} />
             </SettingsCard>
 
-            <SettingsCard title="恢复默认偏好" description="将界面与协作偏好恢复到默认值，同时保留当前 workspace、任务来源、模型路由与已保存 API Key。">
-              <Text as="p" size="2" className="control-panel-shell__about-note">
-                会重置通用设置、悬浮球、记忆设置、任务巡检与预算自动降级；不会删除任务历史、记忆内容、本地文件，也不会改动当前 workspace 路径、任务来源、模型路由或已保存 API Key。
-              </Text>
-
+            <SettingsCard title="恢复默认设置" description="将桌面端可重置的设置恢复到默认值。">
               {isRestoreDefaultsConfirming ? (
                 <div className="control-panel-shell__about-confirm">
                   <Text as="p" size="2" className="control-panel-shell__about-note">
-                    确认后会立即提交上述偏好重置；若存在需要延后生效的设置，仍按后端当前 `apply_mode` 规则生效。
+                    会重置通用设置、悬浮球、记忆设置、任务巡检与预算自动降级。
+                  </Text>
+                  <Text as="p" size="2" className="control-panel-shell__about-note">
+                    不会删除任务历史、记忆内容、本地文件，也不会改动当前 workspace 路径、任务来源、模型路由或已保存 API Key。
+                  </Text>
+                  <Text as="p" size="2" className="control-panel-shell__about-note">
+                    确认后会立即提交默认设置；若存在需要延后生效的设置，仍按后端当前 `apply_mode` 规则生效。
                   </Text>
                   <div className="control-panel-shell__about-actions">
                     <Button
@@ -1753,7 +1755,7 @@ export function ControlPanelApp() {
                       onClick={() => void handleRestoreDefaults()}
                       disabled={restoreDefaultsDisabled}
                     >
-                      确认恢复默认偏好
+                      确认恢复默认设置
                     </Button>
                     <Button
                       type="button"
@@ -1767,7 +1769,7 @@ export function ControlPanelApp() {
                   </div>
                 </div>
               ) : (
-                <ControlLine label="重置操作" hint="这里只恢复通用与协作偏好，不会改动当前 workspace、任务来源、模型路由或已保存 API Key。" className="control-panel-shell__row--stacked">
+                <ControlLine label="恢复操作" hint="先进入确认步骤，再查看本次会恢复哪些设置。" className="control-panel-shell__row--stacked">
                   <div className="control-panel-shell__about-actions">
                     <Button
                       type="button"
@@ -1776,7 +1778,7 @@ export function ControlPanelApp() {
                       onClick={handlePrepareRestoreDefaults}
                       disabled={restoreDefaultsDisabled}
                     >
-                      恢复默认偏好
+                      恢复默认设置
                     </Button>
                   </div>
                 </ControlLine>
