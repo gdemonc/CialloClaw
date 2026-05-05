@@ -170,10 +170,10 @@ function loadConversationSessionServiceModule() {
 function loadTaskPageQueryModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/tasks/taskPage.query.js")) as {
-      buildDashboardTaskArtifactQueryKey: (dataMode: "rpc" | "mock", taskId: string) => unknown;
-      buildDashboardTaskBucketQueryKey: (dataMode: "rpc" | "mock", group: "unfinished" | "finished", limit: number) => unknown;
-      buildDashboardTaskDetailQueryKey: (dataMode: "rpc" | "mock", taskId: string) => unknown;
-      getDashboardTaskSecurityRefreshPlan: (dataMode: "rpc" | "mock") => unknown;
+      buildDashboardTaskArtifactQueryKey: (dataMode: "rpc", taskId: string) => unknown;
+      buildDashboardTaskBucketQueryKey: (dataMode: "rpc", group: "unfinished" | "finished", limit: number) => unknown;
+      buildDashboardTaskDetailQueryKey: (dataMode: "rpc", taskId: string) => unknown;
+      getDashboardTaskSecurityRefreshPlan: (dataMode: "rpc") => unknown;
       resolveDashboardTaskSafetyOpenPlan: (detailState: "loading" | "error" | "ready") => unknown;
       shouldEnableDashboardTaskDetailQuery: (selectedTaskId: string | null, detailOpen: boolean) => boolean;
       dashboardTaskArtifactQueryPrefix: unknown;
@@ -186,9 +186,9 @@ function loadTaskPageQueryModule() {
 function loadNotePageQueryModule() {
   return withDesktopAliasRuntime((requireFn) =>
     requireFn(resolve(desktopRoot, ".cache/dashboard-tests/features/dashboard/notes/notePage.query.js")) as {
-      buildDashboardNoteBucketInvalidateKeys: (dataMode: "rpc" | "mock", groups: ReadonlyArray<"upcoming" | "later" | "recurring_rule" | "closed">) => unknown;
-      buildDashboardNoteBucketQueryKey: (dataMode: "rpc" | "mock", group: "upcoming" | "later" | "recurring_rule" | "closed") => unknown;
-      getDashboardNoteRefreshPlan: (dataMode: "rpc" | "mock") => unknown;
+      buildDashboardNoteBucketInvalidateKeys: (dataMode: "rpc", groups: ReadonlyArray<"upcoming" | "later" | "recurring_rule" | "closed">) => unknown;
+      buildDashboardNoteBucketQueryKey: (dataMode: "rpc", group: "upcoming" | "later" | "recurring_rule" | "closed") => unknown;
+      getDashboardNoteRefreshPlan: (dataMode: "rpc") => unknown;
       dashboardNoteBucketGroups: unknown;
       dashboardNoteBucketQueryPrefix: unknown;
     },
@@ -275,9 +275,9 @@ function loadTaskOutputServiceModule(desktopLocalPath?: DashboardContractDesktop
     return requireFn(modulePath) as {
       describeTaskOpenResultForCurrentTask: (plan: { mode: string; taskId: string | null }, currentTaskId: string | null) => string | null;
       isAllowedTaskOpenUrl: (url: string) => boolean;
-      loadTaskArtifactPage: (taskId: string, source: "rpc" | "mock") => Promise<AgentTaskArtifactListResult>;
-      openTaskArtifactForTask: (taskId: string, artifactId: string, source: "rpc" | "mock") => Promise<AgentTaskArtifactOpenResult>;
-      openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source: "rpc" | "mock") => Promise<AgentDeliveryOpenResult>;
+      loadTaskArtifactPage: (taskId: string, source: "rpc") => Promise<AgentTaskArtifactListResult>;
+      openTaskArtifactForTask: (taskId: string, artifactId: string, source: "rpc") => Promise<AgentTaskArtifactOpenResult>;
+      openTaskDeliveryForTask: (taskId: string, artifactId: string | undefined, source: "rpc") => Promise<AgentDeliveryOpenResult>;
       resolveTaskOpenExecutionPlan: (result: AgentTaskArtifactOpenResult | AgentDeliveryOpenResult) => {
         mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
         taskId: string | null;
@@ -853,7 +853,7 @@ function loadDashboardSettingsMutationModule(rpcMethods?: DashboardContractRpcMe
         persisted: boolean;
         readbackWarning: string | null;
       }, subject: string) => string;
-      updateDashboardSettings: (patch: Record<string, unknown>, source?: "rpc" | "mock") => Promise<{
+      updateDashboardSettings: (patch: Record<string, unknown>, source?: "rpc") => Promise<{
         applyMode: string;
         needRestart: boolean;
         persisted: boolean;
@@ -896,7 +896,7 @@ function loadDashboardSettingsSnapshotModule(rpcMethods?: Pick<DashboardContract
 
     return requireFn(modulePath) as {
       loadDashboardSettingsSnapshot: (
-        source?: "rpc" | "mock",
+        source?: "rpc",
         scope?: AgentSettingsGetParams["scope"],
       ) => Promise<{
         source: string;
@@ -956,7 +956,7 @@ function loadMirrorServiceModule() {
               };
             };
           };
-          source: "rpc" | "mock";
+          source: "rpc";
           conversations: Array<{ id: string }>;
         },
         settingsSnapshot: {
@@ -999,7 +999,7 @@ function loadMirrorServiceModule() {
             };
           };
         };
-        source: "rpc" | "mock";
+          source: "rpc";
         conversations: Array<{ id: string }>;
       };
     };
@@ -1681,20 +1681,13 @@ test("task page query helpers expose stable prefixes and keys", () => {
   assert.deepEqual(dashboardTaskDetailQueryPrefix, ["dashboard", "tasks", "detail"]);
   assert.deepEqual(buildDashboardTaskArtifactQueryKey("rpc", "task_dashboard_001"), ["dashboard", "tasks", "artifacts", "rpc", "task_dashboard_001"]);
   assert.deepEqual(buildDashboardTaskBucketQueryKey("rpc", "unfinished", 12), ["dashboard", "tasks", "bucket", "rpc", "unfinished", 12]);
-  assert.deepEqual(buildDashboardTaskDetailQueryKey("mock", "task_dashboard_001"), ["dashboard", "tasks", "detail", "mock", "task_dashboard_001"]);
+  assert.deepEqual(buildDashboardTaskDetailQueryKey("rpc", "task_dashboard_001"), ["dashboard", "tasks", "detail", "rpc", "task_dashboard_001"]);
   assert.deepEqual(getDashboardTaskSecurityRefreshPlan("rpc"), {
     invalidatePrefixes: [
       ["dashboard", "tasks", "bucket"],
       ["dashboard", "tasks", "detail"],
     ],
     refetchOnMount: true,
-  });
-  assert.deepEqual(getDashboardTaskSecurityRefreshPlan("mock"), {
-    invalidatePrefixes: [
-      ["dashboard", "tasks", "bucket"],
-      ["dashboard", "tasks", "detail"],
-    ],
-    refetchOnMount: false,
   });
 });
 
@@ -1710,17 +1703,13 @@ test("note page query helpers expose stable prefixes, bucket order, and refresh-
   assert.deepEqual(dashboardNoteBucketQueryPrefix, ["dashboard", "notes", "bucket"]);
   assert.deepEqual(dashboardNoteBucketGroups, ["upcoming", "later", "recurring_rule", "closed"]);
   assert.deepEqual(buildDashboardNoteBucketQueryKey("rpc", "upcoming"), ["dashboard", "notes", "bucket", "rpc", "upcoming"]);
-  assert.deepEqual(buildDashboardNoteBucketInvalidateKeys("mock", ["upcoming", "closed", "upcoming"]), [
-    ["dashboard", "notes", "bucket", "mock", "upcoming"],
-    ["dashboard", "notes", "bucket", "mock", "closed"],
+  assert.deepEqual(buildDashboardNoteBucketInvalidateKeys("rpc", ["upcoming", "closed", "upcoming"]), [
+    ["dashboard", "notes", "bucket", "rpc", "upcoming"],
+    ["dashboard", "notes", "bucket", "rpc", "closed"],
   ]);
   assert.deepEqual(getDashboardNoteRefreshPlan("rpc"), {
     invalidatePrefixes: [["dashboard", "notes", "bucket"]],
     refetchOnMount: true,
-  });
-  assert.deepEqual(getDashboardNoteRefreshPlan("mock"), {
-    invalidatePrefixes: [["dashboard", "notes", "bucket"]],
-    refetchOnMount: false,
   });
 });
 
@@ -6184,9 +6173,9 @@ test("task rpc service keeps transport failures visible instead of switching to 
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        controlTaskByAction: (taskId: string, action: "pause" | "resume" | "cancel" | "restart", source?: "rpc" | "mock") => Promise<unknown>;
-        loadTaskBucketPage: (group: "unfinished" | "finished", options?: { limit?: number; offset?: number; source?: "rpc" | "mock" }) => Promise<unknown>;
-        loadTaskDetailData: (taskId: string, source?: "rpc" | "mock") => Promise<unknown>;
+        controlTaskByAction: (taskId: string, action: "pause" | "resume" | "cancel" | "restart", source?: "rpc") => Promise<unknown>;
+        loadTaskBucketPage: (group: "unfinished" | "finished", options?: { limit?: number; offset?: number; source?: "rpc" }) => Promise<unknown>;
+        loadTaskDetailData: (taskId: string, source?: "rpc") => Promise<unknown>;
       };
 
       await assert.rejects(() => service.loadTaskBucketPage("unfinished", { source: "rpc" }), /transport is not wired/i);
@@ -6223,9 +6212,9 @@ test("note rpc service keeps transport failures visible instead of switching to 
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        convertNoteToTask: (itemId: string, source?: "rpc" | "mock") => Promise<unknown>;
-        loadNoteBucket: (group: "upcoming" | "later" | "recurring_rule" | "closed", source?: "rpc" | "mock") => Promise<unknown>;
-        updateNote: (itemId: string, action: "complete" | "cancel" | "move_upcoming" | "toggle_recurring" | "cancel_recurring" | "restore" | "delete", source?: "rpc" | "mock") => Promise<unknown>;
+        convertNoteToTask: (itemId: string, source?: "rpc") => Promise<unknown>;
+        loadNoteBucket: (group: "upcoming" | "later" | "recurring_rule" | "closed", source?: "rpc") => Promise<unknown>;
+        updateNote: (itemId: string, action: "complete" | "cancel" | "move_upcoming" | "toggle_recurring" | "cancel_recurring" | "restore" | "delete", source?: "rpc") => Promise<unknown>;
       };
 
       await assert.rejects(() => service.loadNoteBucket("upcoming", "rpc"), /transport is not wired/i);
@@ -6259,7 +6248,7 @@ test("security rpc service keeps transport failures visible instead of switching
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        loadSecurityModuleData: (source?: "rpc" | "mock") => Promise<unknown>;
+        loadSecurityModuleData: (source?: "rpc") => Promise<unknown>;
         loadSecurityModuleRpcData: () => Promise<unknown>;
       };
 
@@ -6282,9 +6271,9 @@ test("security detail rpc reads keep transport failures visible instead of switc
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        loadSecurityAuditRecords: (source: "rpc" | "mock", taskId?: string | null, options?: { limit?: number; offset?: number }) => Promise<unknown>;
-        loadSecurityPendingApprovals: (source: "rpc" | "mock", options?: { limit?: number; offset?: number }) => Promise<unknown>;
-        loadSecurityRestorePoints: (source: "rpc" | "mock", options?: { limit?: number; offset?: number; taskId?: string | null }) => Promise<unknown>;
+        loadSecurityAuditRecords: (source: "rpc", taskId?: string | null, options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityPendingApprovals: (source: "rpc", options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityRestorePoints: (source: "rpc", options?: { limit?: number; offset?: number; taskId?: string | null }) => Promise<unknown>;
       };
 
       await assert.rejects(() => service.loadSecurityPendingApprovals("rpc"), /transport is not wired/i);
@@ -6514,9 +6503,9 @@ test("security detail rpc reads keep transport failures visible instead of switc
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        loadSecurityAuditRecords: (source: "rpc" | "mock", taskId?: string | null, options?: { limit?: number; offset?: number }) => Promise<unknown>;
-        loadSecurityPendingApprovals: (source: "rpc" | "mock", options?: { limit?: number; offset?: number }) => Promise<unknown>;
-        loadSecurityRestorePoints: (source: "rpc" | "mock", options?: { limit?: number; offset?: number; taskId?: string | null }) => Promise<unknown>;
+        loadSecurityAuditRecords: (source: "rpc", taskId?: string | null, options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityPendingApprovals: (source: "rpc", options?: { limit?: number; offset?: number }) => Promise<unknown>;
+        loadSecurityRestorePoints: (source: "rpc", options?: { limit?: number; offset?: number; taskId?: string | null }) => Promise<unknown>;
       };
 
       await assert.rejects(() => service.loadSecurityPendingApprovals("rpc"), /transport is not wired/i);
@@ -6540,7 +6529,7 @@ test("mirror rpc service keeps transport failures visible instead of switching t
       delete requireFn.cache[modulePath];
 
       const service = requireFn(modulePath) as {
-        loadMirrorOverviewData: (source?: "rpc" | "mock") => Promise<unknown>;
+        loadMirrorOverviewData: (source?: "rpc") => Promise<unknown>;
       };
 
       await assert.rejects(() => service.loadMirrorOverviewData("rpc"), /transport is not wired/i);

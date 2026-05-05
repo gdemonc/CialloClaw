@@ -16,7 +16,7 @@ import { RISK_LEVELS, SECURITY_STATUSES, TASK_STEP_STATUSES } from "@/rpc/protoc
 import { formatTaskSourceLabel, getTaskPreviewStatusLabel } from "./taskPage.mapper";
 import type { TaskBucketPageData, TaskBucketsData, TaskControlOutcome, TaskDetailData, TaskEventFilters, TaskEventPageData, TaskEventTimeRange, TaskExperience, TaskListItem } from "./taskPage.types";
 
-export type TaskPageDataMode = "rpc" | "mock";
+export type TaskPageDataMode = "rpc";
 
 const INITIAL_TASK_PAGE_LIMIT: Record<TaskListGroup, number> = {
   finished: 24,

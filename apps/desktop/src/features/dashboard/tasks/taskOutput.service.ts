@@ -11,7 +11,7 @@ import type {
 import { openDesktopLocalPath, revealDesktopLocalPath } from "@/platform/desktopLocalPath";
 import { listTaskArtifacts, openDelivery, openTaskArtifact } from "@/rpc/methods";
 
-export type TaskOutputDataMode = "rpc" | "mock";
+export type TaskOutputDataMode = "rpc";
 
 export type TaskOpenExecutionPlan = {
   mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";

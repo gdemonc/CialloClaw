@@ -27,7 +27,7 @@ import {
   type MirrorProfileBaseItem,
 } from "./mirrorViewModel";
 
-export type MirrorOverviewSource = "rpc" | "mock";
+export type MirrorOverviewSource = "rpc";
 
 export type MirrorInsightPreview = {
   badge: string;

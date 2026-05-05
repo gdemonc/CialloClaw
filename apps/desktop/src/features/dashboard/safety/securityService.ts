@@ -30,7 +30,7 @@ import {
 } from "@/rpc/methods";
 import { loadTaskDetailData } from "../tasks/taskPage.service";
 
-export type SecurityModuleSource = "rpc" | "mock";
+export type SecurityModuleSource = "rpc";
 
 export type SecurityRpcContext = {
   serverTime: string | null;
@@ -82,7 +82,7 @@ export async function loadSecurityFocusedTaskDetail(taskId: string, source: Secu
   if (!normalizedTaskId) {
     return null;
   }
-  const detail = await loadTaskDetailData(normalizedTaskId, source === "mock" ? "mock" : "rpc");
+  const detail = await loadTaskDetailData(normalizedTaskId, source);
   return detail.detail;
 }
 

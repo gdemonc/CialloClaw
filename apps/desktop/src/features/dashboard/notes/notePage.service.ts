@@ -15,7 +15,7 @@ import type { NoteConvertOutcome, NoteDetailExperience, NoteListItem, NoteResour
 
 const NOTEPAD_RPC_TIMEOUT_MS = 2_500;
 
-export type NotePageDataMode = "rpc" | "mock";
+export type NotePageDataMode = "rpc";
 
 export type NoteResourceOpenExecutionPlan = {
   mode: "task_detail" | "open_url" | "open_local_path" | "reveal_local_path" | "copy_path";
