@@ -217,7 +217,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 ### 4.6 返回规则
 
-- 任务类接口：统一返回 `task`，按需附带 `delivery_result`、`bubble_message`
+- 任务类接口：统一返回 `task`，按需附带 `delivery_result`、`bubble_message`；`agent.input.submit` 对无任务锚点的纯社交 / 闲聊输入可返回 `task = null`
 - 列表类接口：统一返回 `items` + `page`
 - 安全类接口：统一返回 `approval_request / authorization_record / audit_record / recovery_point`，按需附带 `impact_scope`
 - 设置类接口：统一返回 `effective_settings` 或 `setting_item`、`apply_mode`、`need_restart`
@@ -600,9 +600,10 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - **系统处理**：
   - 统一承接语音转写文本和轻量输入文本
   - 结合当前页面、选中文本、附带文件做上下文识别
-  - 创建 `task`，并直接进入处理或等待必要补充输入
+  - 对正式工作请求创建或续接 `task`，并直接进入处理或等待必要补充输入
+  - 对无任务锚点的纯社交 / 闲聊输入，可仅返回脱离 `task` 的轻量气泡
 - **入参**：会话信息、触发来源、输入内容、上下文、语音元信息、执行偏好
-- **出参**：任务对象、气泡消息、按需附带正式交付结果
+- **出参**：任务对象或 `null`、气泡消息、按需附带正式交付结果
 
 ### agent.input.submit 入参说明
 
@@ -644,6 +645,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - 这类视觉型任务的 `task.source_type` 应返回 `screen_capture`，表示正式任务围绕当前屏幕采样展开，而不是普通 `hover_input` 文本处理。
 - `agent.task.start` 不接受显式 `intent` 入参；若客户端误传该字段，协议层应忽略，并继续由后端结合 `input / context` 统一推断，不需要新增平行入口。
 - 当客户端省略 `session_id` 时，后端应负责选择或创建隐藏协作 session，并把最终使用的 `session_id` 写回返回的 `task` 对象，而不是要求前端自行猜测生命周期。
+- 当普通文本被判定为无任务锚点的纯社交 / 闲聊输入时，后端可返回 `data.task = null`、`data.delivery_result = null` 与 `task_id` 为空的 `bubble_message`；前端只能把它当作轻量承接反馈，不得写入正式任务链、任务详情或正式交付出口。
 - 若现有 task 已处于 `waiting_auth`、`blocked` 或 `paused`，后端不得通过隐式 follow-up 直接改写原 task 的后续执行语义；此时应新开 task 或等待显式恢复/授权链路处理。
 - 若同一 `session` 内只有一个 `waiting_input / confirming_intent` 任务，普通文本补充可续接到该任务；`options.confirm_required = true` 只表示本次补充后仍需确认，不应把普通文本补充机械拆成新 task。
 - 文件、选区、错误等结构化补充证据若要续接旧 task，仍必须存在共享页面 / 窗口 / App 锚点、共享选区 / 报错 / 附件血缘，或其他能证明属于旧任务的 lineage。
@@ -700,17 +702,20 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 | 字段                     | 中文说明                         |
 | ------------------------ | -------------------------------- |
-| `data.task.task_id`      | 新建任务 ID                      |
-| `data.task.session_id`   | 后端最终采用的隐藏协作会话 ID     |
-| `data.task.title`        | 任务标题                         |
-| `data.task.source_type`  | 任务来源类型                     |
-| `data.task.status`       | 当前任务状态                     |
-| `data.task.current_step` | 当前步骤                         |
+| `data.task`              | 正式任务对象；纯社交 / 闲聊输入可返回 `null` |
+| `data.task.task_id`      | 新建或续接任务 ID，仅当 `data.task` 非空时存在 |
+| `data.task.session_id`   | 后端最终采用的隐藏协作会话 ID，仅当 `data.task` 非空时存在 |
+| `data.task.title`        | 任务标题，仅当 `data.task` 非空时存在 |
+| `data.task.source_type`  | 任务来源类型，仅当 `data.task` 非空时存在 |
+| `data.task.status`       | 当前任务状态，仅当 `data.task` 非空时存在 |
+| `data.task.current_step` | 当前步骤，仅当 `data.task` 非空时存在 |
 | `data.bubble_message`    | 气泡承接内容                     |
 | `data.delivery_result`   | 若后端已直接完成，可返回正式交付 |
 | `meta.server_time`       | 服务端响应时间                   |
 
 ### agent.input.submit 出参示例
+
+正式任务请求示例：
 
 ```json
 {
@@ -731,6 +736,31 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
         "task_id": "task_001",
         "type": "status",
         "text": "已接收你的输入，正在整理当前页面内容。"
+      },
+      "delivery_result": null
+    },
+    "meta": {
+      "server_time": "2026-04-07T10:20:01+08:00"
+    },
+    "warnings": []
+  }
+}
+```
+
+纯社交 / 闲聊输入示例：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req_input_chat_001",
+  "result": {
+    "data": {
+      "task": null,
+      "bubble_message": {
+        "bubble_id": "bubble_chat_001",
+        "task_id": "",
+        "type": "result",
+        "text": "你好，我在。"
       },
       "delivery_result": null
     },
@@ -1583,14 +1613,15 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 补充约束：
 
 - `approval_request` 是任务详情里的单个安全锚点，只在当前任务处于 `waiting_auth` 且仍持有活跃正式授权对象时返回；否则返回 `null`。
-- `authorization_record` 返回当前任务最近一条正式授权记录；若任务还没有进入授权决策阶段则返回 `null`。
-- `audit_record` 返回当前任务最近一条正式审计记录；若当前任务还没有正式审计记录则返回 `null`。
+- `authorization_record` 返回当前任务当前执行尝试最近一条正式授权记录；若当前尝试还没有进入授权决策阶段则返回 `null`，不能把重启前旧尝试的 allow / deny 结果继续作为当前授权状态返回。
+- `audit_record` 返回当前任务当前执行尝试最近一条正式审计记录；若当前尝试还没有正式审计记录则返回 `null`，不能把重启前旧尝试的审计结果继续作为当前安全摘要返回。
 - 该字段只服务当前 task 的详情承接，不替代 `agent.security.pending.list` 对全局待确认项的聚合查询。
 - `security_summary.pending_authorizations` 在任务详情中收敛为 `0 | 1`，仅反映当前 task 是否存在这一个活跃安全锚点。
 - `security_summary.latest_restore_point` 的正式类型为 `RecoveryPoint | null`。
 - 对屏幕感知类任务，任务详情应通过正式 `delivery_result`、`artifact`、事件和治理对象回看模型结论、截图证据、OCR 摘要和授权过程，而不是直接渲染平台采样结果或裸 worker 输出。
 - 当 `task_run.snapshot_json` 与一等运行态存储同时存在时，`delivery_result` 与 `citations` 必须以前者的正式一等存储记录为准，兼容快照只能作为缺省回退，不能覆盖更新后的正式交付或引用链。
 - 若任务存在正式视觉或上下文引用，`citations` 应返回稳定 `citation` 对象列表，并在需要时补齐 `artifact_id / artifact_type / evidence_role / excerpt_text / screen_session_id` 等结构化字段，用于区分截图证据、OCR 摘要和引用片段，而不是把引用信息混进 artifact 扩展字段或裸 tool output。
+- `citations` 当前只承诺返回“当前 attempt 的正式引用链”；其一等存储写入仍是 task 级替换，不保证旧 attempt 的 citation 历史长期保留。
 - 当 `tasks / task_steps` 已进入结构化读取路径时，`citations` 仍必须可从一等存储重建；不能把 `task_run` 兼容快照当作任务详情正式引用链的唯一来源。
 
 ### agent.task.detail.get 入参说明
@@ -1773,6 +1804,8 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 - **请求方式**：JSON-RPC 2.0
 - **接口调用时机**：用户点击暂停、继续、取消、重启等操作时
 - **系统处理**：执行任务状态控制并返回最新状态
+- **重启语义**：`restart` 仅适用于已结束任务；后端保留 `task_id`，分配新的 `run_id` 与执行尝试编号，并进入正式执行链路。新尝试必须先重新经过同会话串行队列与风险治理 / 授权判断，不能只把任务状态改回 `processing`，也不能绕过治理后直接执行。
+- **追加边界**：已结束任务不能通过 `agent.task.steer` 补充要求；重启后的追加只在新尝试仍处于可 steering 的 `agent_loop` 执行段，或任务处于 `waiting_auth / blocked` 状态时成立。
 - **入参**：任务 ID、动作、动作参数
 - **出参**：更新后的任务、状态气泡
 
@@ -3433,6 +3466,7 @@ Notification 只负责“状态变化推送”，不承载复杂业务命令。
 
 - 必须传入 `task_id`
 - 接口当前只返回指定任务的审计记录
+- 当同一 `task_id` 已经发生 `restart` 且当前任务持有新的 `run_id` 时，默认只返回当前执行尝试的审计记录；旧尝试的审计历史可以继续保留在存储层，但不能和当前 attempt 的任务详情 / 审计明细混在一起展示
 
 ### agent.security.audit.list 入参说明
 
