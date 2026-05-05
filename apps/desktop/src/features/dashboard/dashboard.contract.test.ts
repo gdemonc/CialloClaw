@@ -5900,6 +5900,14 @@ test("source-note fallback cards stay local instead of inferring formal todo buc
   assert.equal(items[0].experience.repeatRule, null);
 });
 
+test("note page no longer guesses source-note paths from duplicated titles", () => {
+  const notePageSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/NotePage.tsx"), "utf8");
+
+  assert.match(notePageSource, /function resolveNoteItemSourceNotePath\(/);
+  assert.doesNotMatch(notePageSource, /sourceNotesByTitle\.get\(item\.item\.title/);
+  assert.match(notePageSource, /return null;/);
+});
+
 test("note service no longer invents related resources from title keywords", () => {
   const noteServiceSource = readFileSync(resolve(desktopRoot, "src/features/dashboard/notes/notePage.service.ts"), "utf8");
 
