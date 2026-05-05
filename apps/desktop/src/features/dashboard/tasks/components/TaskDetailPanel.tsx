@@ -20,6 +20,7 @@ type TaskDetailPanelProps = {
   artifactErrorMessage: string | null;
   artifactItems: TaskDetailData["detail"]["artifacts"];
   artifactLoading: boolean;
+  fallbackOutputAccess?: boolean;
   detailWarningMessage: string | null;
   detailData: TaskDetailData | null;
   detailErrorMessage: string | null;
@@ -49,6 +50,7 @@ export function TaskDetailPanel({
   artifactErrorMessage,
   artifactItems,
   artifactLoading,
+  fallbackOutputAccess = false,
   detailWarningMessage,
   detailData,
   detailErrorMessage,
@@ -172,6 +174,46 @@ export function TaskDetailPanel({
               <p className="task-detail-ended-copy">{detailNoticeBody}</p>
             </section>
             {fallbackActions && fallbackActions.length > 0 ? <TaskActionBar actionsOverride={fallbackActions} detail={null} onAction={onAction} task={null} /> : null}
+            {fallbackOutputAccess ? (
+              <section className="task-detail-card">
+                <div className="task-detail-card__header task-detail-card__header--actionable">
+                  <div>
+                    <p className="task-detail-card__eyebrow">产出内容</p>
+                    <h3 className="task-detail-card__title">已生成的结果</h3>
+                  </div>
+                  <button className="task-detail-card__action" disabled={deliveryActionPending} onClick={onOpenLatestDelivery} type="button">
+                    <ArrowUpRight className="h-4 w-4" />
+                    {deliveryActionPending ? "打开中..." : "打开结果"}
+                  </button>
+                </div>
+                <div className="task-detail-output-list">
+                  {artifactErrorMessage ? <p className="task-detail-card__hint">{artifactErrorMessage}</p> : null}
+                  {artifactLoading && artifactItems.length === 0 ? <p className="task-detail-card__empty">正在同步成果列表...</p> : null}
+                  {artifactItems.length > 0 ? (
+                    artifactItems.map((artifact) => (
+                      <article key={artifact.artifact_id} className="task-detail-output-item">
+                        <FolderOutput className="h-4 w-4" />
+                        <div>
+                          <p className="task-detail-output-item__title">{artifact.title}</p>
+                          <p className="task-detail-output-item__path">{artifact.path}</p>
+                        </div>
+                        <button
+                          className="task-detail-card__action"
+                          disabled={artifactActionPendingId === artifact.artifact_id}
+                          onClick={() => onOpenArtifact(artifact.artifact_id)}
+                          type="button"
+                        >
+                          <ArrowUpRight className="h-4 w-4" />
+                          {artifactActionPendingId === artifact.artifact_id ? "打开中..." : "打开"}
+                        </button>
+                      </article>
+                    ))
+                  ) : !artifactLoading && !artifactErrorMessage ? (
+                    <p className="task-detail-card__empty">结果详情仍在同步，稍后可重试详情或直接尝试打开最新结果。</p>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
           </div>
         </ScrollArea>
       </motion.section>

@@ -5721,11 +5721,14 @@ test("task detail fallback keeps operator controls available from preview tasks 
   assert.match(taskPageSource, /taskSteerMutation\.mutate\(\{ message, taskId: selectedTaskControlTargetId \}\)/);
   assert.match(taskPageSource, /taskId: selectedTaskControlTargetId/);
   assert.match(taskPageSource, /fallbackDetailActions: TaskPrimaryAction\[\] \| null/);
+  assert.match(taskPageSource, /const fallbackOutputAccess = !selectedTaskPreview && Boolean\(selectedTaskId\);/);
   assert.doesNotMatch(taskPageSource, /detailData && artifactListQuery\.isError/);
   assert.match(panelSource, /task \? <TaskActionBar detail=\{detail\} onAction=\{onAction\} task=\{task\} \/> : null/);
   assert.match(panelSource, /fallbackActions && fallbackActions.length > 0 \? <TaskActionBar actionsOverride=\{fallbackActions\} detail=\{null\} onAction=\{onAction\} task=\{null\} \/> : null/);
+  assert.match(panelSource, /fallbackOutputAccess \? \(/);
   assert.doesNotMatch(panelSource, /detailData \? <TaskActionBar/);
   assert.match(panelSource, /<h3 className="task-detail-card__title">已生成的结果<\/h3>/);
+  assert.match(panelSource, /结果详情仍在同步，稍后可重试详情或直接尝试打开最新结果。/);
   assert.match(actionBarSource, /actionsOverride\?: TaskPrimaryAction\[\] \| null;/);
   assert.match(actionBarSource, /task: Task \| null;/);
   assert.match(mapperSource, /export function getTaskPrimaryActions\(task: Task, detail: AgentTaskDetailGetResult \| null\)/);

@@ -304,6 +304,7 @@ export function TaskPage() {
         { action: "open-safety", label: "安全总览", tooltip: "查看当前任务相关的安全总览。" },
       ]
     : null;
+  const fallbackOutputAccess = !selectedTaskPreview && Boolean(selectedTaskId);
 
   useEffect(() => {
     if (routeFocusTaskId || stageInitialized || selectedTaskId) {
@@ -831,6 +832,7 @@ export function TaskPage() {
                   artifactErrorMessage={artifactListQuery.isError ? (artifactListQuery.error instanceof Error ? artifactListQuery.error.message : "成果列表请求失败") : null}
                   artifactItems={artifactListQuery.data?.items ?? detailData?.detail.artifacts ?? []}
                   artifactLoading={artifactListQuery.isPending}
+                  fallbackOutputAccess={fallbackOutputAccess}
                   detailData={detailData}
                   detailWarningMessage={detailData?.detailWarningMessage ?? null}
                   detailErrorMessage={detailErrorMessage}
