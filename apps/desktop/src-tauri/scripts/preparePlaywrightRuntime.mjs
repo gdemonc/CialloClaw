@@ -1,5 +1,17 @@
 /* global process, console */
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,24 +132,39 @@ function installRuntimeCache(options) {
   writeFileSync(manifestPath, JSON.stringify(createRuntimeCacheManifest(playwrightVersion), null, 2) + "\n", "utf8");
 }
 
-// Materialize symlinked Playwright runtime assets so bundlers like NSIS only
-// see real files inside the packaged resource tree.
-function materializeDirectoryCopy(sourceRoot, targetRoot) {
-  const sourceInfo = lstatSync(sourceRoot);
-  if (sourceInfo.isSymbolicLink()) {
-    const linkTarget = readlinkSync(sourceRoot, "utf8");
-    const resolvedSourceTarget = resolve(dirname(sourceRoot), linkTarget);
-    materializeDirectoryCopy(resolvedSourceTarget, targetRoot);
+/**
+ * Copy cached runtime trees as real files so packaged builds do not preserve
+ * symlinks or junctions that may break later when NSIS walks the resource tree.
+ */
+export function copyPackagedRuntimeTree(sourceRoot, targetRoot) {
+  copyPackagedRuntimeEntry(sourceRoot, targetRoot);
+}
+
+function copyPackagedRuntimeEntry(sourcePath, targetPath) {
+  const sourceStats = lstatSync(sourcePath);
+  if (sourceStats.isSymbolicLink()) {
+    copyPackagedRuntimeEntry(realpathSync(sourcePath), targetPath);
     return;
   }
-  if (sourceInfo.isDirectory()) {
-    mkdirSync(targetRoot, { recursive: true });
-    for (const entryName of readdirSync(sourceRoot)) {
-      materializeDirectoryCopy(resolve(sourceRoot, entryName), resolve(targetRoot, entryName));
+  if (sourceStats.isDirectory()) {
+    mkdirSync(targetPath, { recursive: true });
+    for (const entry of readdirSync(sourcePath)) {
+      copyPackagedRuntimeEntry(resolve(sourcePath, entry), resolve(targetPath, entry));
     }
     return;
   }
-  cpSync(sourceRoot, targetRoot);
+  if (!sourceStats.isFile()) {
+    const resolvedStats = statSync(sourcePath);
+    if (resolvedStats.isDirectory()) {
+      mkdirSync(targetPath, { recursive: true });
+      for (const entry of readdirSync(sourcePath)) {
+        copyPackagedRuntimeEntry(resolve(sourcePath, entry), resolve(targetPath, entry));
+      }
+      return;
+    }
+  }
+  mkdirSync(dirname(targetPath), { recursive: true });
+  copyFileSync(sourcePath, targetPath);
 }
 
 /**
@@ -194,8 +221,8 @@ export function preparePlaywrightRuntime() {
   cpSync(sourceNodeExecutable, resolve(packagedNodeRoot, process.platform === "win32" ? "node.exe" : "node"));
   cpSync(sourceWorkerEntry, resolve(packagedWorkerSourceRoot, "index.js"));
   writeRuntimeWorkerPackage(resolve(packagedWorkerRoot, "package.json"), playwrightVersion);
-  materializeDirectoryCopy(resolve(cachedWorkerRoot, "node_modules"), resolve(packagedWorkerRoot, "node_modules"));
-  materializeDirectoryCopy(cachedBrowsersRoot, browsersRoot);
+  copyPackagedRuntimeTree(resolve(cachedWorkerRoot, "node_modules"), resolve(packagedWorkerRoot, "node_modules"));
+  copyPackagedRuntimeTree(cachedBrowsersRoot, browsersRoot);
 
   return runtimeRoot;
 }
