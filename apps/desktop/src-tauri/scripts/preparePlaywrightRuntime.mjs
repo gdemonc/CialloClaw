@@ -132,31 +132,39 @@ function installRuntimeCache(options) {
   writeFileSync(manifestPath, JSON.stringify(createRuntimeCacheManifest(playwrightVersion), null, 2) + "\n", "utf8");
 }
 
-function copyRuntimeTree(source, destination) {
-  copyRuntimeTreeEntry(source, destination);
+/**
+ * Copy cached runtime trees as real files so packaged builds do not preserve
+ * symlinks or junctions that may break later when NSIS walks the resource tree.
+ */
+export function copyPackagedRuntimeTree(sourceRoot, targetRoot) {
+  copyPackagedRuntimeEntry(sourceRoot, targetRoot);
 }
 
-function copyRuntimeTreeEntry(source, destination) {
-  // The packaged Tauri resource tree must contain concrete browser/runtime
-  // files because NSIS cannot bundle broken symlink/junction entries.
-  const sourceInfo = lstatSync(source);
-  if (sourceInfo.isSymbolicLink()) {
-    const resolvedSource = realpathSync(source);
-    copyRuntimeTreeEntry(resolvedSource, destination);
+function copyPackagedRuntimeEntry(sourcePath, targetPath) {
+  const sourceStats = lstatSync(sourcePath);
+  if (sourceStats.isSymbolicLink()) {
+    copyPackagedRuntimeEntry(realpathSync(sourcePath), targetPath);
     return;
   }
-
-  const concreteInfo = statSync(source);
-  if (concreteInfo.isDirectory()) {
-    mkdirSync(destination, { recursive: true });
-    for (const entry of readdirSync(source)) {
-      copyRuntimeTreeEntry(resolve(source, entry), resolve(destination, entry));
+  if (sourceStats.isDirectory()) {
+    mkdirSync(targetPath, { recursive: true });
+    for (const entry of readdirSync(sourcePath)) {
+      copyPackagedRuntimeEntry(resolve(sourcePath, entry), resolve(targetPath, entry));
     }
     return;
   }
-
-  mkdirSync(dirname(destination), { recursive: true });
-  copyFileSync(source, destination);
+  if (!sourceStats.isFile()) {
+    const resolvedStats = statSync(sourcePath);
+    if (resolvedStats.isDirectory()) {
+      mkdirSync(targetPath, { recursive: true });
+      for (const entry of readdirSync(sourcePath)) {
+        copyPackagedRuntimeEntry(resolve(sourcePath, entry), resolve(targetPath, entry));
+      }
+      return;
+    }
+  }
+  mkdirSync(dirname(targetPath), { recursive: true });
+  copyFileSync(sourcePath, targetPath);
 }
 
 /**
@@ -213,8 +221,8 @@ export function preparePlaywrightRuntime() {
   cpSync(sourceNodeExecutable, resolve(packagedNodeRoot, process.platform === "win32" ? "node.exe" : "node"));
   cpSync(sourceWorkerEntry, resolve(packagedWorkerSourceRoot, "index.js"));
   writeRuntimeWorkerPackage(resolve(packagedWorkerRoot, "package.json"), playwrightVersion);
-  copyRuntimeTree(resolve(cachedWorkerRoot, "node_modules"), resolve(packagedWorkerRoot, "node_modules"));
-  copyRuntimeTree(cachedBrowsersRoot, browsersRoot);
+  copyPackagedRuntimeTree(resolve(cachedWorkerRoot, "node_modules"), resolve(packagedWorkerRoot, "node_modules"));
+  copyPackagedRuntimeTree(cachedBrowsersRoot, browsersRoot);
 
   return runtimeRoot;
 }
