@@ -1,5 +1,17 @@
 /* global process, console */
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,6 +132,33 @@ function installRuntimeCache(options) {
   writeFileSync(manifestPath, JSON.stringify(createRuntimeCacheManifest(playwrightVersion), null, 2) + "\n", "utf8");
 }
 
+function copyRuntimeTree(source, destination) {
+  copyRuntimeTreeEntry(source, destination);
+}
+
+function copyRuntimeTreeEntry(source, destination) {
+  // The packaged Tauri resource tree must contain concrete browser/runtime
+  // files because NSIS cannot bundle broken symlink/junction entries.
+  const sourceInfo = lstatSync(source);
+  if (sourceInfo.isSymbolicLink()) {
+    const resolvedSource = realpathSync(source);
+    copyRuntimeTreeEntry(resolvedSource, destination);
+    return;
+  }
+
+  const concreteInfo = statSync(source);
+  if (concreteInfo.isDirectory()) {
+    mkdirSync(destination, { recursive: true });
+    for (const entry of readdirSync(source)) {
+      copyRuntimeTreeEntry(resolve(source, entry), resolve(destination, entry));
+    }
+    return;
+  }
+
+  mkdirSync(dirname(destination), { recursive: true });
+  copyFileSync(source, destination);
+}
+
 /**
  * Prepare the packaged Playwright runtime by reusing a local build cache for
  * the heavyweight browser/runtime install and recreating the final resource
@@ -174,8 +213,8 @@ export function preparePlaywrightRuntime() {
   cpSync(sourceNodeExecutable, resolve(packagedNodeRoot, process.platform === "win32" ? "node.exe" : "node"));
   cpSync(sourceWorkerEntry, resolve(packagedWorkerSourceRoot, "index.js"));
   writeRuntimeWorkerPackage(resolve(packagedWorkerRoot, "package.json"), playwrightVersion);
-  cpSync(resolve(cachedWorkerRoot, "node_modules"), resolve(packagedWorkerRoot, "node_modules"), { recursive: true });
-  cpSync(cachedBrowsersRoot, browsersRoot, { recursive: true });
+  copyRuntimeTree(resolve(cachedWorkerRoot, "node_modules"), resolve(packagedWorkerRoot, "node_modules"));
+  copyRuntimeTree(cachedBrowsersRoot, browsersRoot);
 
   return runtimeRoot;
 }
